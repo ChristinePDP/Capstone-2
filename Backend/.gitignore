@@ -1,0 +1,25 @@
+# Dependencies - Dambuhalang folder ng mga installed packages (Bawal i-upload!)
+node_modules/
+
+# Testing - Mga reports na nilalabas ni Vitest tuwing nagpapatakbo ka ng unit tests
+coverage/
+*.lcov
+
+# Environment Variables - Mga maseselang files na may passwords/API keys ng Supabase
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Operating System Logs - Mga basurang files na kusa nililikha ng Windows/Mac
+Thumbs.db
+.DS_Store
+
+# IDE / Code Editor Settings - Sarili mong configuration sa VS Code (iwas conflict sa kaklase)
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
