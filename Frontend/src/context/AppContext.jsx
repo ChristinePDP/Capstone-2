@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AppContext.jsx
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
 
 export const formatPHP = (amount) => {
@@ -37,117 +37,139 @@ export function AppProvider({ children }) {
   const fetchAll = async () => {
     setLoading(true);
 
-    // Helper function para hindi mag-fail ang Promise.all kapag may error
-    const safeFetch = async (url) => {
-      try {
-        const response = await apiClient.get(url);
-        return response.data;
-      } catch (err) {
-        console.error(`Error fetching ${url}:`, err);
-        return { data: [] }; // Return empty data kung mag-error
-      }
-    };
+    // IMPORTANT: naka-try/finally ang buong katawan ng function. Dati,
+    // kung nag-crash ang kahit anong .map()/normalization sa gitna (hal.
+    // hindi inaasahang shape ng data mula sa isang endpoint), tumitigil
+    // agad ang function bago pa maabot ang setLoading(false) sa dulo —
+    // kaya nananatiling "true" (infinite loading) ang loading state
+    // magpakailanman. Sa pag-wrap ng try/finally, GUARANTEED na tatakbo
+    // ang setLoading(false) kahit may mag-crash sa gitna.
+    try {
+      // Helper function para hindi mag-fail ang Promise.all kapag may error
+      const safeFetch = async (url) => {
+        try {
+          const response = await apiClient.get(url);
+          return response.data;
+        } catch (err) {
+          console.error(`Error fetching ${url}:`, err);
+          return { data: [] }; // Return empty data kung mag-error
+        }
+      };
 
-    const [ing, mat, rec, prodLog, wst, prd] = await Promise.all([
-      safeFetch('/ingredients'),
-      safeFetch('/materials'),
-      safeFetch('/recipes'),
-      safeFetch('/production'),
-      safeFetch('/waste'),
-      safeFetch('/products')
-    ]);
+      const [ing, mat, rec, prodLog, wst, prd] = await Promise.all([
+        safeFetch('/ingredients'),
+        safeFetch('/materials'),
+        safeFetch('/recipes'),
+        safeFetch('/production'),
+        safeFetch('/waste'),
+        safeFetch('/products')
+      ]);
 
-    const normalizedIngredients = (ing.data || []).map(item => ({
-      id: item.id,
-      name: item.name,
-      unit: item.unit,
-      stock: Number(item.stock_quantity ?? 0),
-      min: Number(item.minimum_stock ?? 0),
-      costPerUnit: Number(item.cost_per_unit ?? 0),
-      stock_quantity: Number(item.stock_quantity ?? 0),
-      minimum_stock: Number(item.minimum_stock ?? 0),
-      cost_per_unit: Number(item.cost_per_unit ?? 0),
-      category: item.category,
-    }));
+      const normalizedIngredients = (ing.data || []).map(item => ({
+        id: item.id,
+        name: item.name,
+        unit: item.unit,
+        stock: Number(item.stock_quantity ?? 0),
+        min: Number(item.minimum_stock ?? 0),
+        costPerUnit: Number(item.cost_per_unit ?? 0),
+        stock_quantity: Number(item.stock_quantity ?? 0),
+        minimum_stock: Number(item.minimum_stock ?? 0),
+        cost_per_unit: Number(item.cost_per_unit ?? 0),
+        category: item.category,
+      }));
 
-    const normalizedMaterials = (mat.data || []).map(item => ({
-      id: item.id,
-      name: item.name,
-      unit: item.unit,
-      stock: Number(item.stock_quantity ?? 0),
-      min: Number(item.minimum_stock ?? 0),
-      costPerUnit: Number(item.cost_per_unit ?? 0),
-      stock_quantity: Number(item.stock_quantity ?? 0),
-      minimum_stock: Number(item.minimum_stock ?? 0),
-      cost_per_unit: Number(item.cost_per_unit ?? 0),
-      category: item.category,
-    }));
+      const normalizedMaterials = (mat.data || []).map(item => ({
+        id: item.id,
+        name: item.name,
+        unit: item.unit,
+        stock: Number(item.stock_quantity ?? 0),
+        min: Number(item.minimum_stock ?? 0),
+        costPerUnit: Number(item.cost_per_unit ?? 0),
+        stock_quantity: Number(item.stock_quantity ?? 0),
+        minimum_stock: Number(item.minimum_stock ?? 0),
+        cost_per_unit: Number(item.cost_per_unit ?? 0),
+        category: item.category,
+      }));
 
-    const normalizedRecipes = (rec.data || []).map(recipe => {
-      const relatedProduct = Array.isArray(recipe.products)
-        ? recipe.products[0]
-        : recipe.products;
+      const normalizedRecipes = (rec.data || []).map(recipe => {
+        const relatedProduct = Array.isArray(recipe.products)
+          ? recipe.products[0]
+          : recipe.products;
 
-      return ({
-        id: recipe.id,
-        productId: recipe.product_id,
-        product: relatedProduct?.name || recipe.product_name || '',
-        estimatedCost: Number(recipe.estimated_cost ?? 0),
-        yield: Number(recipe.yield_quantity ?? 0),
-        yieldUnit: recipe.yield_unit || 'pcs',
-        ingredients: (recipe.recipe_ingredients || []).map(ri => ({
-          name: ri.item_name,
-          qty: Number(ri.quantity ?? 0),
-          unit: ri.unit,
-          itemType: ri.item_type,
-        })),
+        return ({
+          id: recipe.id,
+          productId: recipe.product_id,
+          product: relatedProduct?.name || recipe.product_name || '',
+          estimatedCost: Number(recipe.estimated_cost ?? 0),
+          yield: Number(recipe.yield_quantity ?? 0),
+          yieldUnit: recipe.yield_unit || 'pcs',
+          ingredients: (recipe.recipe_ingredients || []).map(ri => ({
+            name: ri.item_name,
+            qty: Number(ri.quantity ?? 0),
+            unit: ri.unit,
+            itemType: ri.item_type,
+          })),
+        });
       });
-    });
 
-    const normalizedProducts = (prd.data || []).map(product => ({
-      ...product,
-      name: product.name || '',
-      stock: Number(product.stock_quantity ?? product.stock ?? 0),
-      stock_quantity: Number(product.stock_quantity ?? product.stock ?? 0),
-      normalizedName: normalizeName(product.name),
-    }));
+      const normalizedProducts = (prd.data || []).map(product => ({
+        ...product,
+        name: product.name || '',
+        stock: Number(product.stock_quantity ?? product.stock ?? 0),
+        stock_quantity: Number(product.stock_quantity ?? product.stock ?? 0),
+        normalizedName: normalizeName(product.name),
+      }));
 
-    const normalizedProductionLogs = (prodLog.data || []).map(log => ({
-      id: log.id,
-      dt: log.produced_at,
-      product: log.product_name,
-      produced: Number(log.total_produced ?? 0),
-      yieldUnit: log.yield_unit || 'pcs',
-      batches: Number(log.batches ?? 0),
-      recipeId: log.recipe_id,
-      productId: log.product_id,
-      notes: log.notes || '',
-    }));
+      const normalizedProductionLogs = (prodLog.data || []).map(log => ({
+        id: log.id,
+        dt: log.produced_at,
+        product: log.product_name,
+        produced: Number(log.total_produced ?? 0),
+        yieldUnit: log.yield_unit || 'pcs',
+        batches: Number(log.batches ?? 0),
+        recipeId: log.recipe_id,
+        productId: log.product_id,
+        notes: log.notes || '',
+      }));
 
-    setIngredients(normalizedIngredients);
-    setMaterials(normalizedMaterials);
-    setRecipes(normalizedRecipes);
-    setProductionLogs(normalizedProductionLogs);
-    setProducts(normalizedProducts);
+      setIngredients(normalizedIngredients);
+      setMaterials(normalizedMaterials);
+      setRecipes(normalizedRecipes);
+      setProductionLogs(normalizedProductionLogs);
+      setProducts(normalizedProducts);
 
-    // Mapping para sa Waste
-    setWasteLogs((wst.data || []).map(w => ({
-      id: w.id,
-      dt: w.logged_at,
-      type: w.waste_type,
-      item: w.item_name,
-      qty: `${w.quantity} ${w.unit}`,
-      cost: Number(w.cost),
-      reason: w.reason,
-      notes: w.notes
-    })));
-
-    setLoading(false);
+      // Mapping para sa Waste
+      setWasteLogs((wst.data || []).map(w => ({
+        id: w.id,
+        dt: w.logged_at,
+        type: w.waste_type,
+        item: w.item_name,
+        qty: `${w.quantity} ${w.unit}`,
+        cost: Number(w.cost),
+        reason: w.reason,
+        notes: w.notes
+      })));
+    } catch (err) {
+      // Kahit anong hindi inaasahang error dito (bad data shape, atbp.),
+      // ma-lo-log lang ito — hindi na dapat mag-crash ang buong app.
+      console.error('fetchAll() encountered an unexpected error:', err);
+    } finally {
+      // GUARANTEED tumatakbo ito kahit may error sa itaas — kaya hindi na
+      // magiging infinite ang loading state.
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchAll();
+    // IMPORTANT: huwag mag-fetch kung wala pang naka-login (hal. nasa
+    // /login page pa lang tayo). Kung tuluy-tuloy nating tinatawag ang
+    // fetchAll() kahit walang session, 401 lahat ng requests — at kung
+    // naka-wrap din ang login page sa AppProvider na ito, dagdag pang
+    // ingay/traffic ito bago pa man makapag-sign-in ang user.
+    if (localStorage.getItem('isLoggedIn') === 'true') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchAll();
+    }
   }, []);
 
   const fetchOrders = async () => {};
@@ -286,6 +308,21 @@ export function AppProvider({ children }) {
     }
   };
 
+  // ── Inventory History (restock / production / waste trail) ────
+  // Hindi ito naka-store sa global state dahil per-item lang ito
+  // tinatawag (pag binuksan ang "View History" modal).
+  // Naka-useCallback ito (stable reference sa lahat ng render) para hindi
+  // ma-trigger nang paulit-ulit ang mga effect sa consumer components
+  // (tulad ng InventoryHistoryModal) na naka-depende dito.
+  const fetchInventoryHistory = useCallback(async (itemName) => {
+    try {
+      const res = await apiClient.get('/logs', { params: { item_name: itemName } });
+      return res.data?.data || [];
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to fetch inventory history'), { cause: err });
+    }
+  }, []);
+
   // ── Waste ────
   const logWaste = async (data) => {
     try {
@@ -316,6 +353,7 @@ export function AppProvider({ children }) {
     addRecipe, updateRecipe, deleteRecipe,
     confirmBatch,
     logWaste, deleteWasteLog,
+    fetchInventoryHistory,
     formatPHP
   };
 
