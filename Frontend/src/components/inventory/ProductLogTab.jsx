@@ -22,6 +22,7 @@ const formatLocalTime = (dateString) => {
 export default function ProductLogTab() {
   const context = useApp() || {};
   const productionLogs = context.productionLogs || [];
+  const isLoading = !!context.loading;
 
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
@@ -96,49 +97,62 @@ export default function ProductLogTab() {
 
         {/* ─── RESPONSIVE CONTENT ─── */}
         <div className="px-4 pb-4 mt-4">
-          {/* MOBILE CARDS VIEW */}
-          <div className="block md:hidden space-y-2">
-            {paged.map(pl => (
-              <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center shadow-sm">
-                <div>
-                  <h4 className="font-bold text-brand-900 text-sm">{pl.product}</h4>
-                  <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
-                </div>
-                <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
-                  +{pl.produced} {pl.yieldUnit}
-                </span>
-              </div>
-            ))}
-          </div>
+          {/* LOADING STATE — habang kinukuha pa ang data mula sa backend.
+              Para hindi agad lumabas ang "Wala pang production record"
+              kahit hindi pa talaga tapos ang fetch. */}
+          {isLoading && (
+            <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl animate-pulse">
+              Naglo-load ng production log...
+            </div>
+          )}
 
-          {/* DESKTOP TABLE VIEW */}
-          <div className="hidden md:block">
-            <Table columns={[
-              { label: 'Date & Time' },
-              { label: 'Product' },
-              { label: 'Qty Produced' },
-            ]}>
-              {paged.map(pl => (
-                <Tr key={pl.id}>
-                  
-                  <Td className="text-xs text-brand-500 whitespace-nowrap font-medium">{formatLocalTime(pl.dt)}</Td>
-                  <Td><strong>{pl.product}</strong></Td>
-                  <Td>
-                    <span className="inline-flex items-center gap-1 text-sm font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-md">
+          {!isLoading && (
+            <>
+              {/* MOBILE CARDS VIEW */}
+              <div className="block md:hidden space-y-2">
+                {paged.map(pl => (
+                  <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center shadow-sm">
+                    <div>
+                      <h4 className="font-bold text-brand-900 text-sm">{pl.product}</h4>
+                      <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
+                    </div>
+                    <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
                       +{pl.produced} {pl.yieldUnit}
                     </span>
-                  </Td>
-                </Tr>
-              ))}
-            </Table>
-          </div>
+                  </div>
+                ))}
+              </div>
 
-          {!filtered.length && (
-            <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-              {search || filterDate !== 'All'
-                ? 'Walang nahanap na production record.'
-                : 'Wala pang production record. Mag-set ng target sa Recipe Log at i-confirm ang batch.'}
-            </div>
+              {/* DESKTOP TABLE VIEW */}
+              <div className="hidden md:block">
+                <Table columns={[
+                  { label: 'Date & Time' },
+                  { label: 'Product' },
+                  { label: 'Qty Produced' },
+                ]}>
+                  {paged.map(pl => (
+                    <Tr key={pl.id}>
+                      
+                      <Td className="text-xs text-brand-500 whitespace-nowrap font-medium">{formatLocalTime(pl.dt)}</Td>
+                      <Td><strong>{pl.product}</strong></Td>
+                      <Td>
+                        <span className="inline-flex items-center gap-1 text-sm font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-md">
+                          +{pl.produced} {pl.yieldUnit}
+                        </span>
+                      </Td>
+                    </Tr>
+                  ))}
+                </Table>
+              </div>
+
+              {!filtered.length && (
+                <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
+                  {search || filterDate !== 'All'
+                    ? 'Walang nahanap na production record.'
+                    : 'Wala pang production record. Mag-set ng target sa Recipe Log at i-confirm ang batch.'}
+                </div>
+              )}
+            </>
           )}
         </div>
 

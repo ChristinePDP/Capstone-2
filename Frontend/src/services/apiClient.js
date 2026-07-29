@@ -13,7 +13,17 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('isLoggedIn'); // Burahin ang flag
-      window.location.href = '/login'; // I-redirect sa login
+
+      // IMPORTANT: huwag nang mag-redirect kung nasa /login page na tayo.
+      // Dati, kahit nasa /login na, patuloy pa ring nagre-redirect papunta
+      // sa /login (full page reload). Yun ang sanhi ng INFINITE LOOP: bawat
+      // reload, tumatakbo ulit ang AppProvider's fetchAll() (kasi naka-wrap
+      // din ang login page dito), lahat ng requests ay 401 dahil wala pang
+      // naka-login, kaya mag-re-redirect na naman -> reload -> walang
+      // katapusan.
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

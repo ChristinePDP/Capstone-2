@@ -38,17 +38,40 @@ const IngredientService = {
 
   restock: async (id, body) => {
     console.log('--- 2. PUMASOK SA SERVICE ---');
-    
+
+    // Overflow / typo guard (tugma sa ginagawa na ng MaterialService) —
+    // hinaharangan dito ang mga sablay na numero bago pa maka-apekto
+    // sa totoong stock sa database.
+    const addedQty = Number(body.added_qty);
+    const totalCost = Number(body.total_cost || 0);
+
+    if (!Number.isFinite(addedQty) || addedQty <= 0) {
+      throw new AppError('Invalid ang dami na inilagay. Dapat positibong number.', 400);
+    }
+    if (addedQty > 1000000 || totalCost > 1000000) {
+      throw new AppError('Masyadong malaki ang numero na inilagay. Pakibabaan ang quantity o cost.', 400);
+    }
+
     const { data: current, error: findErr } = await IngredientModel.findById(id);
     if (findErr || !current) throw new AppError('Ingredient not found', 404);
 
-    const newTotalStock = current.stock_quantity + Number(body.added_qty);
+    const newTotalStock = current.stock_quantity + addedQty;
     console.log('BAGONG TOTAL STOCK:', newTotalStock);
 
-    const { data, error } = await IngredientModel.update(id, {
-      stock_quantity: newTotalStock,
-      minimum_stock: Number(body.minimum_stock)
-    });
+    // IMPORTANT: hindi na dapat "i-update" ang minimum_stock dito sa
+    // Restock — tinanggal na ito sa Restock modal ng frontend (dapat
+    // sa "Ayusin ang Detalye" na lang babaguhin ang minimum_stock).
+    // Kung basta natin "Number(body.minimum_stock)" gagawin nang hindi
+    // sinusuri, at wala namang ipinasa ang frontend, magiging NaN ito
+    // at masisira ang existing value sa database. Kaya isasama lang
+    // natin sa update object kung talagang may ipinasang value.
+    const updatePayload = { stock_quantity: newTotalStock };
+    if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
+      const parsedMin = Number(body.minimum_stock);
+      if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
+    }
+
+    const { data, error } = await IngredientModel.update(id, updatePayload);
     if (error || !data) throw new AppError('Failed to update ingredient', 500);
 
     console.log('--- 3. MAGSE-SAVE NA SA LOGS TABLE ---');
@@ -56,8 +79,8 @@ const IngredientService = {
       item_type: 'raw',
       item_name: current.name,
       transaction_type: 'IN',
-      quantity: Number(body.added_qty),
-      cost: Number(body.total_cost || 0),
+      quantity: addedQty,
+      cost: totalCost,
       action: 'Restock'
     };
     console.log('DATA NA IPAPASA SA SUPABASE:', logPayload);
@@ -98,6 +121,9 @@ const MaterialService = {
     const addedQty = Number(body.added_qty);
     const totalCost = Number(body.total_cost || 0);
 
+    if (!Number.isFinite(addedQty) || addedQty <= 0) {
+      throw new AppError('Invalid ang dami na inilagay. Dapat positibong number.', 400);
+    }
     if (addedQty > 1000000 || totalCost > 1000000) {
       throw new AppError('Masyadong malaki ang numero na inilagay. Pakibabaan ang quantity o cost.', 400);
     }
@@ -109,11 +135,17 @@ const MaterialService = {
     // 3. Compute ang bagong stock
     const newTotalStock = Number(current.stock_quantity || 0) + addedQty;
 
-    // 4. I-update sa database
-    const { data, error } = await MaterialModel.update(id, {
-      stock_quantity: newTotalStock,
-      minimum_stock: Number(body.minimum_stock)
-    });
+    // 4. I-update sa database — hindi na dapat i-overwrite ang
+    // minimum_stock dito (tinanggal na sa Restock modal ng frontend;
+    // sa "Ayusin ang Detalye" na lang dapat babaguhin ito). Isasama
+    // lang ito sa update kung talagang may ipinasang value.
+    const updatePayload = { stock_quantity: newTotalStock };
+    if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
+      const parsedMin = Number(body.minimum_stock);
+      if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
+    }
+
+    const { data, error } = await MaterialModel.update(id, updatePayload);
 
     if (error) {
       console.error("SUPABASE UPDATE ERROR:", error);
@@ -152,6 +184,13 @@ const MaterialService = {
   },
 };
 
+// INVENTORY HISTORY (restock / production / waste trail)
+const InventoryLogService = {
+  getHistory: async (filters) => {
+    return InventoryLogModel.getHistory(filters);
+  },
+};
+
 // PRODUCTION
 const ProductionService = {
   getAll: async (limit) => {
@@ -182,10 +221,25 @@ const ProductionService = {
 
     // 4. Bawasan ang actual stock sa database at MAG-LOG SA HISTORY
     for (const d of deductions) {
-      if (d.item_type === 'raw') {
-        await IngredientModel.deductByName(d.item_name, d.quantity);
-      } else {
-        await MaterialModel.deductByName(d.item_name, d.quantity);
+      try {
+        if (d.item_type === 'raw') {
+          // Ipinapasa ang d.unit (unit na naka-declare sa recipe) — kung
+          // magkaiba ito sa aktwal na unit ng stock sa database (hal.
+          // recipe = "g" pero stock = "kg"), awtomatiko itong iko-convert
+          // sa loob ng deductByName bago ibawas. Kung hindi ma-convert
+          // (di-magkatugmang klase ng unit), mag-e-error ito.
+          await IngredientModel.deductByName(d.item_name, d.quantity, d.unit);
+        } else {
+          await MaterialModel.deductByName(d.item_name, d.quantity, d.unit);
+        }
+      } catch (deductErr) {
+        // Itigil agad ang batch confirmation kung hindi ligtas i-deduct
+        // ang isang ingredient — mas mabuting malaman agad ng user kaysa
+        // tahimik na magkamali ang stock count.
+        throw new AppError(
+          `Hindi na-tuloy ang batch: ${deductErr.message}`,
+          400
+        );
       }
 
       await InventoryLogModel.logHistory({
@@ -307,11 +361,17 @@ const WasteService = {
   },
 
   log: async (body) => {
-    // 1. Logic for deducting stocks
-    if (body.waste_type === 'ingredient') {
-      await IngredientModel.deductByName(body.item_name, body.quantity);
-    } else if (body.waste_type === 'material') {
-      await MaterialModel.deductByName(body.item_name, body.quantity);
+    // 1. Logic for deducting stocks — ipinapasa rin ang body.unit para
+    // pareho ring protektado ito (tingnan ang paliwanag sa
+    // ProductionService.confirmBatch tungkol sa unit-aware deduction).
+    try {
+      if (body.waste_type === 'ingredient') {
+        await IngredientModel.deductByName(body.item_name, body.quantity, body.unit);
+      } else if (body.waste_type === 'material') {
+        await MaterialModel.deductByName(body.item_name, body.quantity, body.unit);
+      }
+    } catch (deductErr) {
+      throw new AppError(`Hindi na-log ang waste: ${deductErr.message}`, 400);
     }
 
     // 2. Correct way to call Supabase via WasteModel
@@ -334,4 +394,4 @@ const WasteService = {
   },
 };
 
-export { ProductService, WasteService, RecipeService, ProductionService, MaterialService, IngredientService };
+export { ProductService, WasteService, RecipeService, ProductionService, MaterialService, IngredientService, InventoryLogService };

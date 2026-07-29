@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { AlertTriangle, Search, Filter, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Textarea, Table, Tr, Td, Pagination, Badge, Card } from '../../components/ui';
+import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 
 const PER_PAGE = 10;
 
@@ -58,6 +59,7 @@ export default function WasteTab() {
 
   const [reason, setReason] = useState('Spoiled');
   const [notes, setNotes] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const filteredLogs = useMemo(() => {
     return wasteLogs.filter(log => {
@@ -81,10 +83,15 @@ export default function WasteTab() {
     setIngName(''); setIngQty(''); setIngUnit('kg');
     setProductName(''); setProductQty(''); setProductUnit('pcs');
     setMatName(''); setMatQty(''); setMatUnit('pcs');
+    setIsSaving(false);
     setModalOpen(true);
   };
 
   const handleLog = async () => {
+    // Guard: hindi papayagan ang double-submit habang naka-save pa
+    // (nag-iiwas sa dobleng bawas ng stock kapag pinindot ng dalawang beses).
+    if (isSaving) return;
+
     // FIX: required-field validation now runs BEFORE the stock-sufficiency
     // check (per logType). Previously the stock check ran first and, when
     // no item was selected, `selectedItemStock` defaulted to 0 — so any
@@ -137,6 +144,14 @@ export default function WasteTab() {
       return;
     }
 
+    // Overflow / typo guard — kahit sapat sa stock, i-double check pa rin
+    // kung baka may extra zero na naidagdag nang hindi sinasadya.
+    const qtyOverflowError = getQtyError(rawQty, { max: MAX_QTY, label: 'Dami' });
+    if (qtyOverflowError) {
+      showToast(qtyOverflowError, 'error');
+      return;
+    }
+
     const backendPayload = {
       waste_type: logType,
       item_name: finalItem,
@@ -147,6 +162,7 @@ export default function WasteTab() {
       notes: notes.trim()
     };
 
+    setIsSaving(true);
     try {
       if (logWaste) {
         await logWaste(backendPayload);
@@ -155,6 +171,8 @@ export default function WasteTab() {
       setModalOpen(false);
     } catch (err) {
       showToast(err.message || 'May naganap na error sa pag-save.', 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -324,12 +342,12 @@ export default function WasteTab() {
       {/* Creation Modal Form */}
       <Modal 
         isOpen={modalOpen} 
-        onClose={() => setModalOpen(false)} 
+        onClose={() => !isSaving && setModalOpen(false)} 
         title={`Mag-ulat ng ${logType === 'ingredient' ? 'Sira / Expired na Sangkap' : logType === 'product' ? 'Hindi Nabentang Produkto' : 'Nasirang Dekorasyon/Materyales'}`}
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="danger" onClick={handleLog}>Confirm Log</Button>
+            <Button variant="secondary" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="danger" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Sinasave...' : 'Confirm Log'}</Button>
           </div>
         }
       >
@@ -346,7 +364,7 @@ export default function WasteTab() {
               ))}
             </Select>
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Dami ng Itatapon" required type="number" value={ingQty} onChange={e => setIngQty(e.target.value)} min="0" step="any" />
+              <Input label="Dami ng Itatapon" required type="text" inputMode="decimal" value={ingQty} onChange={e => setIngQty(sanitizeNumericText(e.target.value))} min="0" />
               <Select label="Dahilan" required value={reason} onChange={e => setReason(e.target.value)}>
                 {REASONS.ingredient.map(r => <option key={r}>{r}</option>)}
               </Select>
@@ -368,7 +386,7 @@ export default function WasteTab() {
               ))}
             </Select>
             <div className="grid grid-cols-2 gap-4">
-              <Input label="Quantity Lost" required type="number" value={matQty} onChange={e => setMatQty(e.target.value)} min="0" />
+              <Input label="Quantity Lost" required type="text" inputMode="decimal" value={matQty} onChange={e => setMatQty(sanitizeNumericText(e.target.value))} min="0" />
               <Select label="Dahilan" required value={reason} onChange={e => setReason(e.target.value)}>
                 {REASONS.material.map(r => <option key={r}>{r}</option>)}
               </Select>

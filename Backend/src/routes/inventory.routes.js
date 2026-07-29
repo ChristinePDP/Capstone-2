@@ -5,7 +5,8 @@ import {
   ProductController, 
   ProductionController, 
   RecipeController, 
-  WasteController 
+  WasteController,
+  InventoryLogController
 } from '../controller/inventory.controller.js';
 
 const router = Router();
@@ -42,6 +43,9 @@ router.delete('/recipes/:id', RecipeController.delete);
 // ── WASTE ───────────────────────────────────────────
 router.get('/waste', WasteController.getAll); 
 router.post('/waste', WasteController.log); 
+
+// ── INVENTORY HISTORY (restock / production / waste trail) ──
+router.get('/logs', InventoryLogController.getHistory); 
 
 // I-export bilang default
 export default router;

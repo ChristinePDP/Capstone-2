@@ -1,6 +1,6 @@
 import { ok, created } from '../utils/response.js';
 import { StockItemSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema   } from '../schemas/index.js';
-import { MaterialService, ProductService, ProductionService, RecipeService, WasteService, IngredientService } from '../services/inventory.service.js';
+import { MaterialService, ProductService, ProductionService, RecipeService, WasteService, IngredientService, InventoryLogService } from '../services/inventory.service.js';
 
 const IngredientController = {
   getAll: async (_req, res, next) => {
@@ -144,6 +144,27 @@ const RecipeController = {
 };
 
 
+// Para sa "View History" — walang butas na pagsubaybay ng bawat
+// restock / production deduction / waste sa isang item.
+const InventoryLogController = {
+  getHistory: async (req, res, next) => {
+    try {
+      const { item_name, startDate, endDate, limit } = req.query;
+      const defaultEnd = new Date().toISOString();
+      const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
+      const data = await InventoryLogService.getHistory({
+        itemName: item_name,
+        startDate: startDate || defaultStart,
+        endDate: endDate || defaultEnd,
+        limit: limit ? Math.min(500, parseInt(limit, 10)) : 100,
+      });
+
+      ok(res, data);
+    } catch (err) { next(err); }
+  },
+};
+
 const WasteController = {
   getAll: async (req, res, next) => {
     try {
@@ -165,5 +186,6 @@ export {
   ProductController,
   ProductionController,
   RecipeController,
-  WasteController
+  WasteController,
+  InventoryLogController
 };

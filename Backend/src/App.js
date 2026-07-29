@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes.js';
 import inventoryRoutes from './routes/inventory.routes.js'; 
 import analyticsRoutes from './routes/analytics.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'; 
+import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 
 const app = express(); 
 
