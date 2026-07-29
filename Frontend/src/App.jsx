@@ -3,6 +3,7 @@ import * as authService from './services/authService';
 
 import LoginPage from './pages/LoginPage';
 import InventoryPage from './pages/InventoryPage';
+import AnalyticsPage from './pages/analyticsPage'
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -60,6 +61,9 @@ export default function App() {
 
           {/* ── INVENTORY (Private) ── */}
           <Route path="/inventory" element={<ProtectedAdminRoute><InventoryPage /></ProtectedAdminRoute>} />
+
+          {/* ── ANALYTICS PAGES (Private) ── */}
+          <Route path="/analytics" element={<ProtectedAdminRoute><AnalyticsPage /></ProtectedAdminRoute>} />
 
           {/* ── 404 ── */}
           <Route path="*" element={<NotFound />} />
