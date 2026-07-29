@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 
 import authRoutes from './routes/auth.routes.js'; 
 import inventoryRoutes from './routes/inventory.routes.js'; 
+import analyticsRoutes from './routes/analytics.routes.js'
 import { errorHandler } from './middleware/errorHandler.js'; 
 
 const app = express(); 
@@ -30,6 +31,7 @@ app.get('/', (req, res) => res.json({ status: 'CakeLytics backend is running' })
 
 app.use('/api', authRoutes); 
 app.use('/api/inventory', inventoryRoutes); 
+app.use('/api/analytics', analyticsRoutes); 
 app.use(errorHandler);
 
 export default app;
