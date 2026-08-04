@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { History as HistoryIcon } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { ConfirmModal, useToast, Pagination } from '../ui';
 
 const formatDT = (iso) => {
   if (!iso) return '—';
@@ -13,30 +14,75 @@ const formatDT = (iso) => {
   });
 };
 
+const PAGE_SIZE = 5;
+
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
 // Inline panel (HINDI hiwalay na modal) na ipinapakita sa loob mismo
-// ng Restock/Add Stock modal — para iisang pindot lang ang kailangan
-// para makita ang stock ngayon AT ang dating restock history, sa
-// halip na magbukas pa ng ibang modal.
+// ng "Manage Stock" modal — para iisang tingin lang para makita ang
+// stock ngayon AT ang dating restock history, sa halip na magbukas pa
+// ng ibang modal.
 //
-// Restock entries LANG ang ipinapakita dito (transaction_type IN,
-// action === 'Restock') — hindi na kasama ang Waste o Production
-// deductions (OUT), dahil ang purpose lang naman ng panel na ito ay
-// ipakita "kailan, ilan, at magkano" ang bawat restock — hindi
-// kailangan ang buong IN/OUT trail dito.
-export function RestockHistoryPanel({ itemName }) {
-  const { fetchInventoryHistory } = useApp() || {};
+// DESIGN NOTES (sagot sa mga tanong tungkol sa dami ng history):
+//   1. Naka-limit na ito sa backend (InventoryLogController) sa
+//      pinaka-huling 90 araw bilang default window — kaya hindi ito
+//      "infinite" kahit matagal nang ginagamit ang item. Kung
+//      kailangan pa ring mas mahabang range, dagdag na feature na iyon
+//      (hindi kasama dito) sa halip na basta i-hide ang mga lumang
+//      entries.
+//   2. Hindi na kailangang aktibong "tanggalin" sa listahan ang mga
+//      matagal nang restock — kung nagamit na sa production/waste ang
+//      stock mula doon, awtomatiko namang babawalan (ng backend, HTTP
+//      409) ang pag-void nito, may extra confirmation pa ("Kulang na
+//      ang kasalukuyang stock") bago pilitin. Kaya ligtas pa ring
+//      makita ang lahat ng recent history nang walang risk.
+//   3. Ang totoong problema dati ay VISUAL — may sarili pang scroll
+//      (max-h-52 overflow-y-auto) SA LOOB ng listahan, kasabay pa ng
+//      Prev/Next pagination sa ibaba — dalawang magkaibang paraan ng
+//      pag-navigate nang sabay-sabay, nakalilito. Tinanggal na ang
+//      inner scroll; pagination na lang (5 per page) gamit ang shared
+//      Pagination component (parehong ginagamit sa RawTab, WasteTab,
+//      atbp. — consistent sa buong app).
+export function RestockHistoryPanel({ itemName, itemType }) {
+  const { fetchInventoryHistory, voidRestockLog } = useApp() || {};
+  const { show } = useToast();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Stable ref para sa context function — proteksyon laban sa
-  // unstable function reference mula sa AppContext (tingnan ang
-  // paliwanag sa naunang bersyon ng file na ito).
+  // Void mode — walang checkbox na basta nakikita, kailangan munang
+  // i-click ang "Select to Void" para lumabas ang mga checkbox (mas
+  // malinaw sa user na sinasadya niya itong gawin).
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [confirmLog, setConfirmLog] = useState(null);
+  const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
+  const [insufficientLog, setInsufficientLog] = useState(null);
+  const [insufficientDetail, setInsufficientDetail] = useState('');
+  const [voidingId, setVoidingId] = useState(null);
+
+  const [page, setPage] = useState(1);
+
   const fetchRef = useRef(fetchInventoryHistory);
   useEffect(() => {
     fetchRef.current = fetchInventoryHistory;
   });
+
+  const loadHistory = async () => {
+    if (!itemName || !fetchRef.current) return;
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const data = await fetchRef.current(itemName, itemType);
+      const restocksOnly = (Array.isArray(data) ? data : [])
+        .filter(log => log.action === 'Restock');
+      setLogs(restocksOnly);
+    } catch (err) {
+      setErrorMsg(err.message || 'Hindi makuha ang history.');
+      setLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -46,10 +92,15 @@ export function RestockHistoryPanel({ itemName }) {
       setLoading(true);
       setErrorMsg('');
       try {
-        const data = await fetchRef.current(itemName);
+        const data = await fetchRef.current(itemName, itemType);
         const restocksOnly = (Array.isArray(data) ? data : [])
           .filter(log => log.action === 'Restock');
-        if (!cancelled) setLogs(restocksOnly);
+        if (!cancelled) {
+          setLogs(restocksOnly);
+          setPage(1);
+          setSelectedIds([]);
+          setSelectionMode(false);
+        }
       } catch (err) {
         if (!cancelled) {
           setErrorMsg(err.message || 'Hindi makuha ang history.');
@@ -62,18 +113,152 @@ export function RestockHistoryPanel({ itemName }) {
 
     load();
     return () => { cancelled = true; };
-  }, [itemName]);
+  }, [itemName, itemType]);
+
+  // IMPORTANT: hindi na natin ginagamit ang useEffect+setPage para
+  // i-clamp ang page (dating pattern, nagdulot ng "set-state-in-effect"
+  // warning) — direkta na lang kinakalkula ang "safePage" habang
+  // nagre-render.
+  const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+
+  const pagedLogs = useMemo(
+    () => logs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [logs, safePage]
+  );
+
+  const activeLogs = useMemo(() => logs.filter(l => !l.voided_at), [logs]);
+  const activeIdsOnPage = pagedLogs.filter(l => !l.voided_at).map(l => l.id);
+  const allSelectedOnPage = activeIdsOnPage.length > 0 && activeIdsOnPage.every(id => selectedIds.includes(id));
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAllOnPage = () => {
+    if (allSelectedOnPage) {
+      setSelectedIds(prev => prev.filter(id => !activeIdsOnPage.includes(id)));
+    } else {
+      setSelectedIds(prev => Array.from(new Set([...prev, ...activeIdsOnPage])));
+    }
+  };
+
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds([]);
+  };
+
+  // Isahang pag-void.
+  const runVoid = async (log, force = false) => {
+    if (!voidRestockLog || !log) return;
+    setVoidingId(log.id);
+    try {
+      await voidRestockLog(log.id, force);
+      show('Na-void na ang restock entry.', 'success');
+      setConfirmLog(null);
+      setInsufficientLog(null);
+      setSelectedIds([]);
+      setSelectionMode(false);
+      await loadHistory();
+    } catch (err) {
+      if (err.cause?.response?.status === 409) {
+        setConfirmLog(null);
+        setInsufficientLog(log);
+        setInsufficientDetail(err.cause?.response?.data?.message || err.message);
+      } else {
+        show(err.message || 'Hindi ma-void ang restock entry.', 'error');
+        setConfirmLog(null);
+      }
+    } finally {
+      setVoidingId(null);
+    }
+  };
+
+  // Maramihang pag-void.
+  const runBulkVoid = async () => {
+    if (!selectedIds.length || !voidRestockLog) return;
+    setIsBulkConfirmOpen(false);
+    setLoading(true);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const id of selectedIds) {
+      try {
+        await voidRestockLog(id, false);
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) show(`Na-void na ang ${successCount} entry(ies).`, 'success');
+    if (failCount > 0) show(`May ${failCount} entry(ies) na hindi na-void (insufficient stock / conflict).`, 'error');
+
+    setSelectedIds([]);
+    setSelectionMode(false);
+    await loadHistory();
+    setLoading(false);
+  };
+
+  const handleInitiateVoid = () => {
+    if (selectedIds.length === 1) {
+      const target = logs.find(l => l.id === selectedIds[0]);
+      if (target) setConfirmLog(target);
+    } else if (selectedIds.length > 1) {
+      setIsBulkConfirmOpen(true);
+    }
+  };
 
   if (!itemName) return null;
 
   return (
     <div className="pt-4 mt-4 border-t border-brand-100">
-      <div className="flex items-center gap-1.5 mb-2">
-        <HistoryIcon size={13} className="text-brand-400" />
-        <span className="text-[11px] font-bold uppercase tracking-wide text-brand-400">Restock History</span>
+      {/* Header & Mode Actions */}
+      <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
+        <div className="flex items-center gap-1.5">
+          <HistoryIcon size={13} className="text-brand-400" />
+          <span className="text-[11px] font-bold uppercase tracking-wide text-brand-400">Restock History</span>
+          {logs.length > 0 && (
+            <span className="text-[10px] text-brand-400 font-medium">({logs.length})</span>
+          )}
+        </div>
+
+        {!loading && activeLogs.length > 0 && (
+          !selectionMode ? (
+            <button
+              type="button"
+              onClick={() => setSelectionMode(true)}
+              className="text-[11px] font-bold text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1 rounded-md transition-all"
+            >
+              Select to Void
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={handleInitiateVoid}
+                className="px-2.5 py-1 text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed rounded shadow-sm transition-all"
+              >
+                Void Selected ({selectedIds.length})
+              </button>
+              <button type="button" onClick={exitSelectionMode} className="px-2 py-1 text-[11px] font-medium text-brand-500 hover:text-brand-700 bg-brand-50 rounded">
+                Cancel
+              </button>
+            </div>
+          )
+        )}
       </div>
 
-      <div className="max-h-40 overflow-y-auto rounded-lg border border-brand-100 bg-brand-50/30">
+      {selectionMode && (
+        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+          {selectedIds.length === 0 ? 'Check entries below you want to void.' : `${selectedIds.length} selected.`}
+        </p>
+      )}
+
+      {/* Log Container */}
+      <div className="rounded-lg border border-brand-100 bg-brand-50/30 overflow-hidden">
         {loading && (
           <div className="py-6 text-center text-xs text-brand-400 font-medium">Naglo-load...</div>
         )}
@@ -89,24 +274,135 @@ export function RestockHistoryPanel({ itemName }) {
         )}
 
         {!loading && !errorMsg && logs.length > 0 && (
-          <div className="divide-y divide-brand-100">
-            {logs.map((log, idx) => (
-              <div key={`${log.created_at}-${idx}`} className="flex items-center justify-between gap-3 px-3 py-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs font-bold text-brand-700">Restock</span>
-                  <span className="text-[11px] text-brand-400 truncate">{formatDT(log.created_at)}</span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs font-bold text-green-700">+{log.quantity}</span>
-                  {log.cost > 0 && (
-                    <span className="text-[11px] text-brand-400">₱{Number(log.cost).toFixed(2)}</span>
+          <>
+            {/* 📱 MOBILE CARDS — walang scroll-in-scroll, natural height lang */}
+            <div className="block sm:hidden divide-y divide-brand-100 bg-white">
+              {pagedLogs.map((log, idx) => {
+                const isVoided = Boolean(log.voided_at);
+                const isSelected = selectedIds.includes(log.id);
+                return (
+                  <div
+                    key={log.id ?? `${log.created_at}-${idx}`}
+                    className={`p-3 flex items-start gap-2.5 ${isVoided ? 'opacity-50' : isSelected ? 'bg-red-50/40' : ''}`}
+                  >
+                    {selectionMode && !isVoided && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(log.id)}
+                        className="mt-1 shrink-0 rounded border-brand-300 text-red-600 focus:ring-red-500"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {isVoided ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-red-100 text-red-600">Voided</span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">Restock</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-brand-500">{formatDT(log.created_at)}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</p>
+                        {log.cost > 0 && <p className="text-[11px] text-brand-500">₱{Number(log.cost).toFixed(2)}</p>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 💻 DESKTOP TABLE — natural height, walang overflow-y wrapper */}
+            <table className="hidden sm:table w-full text-left text-sm">
+              <thead className="bg-brand-50/90 border-b border-brand-100 text-[10px] uppercase tracking-wider text-brand-500">
+                <tr>
+                  {selectionMode && (
+                    <th className="px-3 py-2 w-8 text-center">
+                      <input
+                        type="checkbox"
+                        onChange={toggleSelectAllOnPage}
+                        checked={allSelectedOnPage}
+                        className="rounded border-brand-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                      />
+                    </th>
                   )}
-                </div>
-              </div>
-            ))}
-          </div>
+                  <th className="px-3 py-2 font-bold">Petsa at Oras</th>
+                  <th className="px-3 py-2 font-bold">Action</th>
+                  <th className="px-3 py-2 font-bold text-right">Qty</th>
+                  <th className="px-3 py-2 font-bold text-right">Halaga</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-100 bg-white">
+                {pagedLogs.map((log, idx) => {
+                  const isVoided = Boolean(log.voided_at);
+                  const isSelected = selectedIds.includes(log.id);
+                  return (
+                    <tr key={log.id ?? `${log.created_at}-${idx}`} className={`transition-colors ${isVoided ? 'opacity-50 bg-gray-50/50' : isSelected ? 'bg-red-50/40' : 'hover:bg-brand-50/50'}`}>
+                      {selectionMode && (
+                        <td className="px-3 py-2 text-center">
+                          {!isVoided && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(log.id)}
+                              className="rounded border-brand-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                            />
+                          )}
+                        </td>
+                      )}
+                      <td className="px-3 py-2 text-[11px] text-brand-600 whitespace-nowrap">{formatDT(log.created_at)}</td>
+                      <td className="px-3 py-2">
+                        {isVoided ? (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-red-100 text-red-600">Voided</span>
+                        ) : (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">Restock</span>
+                        )}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</td>
+                      <td className="px-3 py-2 text-right text-xs text-brand-600 font-medium">{log.cost > 0 ? `₱${Number(log.cost).toFixed(2)}` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <Pagination page={safePage} total="restock entries" perPage={PAGE_SIZE} count={logs.length} onChange={setPage} />
+          </>
         )}
       </div>
+
+      {/* Confirmation Modals */}
+      <ConfirmModal
+        isOpen={Boolean(confirmLog)}
+        onClose={() => setConfirmLog(null)}
+        onConfirm={() => runVoid(confirmLog, false)}
+        title="I-void ang restock na ito?"
+        message={confirmLog ? `Ibabawas ang ${confirmLog.quantity} na dati'y naidagdag sa "${itemName}". Mananatili ang record bilang audit trail, pero babalik ang stock sa dati.` : ''}
+        confirmLabel={voidingId ? 'Inaalis...' : 'Oo, i-void'}
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={isBulkConfirmOpen}
+        onClose={() => setIsBulkConfirmOpen(false)}
+        onConfirm={runBulkVoid}
+        title={`I-void ang ${selectedIds.length} napiling restock entry?`}
+        message={`Ibabawas ang mga idinagdag na stock para sa ${selectedIds.length} entry na ito sa "${itemName}".`}
+        confirmLabel="Oo, i-void lahat"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(insufficientLog)}
+        onClose={() => setInsufficientLog(null)}
+        onConfirm={() => runVoid(insufficientLog, true)}
+        title="Kulang na ang kasalukuyang stock"
+        message={`${insufficientDetail} Ituloy pa rin ang pag-void? (Mapupunta sa 0 ang stock sa halip na eksaktong tumugma sa dati.)`}
+        confirmLabel="Ituloy pa rin"
+        variant="danger"
+      />
     </div>
   );
 }

@@ -36,6 +36,51 @@ const MaterialModel = {
       .update({ stock_quantity: Math.max(0, data.stock_quantity - deductQty) })
       .eq('name', name);
   },
+
+  // Tingnan ang paliwanag sa IngredientModel.restoreByName — parehong
+  // proteksyon dito, para sa Void/reversal feature.
+  restoreByName: async (name, qty, fromUnit) => {
+    const { data } = await supabase.from('celebration_materials').select('stock_quantity, unit').eq('name', name).single();
+    if (!data) return;
+
+    let restoreQty = Number(qty);
+    if (fromUnit && data.unit && fromUnit !== data.unit) {
+      const converted = convertUnit(qty, fromUnit, data.unit);
+      if (Number.isFinite(converted)) restoreQty = converted;
+    }
+
+    return supabase.from('celebration_materials')
+      .update({ stock_quantity: data.stock_quantity + restoreQty })
+      .eq('name', name);
+  },
+
+  // Tingnan ang paliwanag sa IngredientModel.reverseRestock — parehong
+  // proteksyon dito (sufficiency check + force flag) para sa Void Restock.
+  reverseRestock: async (name, qty, force = false) => {
+    const { data } = await supabase
+      .from('celebration_materials')
+      .select('stock_quantity, unit')
+      .eq('name', name)
+      .single();
+
+    if (!data) return { notFound: true };
+
+    const reverseQty = Number(qty);
+    const currentStock = Number(data.stock_quantity ?? 0);
+
+    if (currentStock < reverseQty && !force) {
+      return { insufficient: true, currentStock, requested: reverseQty };
+    }
+
+    const newStock = Math.max(0, currentStock - reverseQty);
+    const { error } = await supabase
+      .from('celebration_materials')
+      .update({ stock_quantity: newStock })
+      .eq('name', name);
+
+    if (error) throw error;
+    return { updated: true, newStock };
+  },
 };
 
 export { MaterialModel };
