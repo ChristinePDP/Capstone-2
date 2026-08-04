@@ -3,7 +3,10 @@ import * as authService from './services/authService';
 
 import LoginPage from './pages/LoginPage';
 import InventoryPage from './pages/InventoryPage';
-import AnalyticsPage from './pages/analyticsPage'
+import AnalyticsPage from './pages/analyticsPage';
+import OnlineOrderingPage from './pages/onlineOrderingPage';
+import ProductModal from './components/onlineOrdering/Productmodal';
+import QrScanner from './components/onlineOrdering/MobileScanner';
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -64,6 +67,14 @@ export default function App() {
 
           {/* ── ANALYTICS PAGES (Private) ── */}
           <Route path="/analytics" element={<ProtectedAdminRoute><AnalyticsPage /></ProtectedAdminRoute>} />
+          
+          {/* ── DAGDAG: Explicit redirect kapag eksaktong "/onlineOrdering" lang ang tinype ── */}
+          <Route path="/onlineOrdering" element={<Navigate to="/onlineOrdering/home" replace />} />
+          
+          {/* ── YUNG ORIGINAL MO: Sasalo sa /onlineOrdering/home, /menu, /checkout, etc. ── */}
+          <Route path="/onlineOrdering/*" element={<OnlineOrderingPage />} />
+          <Route path="/productmodal" element={<ProductModal />} />
+          <Route path="/qr" element={<QrScanner />} />
 
           {/* ── 404 ── */}
           <Route path="*" element={<NotFound />} />
