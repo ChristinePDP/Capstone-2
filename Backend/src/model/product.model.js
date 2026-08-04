@@ -23,11 +23,14 @@ const ProductModel = {
   },
 
   async findById(id) {
-    return getSupabase()
+    const { data, error } = await getSupabase()
       .from('products')
       .select('*')
       .eq('id', id)
       .single();
+
+    if (error) throw error;
+    return data;
   },
 
   async create(payload) {
