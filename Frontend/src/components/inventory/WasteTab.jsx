@@ -195,6 +195,14 @@ export default function WasteTab() {
       return;
     }
 
+    // Overflow / typo guard — kahit sapat sa stock, i-double check pa rin
+    // kung baka may extra zero na naidagdag nang hindi sinasadya.
+    const qtyOverflowError = getQtyError(rawQty, { max: MAX_QTY, label: 'Dami' });
+    if (qtyOverflowError) {
+      showToast(qtyOverflowError, 'error');
+      return;
+    }
+
     const backendPayload = {
       waste_type: logType,
       item_name: finalItem,

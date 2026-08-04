@@ -49,5 +49,8 @@ router.patch('/waste/:id/void', WasteController.void);
 router.get('/logs', InventoryLogController.getHistory); 
 router.patch('/logs/:id/void', InventoryLogController.voidRestock);
 
+// ── INVENTORY HISTORY (restock / production / waste trail) ──
+router.get('/logs', InventoryLogController.getHistory); 
+
 // I-export bilang default
 export default router;

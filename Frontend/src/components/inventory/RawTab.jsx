@@ -55,6 +55,7 @@ export default function IngredientsTab() {
     } else if (payload.detailsPayload) {
       showToast('Naitama ang detalye ng ingredient.');
     }
+    void note; // reserved for future audit-note support
   };
 
   const handleDelete = async () => {

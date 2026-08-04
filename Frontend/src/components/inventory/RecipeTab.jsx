@@ -317,6 +317,11 @@ export default function RecipeTab() {
         showToast('Please specify a yield unit.', 'warning');
         return;
       }
+      const yieldOverflow = getQtyError(yld, { max: MAX_QTY, label: 'Yield' });
+      if (yieldOverflow) { showToast(yieldOverflow, 'warning'); return; }
+
+      const costOverflow = getCostError(cost);
+      if (costOverflow) { showToast(costOverflow, 'warning'); return; }
 
       const validRows = rows.filter(row => row.itemId || row.qty || row.unit);
       if (!validRows.length) {
@@ -344,6 +349,16 @@ export default function RecipeTab() {
           return;
         }
 
+        const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
+        if (rowQtyErr) {
+          showToast(rowQtyErr, 'warning');
+          return;
+        }
+
+        // IMPORTANT: dati, WALA talagang overflow/typo check dito (hindi
+        // tulad ng RawTab/CelebrationTab na may getQtyError). Kaya kahit
+        // sablay na number (extra zero, atbp.) ang ilagay, tahimik na
+        // nasa-save. Ngayon, gagamitin din natin ang parehong guard.
         const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
         if (rowQtyErr) {
           showToast(rowQtyErr, 'warning');
