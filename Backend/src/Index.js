@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import app from './App.js'; // Wag kalimutan ang .js!
+import app from './App.js'; 
 import { setupAnalyticsCron } from './cron/analytics.cron.js';
 
 const PORT = process.env.PORT || 4000;

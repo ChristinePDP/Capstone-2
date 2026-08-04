@@ -28,7 +28,7 @@ export function AppProvider({ children }) {
   const [productionLogs, setProductionLogs] = useState([]);
   const [wasteLogs,      setWasteLogs]      = useState([]);
   const [products,       setProducts]       = useState([]);
-  const [orders]                          = useState([]);
+  const [orders]                            = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
@@ -37,13 +37,6 @@ export function AppProvider({ children }) {
   const fetchAll = async () => {
     setLoading(true);
 
-    // IMPORTANT: naka-try/finally ang buong katawan ng function. Dati,
-    // kung nag-crash ang kahit anong .map()/normalization sa gitna (hal.
-    // hindi inaasahang shape ng data mula sa isang endpoint), tumitigil
-    // agad ang function bago pa maabot ang setLoading(false) sa dulo —
-    // kaya nananatiling "true" (infinite loading) ang loading state
-    // magpakailanman. Sa pag-wrap ng try/finally, GUARANTEED na tatakbo
-    // ang setLoading(false) kahit may mag-crash sa gitna.
     try {
       // Helper function para hindi mag-fail ang Promise.all kapag may error
       const safeFetch = async (url) => {
@@ -150,22 +143,13 @@ export function AppProvider({ children }) {
         notes: w.notes
       })));
     } catch (err) {
-      // Kahit anong hindi inaasahang error dito (bad data shape, atbp.),
-      // ma-lo-log lang ito — hindi na dapat mag-crash ang buong app.
       console.error('fetchAll() encountered an unexpected error:', err);
     } finally {
-      // GUARANTEED tumatakbo ito kahit may error sa itaas — kaya hindi na
-      // magiging infinite ang loading state.
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // IMPORTANT: huwag mag-fetch kung wala pang naka-login (hal. nasa
-    // /login page pa lang tayo). Kung tuluy-tuloy nating tinatawag ang
-    // fetchAll() kahit walang session, 401 lahat ng requests — at kung
-    // naka-wrap din ang login page sa AppProvider na ito, dagdag pang
-    // ingay/traffic ito bago pa man makapag-sign-in ang user.
     if (localStorage.getItem('isLoggedIn') === 'true') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchAll();
@@ -309,14 +293,9 @@ export function AppProvider({ children }) {
   };
 
   // ── Inventory History (restock / production / waste trail) ────
-  // Hindi ito naka-store sa global state dahil per-item lang ito
-  // tinatawag (pag binuksan ang "View History" modal).
-  // Naka-useCallback ito (stable reference sa lahat ng render) para hindi
-  // ma-trigger nang paulit-ulit ang mga effect sa consumer components
-  // (tulad ng InventoryHistoryModal) na naka-depende dito.
-  const fetchInventoryHistory = useCallback(async (itemName) => {
+  const fetchInventoryHistory = useCallback(async (itemName, itemType) => {
     try {
-      const res = await apiClient.get('/logs', { params: { item_name: itemName } });
+      const res = await apiClient.get('/logs', { params: { item_name: itemName, item_type: itemType } });
       return res.data?.data || [];
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to fetch inventory history'), { cause: err });
@@ -333,15 +312,27 @@ export function AppProvider({ children }) {
     }
   };
 
-  const deleteWasteLog = async (id) => {
+  const voidWasteLog = async (id) => {
     try {
-      await apiClient.delete(`/waste/${id}`);
+      await apiClient.patch(`/waste/${id}/void`);
       await fetchAll(); // Refresh data from DB
     } catch (err) {
-      throw new Error(getErrMsg(err, 'Failed to delete waste log'), { cause: err });
+      throw new Error(getErrMsg(err, 'Failed to void waste log'), { cause: err });
     }
   };
 
+  // ── Void Restock (ADDED HERE) ────
+  // Kanselahin (void) ang isang MALING restock entry
+  const voidRestockLog = async (logId, force = false) => {
+    try {
+      await apiClient.patch(`/logs/${logId}/void${force ? '?force=true' : ''}`);
+      await fetchAll();
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to void restock log'), { cause: err });
+    }
+  };
+
+  // ── Value Provider ────
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     loading, error,
@@ -352,7 +343,7 @@ export function AppProvider({ children }) {
     addMaterial, updateMaterial, deleteMaterial, restockMaterial,
     addRecipe, updateRecipe, deleteRecipe,
     confirmBatch,
-    logWaste, deleteWasteLog,
+    logWaste, voidWasteLog, voidRestockLog, // <-- ADDED voidRestockLog HERE
     fetchInventoryHistory,
     formatPHP
   };

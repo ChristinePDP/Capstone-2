@@ -43,9 +43,11 @@ router.delete('/recipes/:id', RecipeController.delete);
 // ── WASTE ───────────────────────────────────────────
 router.get('/waste', WasteController.getAll); 
 router.post('/waste', WasteController.log); 
+router.patch('/waste/:id/void', WasteController.void);
 
 // ── INVENTORY HISTORY (restock / production / waste trail) ──
 router.get('/logs', InventoryLogController.getHistory); 
+router.patch('/logs/:id/void', InventoryLogController.voidRestock);
 
 // I-export bilang default
 export default router;

@@ -4,7 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, createContext, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom'; // Dinagdag para sa Portal fix[cite: 13]
-import { X, Search, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { X, Search, CheckCircle, XCircle } from 'lucide-react';
 
 // ─── Badge ────────────────────────────────────────────────────
 export function Badge({ children, variant = 'default', className = '' }) {
@@ -49,11 +49,22 @@ export function Button({ children, variant = 'primary', size = 'md', className =
 }
 
 // ─── Input Fields ─────────────────────────────────────────────
-export function Input({ label, hint, required, error, className = '', ...props }) {
+// `suffix` (opsyonal): maliit na badge na naka-overlay sa loob mismo,
+// dulo-kanan ng input — ginagamit para sa unit (hal. "ml", "kg") sa
+// halip na itago lang ito sa label. Mas mabilis makilala ng mata kung
+// anong unit ang hinihingi ng field habang nagta-type.
+export function Input({ label, hint, required, error, suffix, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1">
       {label && <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>}
-      <input className={`px-3 py-2 border border-brand-200 rounded-lg text-sm text-brand-900 font-sans outline-none focus:border-brand-400 bg-white placeholder:text-brand-300 transition-colors ${error ? 'border-red-400' : ''} ${className}`} {...props} />
+      <div className="relative">
+        <input className={`w-full px-3 py-2 border border-brand-200 rounded-lg text-sm text-brand-900 font-sans outline-none focus:border-brand-400 bg-white placeholder:text-brand-300 transition-colors ${error ? 'border-red-400' : ''} ${suffix ? 'pr-12' : ''} ${className}`} {...props} />
+        {suffix && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-brand-400 pointer-events-none select-none">
+            {suffix}
+          </span>
+        )}
+      </div>
       {hint && <span className="text-[11px] text-brand-400">{hint}</span>}
       {error && <span className="text-[11px] text-red-500">{error}</span>}
     </div>
@@ -240,15 +251,25 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ show }}>
       {children}
+      {/* IMPORTANT: dalawang kulay LANG dapat ang toast — green para sa
+          success, red para sa lahat ng iba pa (error/danger/warning).
+          Dati may 3rd na "warning" (amber) na hiwalay pa, at pati ang
+          "success" ay hindi totoong green (brand-800 lang) — nakalilito
+          dahil hindi agad ma-distinguish sa isang tingin kung
+          successful ba o may problema. Kaya dito, i-treat na ang
+          "warning" bilang parte ng red bucket sa halip na hiwalay na
+          kulay — hindi na kailangang galawin ang lahat ng showToast()
+          calls sa ibang components na gumagamit pa rin ng 'warning'. */}
       <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
-        {toasts.map(t => (
-          <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${t.type === 'success' ? 'bg-brand-800 text-white' : t.type === 'warning' ? 'bg-amber-700 text-white' : 'bg-red-700 text-white'}`}>
-            {t.type === 'success' && <CheckCircle size={16} />}
-            {t.type === 'warning' && <AlertCircle size={16} />}
-            {(t.type === 'error' || t.type === 'danger') && <XCircle size={16} />}
-            {t.message}
-          </div>
-        ))}
+        {toasts.map(t => {
+          const isSuccess = t.type === 'success';
+          return (
+            <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${isSuccess ? 'bg-green-600 text-white' : 'bg-red-700 text-white'}`}>
+              {isSuccess ? <CheckCircle size={16} /> : <XCircle size={16} />}
+              {t.message}
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

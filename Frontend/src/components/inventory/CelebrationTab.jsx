@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
-import { Plus, Search, Pencil } from 'lucide-react';
+import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui';
 import { ingStatus } from '../../utils/inventoryHelpers';
-import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatWithCommas, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
-import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS } from '../../utils/unitUtils';
+import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
+import { STOCK_UNIT_CATEGORIES } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 
 const PER_PAGE = 10;
@@ -22,37 +22,43 @@ export default function CelebrationTab() {
   const [editMat, setEditMat]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  // Ginagamit ang ref (bukod sa state) dahil INSTANT ito mag-update,
-  // hindi tulad ng useState na naka-batch/async pa rin ang effect sa
-  // parehong render tick. Kung ang ConfirmModal ay tumatawag ng
-  // onConfirm() at onClose() nang magkasunod sa iisang tick, ang
-  // `isDeleting` state ay HINDI pa naka-update sa oras na tawagin ang
-  // onClose — kaya ang ref ang gagamitin bilang tunay na "totoong oras"
-  // na proteksyon laban dito.
+  
   const isDeletingRef = useRef(false);
 
-  const [detailsTarget, setDetailsTarget] = useState(null); // typo/name correction
+  // Pinakabagong data mula sa materials list
+  const currentEditMat = materials.find(m => m.id === editMat?.id) || editMat;
 
   const filtered = materials.filter(m =>
     m.name.toLowerCase().includes(search.toLowerCase())
   );
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  const handleSave = async (data, addedQty = 0, note = '') => {
-    if (editMat?.id) {
-      await restockMaterial(editMat.id, data);
-      showToast(`+${addedQty} ${editMat.unit} na-add sa ${editMat.name}.`);
-    } else {
-      await addMaterial(data);
+  const handleSave = async (payload) => {
+    if (payload.isNew) {
+      await addMaterial(payload.newData);
       showToast('Celebration material added.');
+      return;
     }
-    void note;
+
+    if (payload.detailsPayload && updateMaterial) {
+      await updateMaterial(currentEditMat.id, payload.detailsPayload);
+    }
+    if (payload.restockPayload && restockMaterial) {
+      await restockMaterial(currentEditMat.id, payload.restockPayload);
+    }
+
+    if (payload.detailsPayload && payload.restockPayload) {
+      showToast(`Na-update ang detalye at +${payload.addedQty} ${currentEditMat.unit} na-add sa ${currentEditMat.name}.`);
+    } else if (payload.restockPayload) {
+      showToast(`+${payload.addedQty} ${currentEditMat.unit} na-add sa ${currentEditMat.name}.`);
+    } else if (payload.detailsPayload) {
+      showToast('Naitama ang detalye ng material.');
+    }
   };
 
   const handleDelete = async () => {
-    // Guard: kung may ongoing delete na, huwag na ulitin (double-click / double-tap).
     if (isDeletingRef.current || !deleteTarget) return;
-    isDeletingRef.current = true; // instant, hindi naka-batch — dito nagaganap ang tunay na proteksyon
+    isDeletingRef.current = true; 
     setIsDeleting(true);
     try {
       if (deleteMaterial) await deleteMaterial(deleteTarget.id);
@@ -71,7 +77,7 @@ export default function CelebrationTab() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className=" font-bold text-brand-800">Celebration Materials</h3>
+            <h3 className="font-bold text-brand-800">Celebration Materials</h3>
             <p className="text-xs text-brand-400 mt-0.5">Mag-manage ng Printed Balloons, Tarpaulin, at iba pang party add-ons.</p>
           </div>
           <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
@@ -93,11 +99,7 @@ export default function CelebrationTab() {
           </div>
         </div>
 
-        {/* ─── RESPONSIVE CONTAINER ─── */}
         <div className="px-4 pb-4 mt-4">
-          {/* LOADING STATE — habang kinukuha pa ang data mula sa backend.
-              Para hindi agad lumabas ang "Walang naka-record" kahit hindi
-              pa talaga tapos ang fetch. */}
           {isLoading && (
             <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl animate-pulse">
               Naglo-load ng celebration materials...
@@ -125,8 +127,7 @@ export default function CelebrationTab() {
                         <LevelBar stock={mat.stock} min={mat.min} />
                       </div>
                       <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
-                        <Button size="sm" variant="ghost" onClick={() => setDetailsTarget(mat)}><Pencil size={13} /> Edit</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock</Button>
+                        <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
                         <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
                       </div>
                     </div>
@@ -153,8 +154,7 @@ export default function CelebrationTab() {
                         <Td><Badge variant={st.cls}>{st.label}</Badge></Td>
                         <Td align="right">
                           <div className="flex gap-2 justify-end">
-                            <Button size="sm" variant="ghost" title="Ayusin ang pangalan/unit" onClick={() => setDetailsTarget(mat)}><Pencil size={14} /></Button>
-                            <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock</Button>
+                            <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
                             <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
                           </div>
                         </Td>
@@ -181,22 +181,11 @@ export default function CelebrationTab() {
       </Card>
 
       <MaterialModal
-        key={editMat?.id ?? 'new'}   // remount kada bagong item / bagong "add" — dito nagre-reset ang state
+        key={currentEditMat?.id ?? 'new'}  
         isOpen={modalOpen}
-        material={editMat}
+        material={currentEditMat}
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
-      />
-
-      <EditDetailsModal
-        key={detailsTarget?.id ?? 'none'}  // remount din dito para automatic mag-reset
-        isOpen={!!detailsTarget}
-        onClose={() => setDetailsTarget(null)}
-        item={detailsTarget}
-        onSave={async (payload) => {
-          if (updateMaterial) await updateMaterial(detailsTarget.id, payload);
-          showToast('Naitama ang detalye ng material.');
-        }}
       />
 
       <ConfirmModal
@@ -210,13 +199,16 @@ export default function CelebrationTab() {
 
 function MaterialModal({ isOpen, onClose, material, onSave }) {
   const { show: showToast } = useToast();
-  
+
   const [name, setName] = useState(material?.name ?? '');
   const [unit, setUnit] = useState(material?.unit ?? 'pcs');
   const [stock, setStock] = useState('');
   const [min, setMin] = useState(material?.min ?? '');
-  const [cost, setCost] = useState('');
-  
+  const [cost, setCost] = useState(''); 
+
+  const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
+  const [editingDetails, setEditingDetails] = useState(false);
+
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
 
@@ -224,9 +216,42 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
 
   const finalizedStock = parseFractionInput(stock);
   const addedQty = parseFloat(finalizedStock) || 0;
-  const qtyError = getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Dami na idadagdag' : 'Initial stock' });
+  const qtyError = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Dami na idadagdag' : 'Initial stock' }) : '';
   const minError = getQtyError(min, { max: MAX_QTY, label: 'Minimum safety stock' });
   const costError = getCostError(cost);
+  const detailsCostError = getCostError(detailsCost);
+
+  // Suriin kung may pagbabagong ginawa sa mga detalye
+  const isDetailsModified = isEdit && (
+    name.trim() !== (material?.name ?? '').trim() ||
+    unit !== (material?.unit ?? 'pcs') ||
+    String(min) !== String(material?.min ?? '') ||
+    String(detailsCost) !== String(material?.costPerUnit ?? '')
+  );
+
+  const handleDetailsHeaderClick = () => {
+    if (!editingDetails) {
+      setEditingDetails(true);
+    } else {
+      if (isDetailsModified) {
+        if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
+        if (minError) { showToast(minError, 'error'); return; }
+        if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
+        
+        setEditingDetails(false);
+      } else {
+        setEditingDetails(false);
+      }
+    }
+  };
+
+  const handleCancelDetails = () => {
+    setName(material?.name ?? '');
+    setUnit(material?.unit ?? 'pcs');
+    setMin(material?.min ?? '');
+    setDetailsCost(String(material?.costPerUnit ?? ''));
+    setEditingDetails(false);
+  };
 
   const handleValidate = () => {
     if (isSaving) return;
@@ -235,33 +260,53 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
       if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
       if (!stock) { showToast('Initial stock is required.', 'error'); return; }
       if (parseFloat(finalizedStock) < 0) { showToast('Stock quantity cannot be negative.', 'error'); return; }
-    } else {
-      if (!stock) { showToast('Added quantity is required.', 'error'); return; }
-      if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
-    }
-
-    // Ang "Minimum Stock Level" ay hindi na dapat i-validate/i-send dito
-    // kapag Restock/Add Stock (isEdit) — tanggal na ang field na ito sa
-    // Restock modal, doon na lang dapat sa "Ayusin ang Detalye" babaguhin.
-    if (!isEdit) {
       if (!min) { showToast('Minimum safety stock is required.', 'error'); return; }
       if (minError) { showToast(minError, 'error'); return; }
-    }
-    if (qtyError) { showToast(qtyError, 'error'); return; }
-    if (costError) { showToast(costError, 'error'); return; }
+      if (qtyError) { showToast(qtyError, 'error'); return; }
+      if (!cost) { showToast('Total cost is required.', 'error'); return; }
+      if (costError) { showToast(costError, 'error'); return; }
 
-    const newStock = isEdit ? +(material.stock + addedQty).toFixed(4) : addedQty;
-    const dataToSave = isEdit
-      ? { added_qty: addedQty, total_cost: cost ? parseFloat(cost) : 0 }
-      : { name: name.trim(), unit, stock_quantity: newStock, minimum_stock: parseFloat(min), cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, category: 'Celebration Material' };
+      setConfirmPayload({
+        isNew: true,
+        newData: { name: name.trim(), unit, stock_quantity: addedQty, minimum_stock: parseFloat(min), cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, category: 'Celebration Material' },
+        addedQty,
+        itemName: name.trim(),
+        itemUnit: unit,
+        totalCost: cost ? parseFloat(cost) : 0,
+      });
+      return;
+    }
+
+    if (isDetailsModified || editingDetails) {
+      if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
+      if (minError) { showToast(minError, 'error'); return; }
+      if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
+    }
+
+    if (stock) {
+      if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
+      if (qtyError) { showToast(qtyError, 'error'); return; }
+      if (!cost) { showToast('Total cost is required kapag nagdadagdag ng stock.', 'error'); return; }
+      if (costError) { showToast(costError, 'error'); return; }
+    }
+
+    if (!isDetailsModified && !stock) {
+      showToast('Walang binago o idinagdag. I-edit ang detalye o maglagay ng dami na idadagdag.', 'error');
+      return;
+    }
+
+    const detailsPayload = isDetailsModified || editingDetails
+      ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
+      : null;
+    const restockPayload = stock ? { added_qty: addedQty, total_cost: cost ? parseFloat(cost) : 0 } : null;
 
     setConfirmPayload({
-      dataToSave,
+      detailsPayload,
+      restockPayload,
       addedQty,
-      note: isEdit ? 'Stock added' : 'Initial stock',
-      itemName: isEdit ? material.name : name.trim(),
-      itemUnit: isEdit ? material.unit : unit,
-      totalCost: cost ? parseFloat(cost) : 0
+      itemName: name.trim(),
+      itemUnit: unit,
+      totalCost: cost ? parseFloat(cost) : 0,
     });
   };
 
@@ -269,9 +314,11 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     if (!confirmPayload) return;
     setIsSaving(true);
     try {
-      await onSave(confirmPayload.dataToSave, confirmPayload.addedQty, confirmPayload.note);
+      await onSave(confirmPayload);
       setConfirmPayload(null);
-      onClose(); 
+      setStock('');
+      setCost('');
+      onClose();
     } catch (err) {
       showToast(err.message || 'Failed to save', 'error');
       setConfirmPayload(null);
@@ -280,78 +327,253 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     }
   };
 
+  const confirmTitle = confirmPayload?.isNew
+    ? 'Kumpirmahin ang Bagong Material'
+    : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
+      ? 'Kumpirmahin ang Pagbabago'
+      : confirmPayload?.restockPayload
+        ? 'Kumpirmahin ang Add Stock'
+        : 'Kumpirmahin ang Pag-edit';
+
+  const confirmMessage = confirmPayload?.detailsPayload && confirmPayload?.restockPayload
+    ? `I-sasave ang bagong detalye ng "${confirmPayload.itemName}" AT idadagdag ang ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Sigurado ka na?`
+    : confirmPayload?.restockPayload
+      ? `Sigurado ka bang idadagdag ang ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} sa ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` na may kabuuang halaga na ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
+      : `I-save ang bagong detalye ng "${confirmPayload?.itemName}"?`;
+
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Add Stock — ${material?.name}` : 'Add New Celebration Material'} size="md"
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : 'Add New Celebration Material'}
+        subtitle={isEdit ? `Unit: ${material?.unit}` : 'Mag-record ng bagong bulto ng party add-ons.'}
+        size="lg"
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isSaving} onClick={onClose}>Kanselahin</Button>
+            <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
             <Button variant="primary" disabled={isSaving} onClick={handleValidate}>
-              {isEdit ? 'Add Stock' : 'Save Material'}
+              {isEdit ? 'Save Changes' : 'Save Material'}
             </Button>
           </div>
         }
       >
-        <div className="space-y-4">
-          {!isEdit && (
-            <div className="grid grid-cols-2 gap-4">
-              <Input label="Item Name" required value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Tarpaulin (2x3 ft)" />
-              <div>
-                <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
-                  {STOCK_UNIT_CATEGORIES.map(cat => (
-                    <optgroup key={cat.label} label={cat.label}>
-                      {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-                    </optgroup>
-                  ))}
-                </Select>
-              </div>
-            </div>
-          )}
-          
+        <div className="space-y-5">
+          {/* Header Banner */}
           {isEdit && (
-            <div className="grid grid-cols-2 gap-3">
-               <div className="flex flex-col gap-1">
-                 <span className="text-[11px] font-bold uppercase text-brand-400">Item Name</span>
-                 <div className="px-3 py-2 bg-brand-50 border rounded-lg text-sm font-bold text-brand-800">{material?.name}</div>
-               </div>
-               <div className="flex flex-col gap-1">
-                 <span className="text-[11px] font-bold uppercase text-brand-400">Unit</span>
-                 <div className="px-3 py-2 bg-brand-50 border rounded-lg text-sm font-bold text-brand-800">{material?.unit}</div>
-               </div>
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
+              <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
+                <Wallet size={16} className="text-brand-500" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost ng Kasalukuyang Stock</p>
+                <p className="text-lg font-black text-brand-800 leading-tight">
+                  ₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}
+                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({material?.stock} {material?.unit})</span>
+                </p>
+              </div>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Input
-                label={isEdit ? `Quantity na Idadagdag` : 'Initial Stock Quantity'}
-                required type="text" inputMode="decimal"
-                value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))}
-                onBlur={() => setStock(current => parseFractionInput(current))}
-                placeholder="hal. 0.5 o 1/2" min="0"
-              />
-              {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
-            </div>
-            {!isEdit && (
-              <div>
-                <Input label="Minimum Stock Level" required type="text" inputMode="decimal" value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} min="0" />
-                {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
+          {/* ADD NEW MATERIAL FORM */}
+          {!isEdit && (
+            <div className="space-y-5">
+              {/* Basic Information */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <Tag size={13} className="text-brand-400" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">1. Basic Information</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input label="Material Name" required value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Tarpaulin (2x3 ft)" />
+                  <div>
+                    <Select label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
+                      {STOCK_UNIT_CATEGORIES.map(cat => (
+                        <optgroup key={cat.label} label={cat.label}>
+                          {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
+                        </optgroup>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
               </div>
-            )}
-            {isEdit && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold uppercase text-brand-400">Minimum Stock Level</span>
-                <div className="px-3 py-2 bg-brand-50 border rounded-lg text-sm font-bold text-brand-800">{material?.min} {material?.unit}</div>
-                <span className="text-[10px] text-brand-400">I-edit ito sa "Ayusin ang Detalye" (✎), hindi dito sa Restock.</span>
-              </div>
-            )}
-            <div className="col-span-2">
-              <Input label="Total Cost" type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" min="0" />
-              {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-            </div>
-          </div>
 
-          {isEdit && <RestockHistoryPanel itemName={material?.name} />}
+              <div className="border-t border-brand-100" />
+
+              {/* Stock Levels */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <Package size={13} className="text-brand-400" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">2. Stock Levels</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="hal. 0.5 o 1/2" />
+                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
+                  </div>
+                  <div>
+                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="hal. 10" />
+                    {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-brand-100" />
+
+              {/* Cost & Financials */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5">
+                  <Wallet size={13} className="text-brand-400" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
+                </div>
+                <div>
+                  <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
+                  {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
+                  {!costError && cost && addedQty > 0 && (
+                    <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {unit} ({addedQty} {unit})</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* EDIT DETAILS AND RESTOCK FORM */}
+          {isEdit && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+              
+              {/* SECTION A: MATERIAL DETAILS CARD */}
+              <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-brand-100">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-brand-500">Material Details</span>
+                  
+                  {editingDetails ? (
+                    <div className="flex items-center gap-1.5">
+                      {isDetailsModified && (
+                        <button
+                          type="button"
+                          onClick={handleCancelDetails}
+                          className="text-xs font-bold text-gray-500 hover:text-gray-700 bg-white px-2 py-1 rounded-lg border border-gray-200 shadow-sm transition-all"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleDetailsHeaderClick}
+                        className={`text-xs font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg border shadow-sm transition-all ${
+                          isDetailsModified 
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600' 
+                            : 'bg-white text-brand-600 hover:text-brand-800 border-brand-200'
+                        }`}
+                      >
+                        {isDetailsModified ? (
+                          <>
+                            <Check size={12} /> Save
+                          </>
+                        ) : (
+                          'Cancel'
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setEditingDetails(true)}
+                      className="text-xs font-bold text-brand-600 hover:text-brand-800 flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-brand-200 shadow-sm transition-all"
+                    >
+                      <Pencil size={12} /> Edit Details
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  {!editingDetails ? (
+                    <>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Name</span>
+                        <span className="text-sm font-bold text-brand-800 truncate block">{name}</span>
+                      </div>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Unit</span>
+                        <span className="text-sm font-bold text-brand-800 block">{unit}</span>
+                      </div>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Min. Stock</span>
+                        <span className="text-sm font-bold text-brand-800 block">{min} {unit}</span>
+                      </div>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Cost per Unit</span>
+                        <span className="text-sm font-bold text-brand-800 block">₱{(parseFloat(detailsCost) || 0).toFixed(2)}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <Input label="Name" required value={name} onChange={e => setName(e.target.value)} />
+                      </div>
+                      <div>
+                        <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
+                          {STOCK_UNIT_CATEGORIES.map(cat => (
+                            <optgroup key={cat.label} label={cat.label}>
+                              {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
+                            </optgroup>
+                          ))}
+                        </Select>
+                      </div>
+                      <div>
+                        <Input label="Min. Stock" type="text" inputMode="decimal" value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} />
+                        {minError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{minError}</p>}
+                      </div>
+                      <div>
+                        <Input label="Cost/Unit (₱)" type="text" inputMode="decimal" value={formatPesoLive(detailsCost)} onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} />
+                        {detailsCostError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{detailsCostError}</p>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* SECTION B: ADD STOCK CARD */}
+              <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
+                <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
+                  <RefreshCw size={13} className="text-brand-500" />
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">Add Stock / Quantity</span>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <Input
+                      label="Dami na Idadagdag"
+                      type="text" 
+                      inputMode="decimal"
+                      suffix={material?.unit}
+                      value={stock} 
+                      onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                      onBlur={() => setStock(current => parseFractionInput(current))}
+                      placeholder="hal. 0.5 o 1/2"
+                    />
+                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
+                  </div>
+
+                  <div>
+                    <Input 
+                      label="Total Halaga / Resibo" 
+                      type="text" 
+                      inputMode="decimal" 
+                      value={formatPesoLive(cost)} 
+                      onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} 
+                      placeholder="₱0.00" 
+                    />
+                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
+                    {!costError && cost && addedQty > 0 && (
+                      <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {material?.unit} ({addedQty} {material?.unit})</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* Restock History Panel */}
+          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" />}
         </div>
       </Modal>
 
@@ -359,98 +581,11 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
         isOpen={!!confirmPayload}
         onClose={() => !isSaving && setConfirmPayload(null)}
         onConfirm={executeSave}
-        title="Kumpirmahin ang Restock"
-        message={`Sigurado ka bang idadagdag ang ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} sa ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` na may kabuuang halaga na ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`}
+        title={confirmTitle}
+        message={confirmMessage}
         confirmLabel={isSaving ? 'Sinasave...' : 'Oo, Sigurado Ako'}
         variant="primary"
       />
     </>
-  );
-}
-
-// ─── EDIT DETAILS MODAL ───────────────────────────────────────
-// Para maitama kapag may typo sa pangalan/unit/minimum stock ng
-// isang material. Hindi ito nagdadagdag ng stock — pang-correction
-// lang. Gumagamit ng PUT /materials/:id (updateMaterial).
-function EditDetailsModal({ isOpen, onClose, item, onSave }) {
-  const { show: showToast } = useToast();
-  // Walang useEffect dito — naga-reset na ang state via `key` sa parent (remount)
-  const [name, setName] = useState(item?.name ?? '');
-  const [unit, setUnit] = useState(item?.unit ?? 'pcs');
-  const [min, setMin] = useState(String(item?.min ?? ''));
-  const [cost, setCost] = useState(String(item?.costPerUnit ?? ''));
-  const [isSaving, setIsSaving] = useState(false);
-
-  const minError = getQtyError(min, { max: MAX_QTY, label: 'Minimum safety stock' });
-  const costError = getCostError(cost);
-
-  const handleSave = async () => {
-    if (isSaving) return;
-    if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
-    if (minError) { showToast(minError, 'error'); return; }
-    if (costError) { showToast(costError, 'error'); return; }
-
-    setIsSaving(true);
-    try {
-      await onSave({
-        name: name.trim(),
-        unit,
-        minimum_stock: parseFloat(min) || 0,
-        cost_per_unit: cost ? parseFloat(cost) : 0,
-      });
-      onClose();
-    } catch (err) {
-      showToast(err.message || 'Failed to update material', 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!item) return null;
-
-  return (
-    <Modal
-      isOpen={isOpen} onClose={() => !isSaving && onClose()}
-      title={`Ayusin ang Detalye — ${item?.name}`}
-      subtitle="Para sa pagtatama ng maling type sa pangalan, unit, o minimum stock. Hindi ito nagdadagdag ng stock."
-      size="md"
-      footer={
-        <div className="flex gap-3 justify-end">
-          <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={isSaving} onClick={handleSave}>
-            {isSaving ? 'Sinasave...' : 'I-save ang Ayos'}
-          </Button>
-        </div>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <Input label="Item Name" required value={name} onChange={e => setName(e.target.value)} />
-          <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
-            {STOCK_UNIT_CATEGORIES.map(cat => (
-              <optgroup key={cat.label} label={cat.label}>
-                {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-              </optgroup>
-            ))}
-          </Select>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Input label="Minimum Stock Level" type="text" inputMode="decimal" value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} />
-            {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
-          </div>
-          <div>
-            <Input
-              label="Cost per Unit"
-              type="text" inputMode="decimal"
-              value={formatPesoLive(cost)}
-              onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
-              placeholder="₱0.00"
-            />
-            {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-          </div>
-        </div>
-      </div>
-    </Modal>
   );
 }

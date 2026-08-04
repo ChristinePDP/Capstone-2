@@ -109,19 +109,19 @@ export function parseFormattedPeso(displayValue) {
  * Ibinabalik ang error message (string) kapag may problema,
  * o null kapag okay naman.
  */
-export function getQtyError(value, { max = MAX_QTY, label = 'Dami' } = {}) {
+export function getQtyError(value, { max = MAX_QTY, label = 'Quantity' } = {}) {
   if (value === '' || value === null || value === undefined) return null;
   const num = parseFloat(value);
-  if (!Number.isFinite(num)) return `Hindi valid na number ang ${label.toLowerCase()}.`;
-  if (num < 0) return `Hindi puwedeng negative ang ${label.toLowerCase()}.`;
+  if (!Number.isFinite(num)) return `Invalid number for ${label.toLowerCase()}.`;
+  if (num < 0) return `${label} can't be negative.`;
   if (num > max) {
-    return `Masyadong malaki ang ${label.toLowerCase()} (max ${formatWithCommas(max)}). Baka may extra zero na naidagdag — paki-check.`;
+    return `${label} is too large (max ${formatWithCommas(max)}). Baka may extra zero na naidagdag — paki-check.`;
   }
   return null;
 }
 
 export function getCostError(value, { max = MAX_COST } = {}) {
-  return getQtyError(value, { max, label: 'Halaga' });
+  return getQtyError(value, { max, label: 'Cost' });
 }
 
 // ─────────────────────────────────────────────────────────────

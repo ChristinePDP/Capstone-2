@@ -149,18 +149,31 @@ const RecipeController = {
 const InventoryLogController = {
   getHistory: async (req, res, next) => {
     try {
-      const { item_name, startDate, endDate, limit } = req.query;
+      const { item_name, item_type, startDate, endDate, limit } = req.query;
       const defaultEnd = new Date().toISOString();
       const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
       const data = await InventoryLogService.getHistory({
         itemName: item_name,
+        itemType: item_type,
         startDate: startDate || defaultStart,
         endDate: endDate || defaultEnd,
         limit: limit ? Math.min(500, parseInt(limit, 10)) : 100,
       });
 
       ok(res, data);
+    } catch (err) { next(err); }
+  },
+
+  // Kanselahin (void) ang isang MALING restock entry — tingnan ang
+  // paliwanag sa InventoryLogService.voidRestock. Opsyonal ang
+  // `?force=true` sa query string — ginagamit lang ito kapag na-warn na
+  // ang user (409 insufficient) at pumayag pa rin silang ituloy.
+  voidRestock: async (req, res, next) => {
+    try {
+      const force = req.query.force === 'true';
+      const result = await InventoryLogService.voidRestock(req.params.id, force);
+      ok(res, result, 'Restock entry voided');
     } catch (err) { next(err); }
   },
 };
@@ -176,6 +189,15 @@ const WasteController = {
     try {
       const body = WasteLogSchema.parse(req.body);
       created(res, await WasteService.log(body), 'Waste logged');
+    } catch (err) { next(err); }
+  },
+  // Kanselahin (void) ang isang waste record — ibinabalik ang stock na
+  // naibawas dati, at nananatili sa database ang record bilang audit
+  // trail (hindi totoong "delete").
+  void: async (req, res, next) => {
+    try {
+      const result = await WasteService.void(req.params.id);
+      ok(res, result, 'Waste record voided');
     } catch (err) { next(err); }
   },
 };
