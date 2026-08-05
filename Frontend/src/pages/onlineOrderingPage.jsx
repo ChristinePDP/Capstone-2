@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
 import Home from '../components/onlineOrdering/Home';
@@ -6,8 +6,36 @@ import Menu from '../components/onlineOrdering/Menu';
 import Checkout from '../components/onlineOrdering/Checkout';
 import Confirm from '../components/onlineOrdering/Confirm';
 
+const CART_STORAGE_KEY = 'aileen_cake_max_cart';
+
 export default function OnlineOrderingPage() {
-  const [cart, setCart] = useState([]);
+  // Cart state, naka-persist sa localStorage kaya nananatili ang laman
+  // nito kahit mag-refresh o bumalik ang customer gamit ang browser back
+  // button. Note: hindi kasama ang `inspiration_image` (File object) sa
+  // na-save, dahil hindi ito JSON-serializable — kailangang i-reattach
+  // ulit ng customer ang image kapag talagang na-refresh habang naka-set ito.
+  const [cart, setCart] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CART_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (err) {
+      console.error('Failed to read cart from storage:', err);
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const serializable = cart.map(({ inspiration_image, ...rest }) => ({
+        ...rest,
+        had_inspiration_image: !!inspiration_image,
+      }));
+      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(serializable));
+    } catch (err) {
+      console.error('Failed to save cart to storage:', err);
+    }
+  }, [cart]);
+
   const [confirmedOrderId, setConfirmedOrderId] = useState('');
 
   return (

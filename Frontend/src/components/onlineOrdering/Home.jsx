@@ -1,16 +1,17 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
-// Kunin ang base URL mula sa frontend .env file
-const BUCKET_URL = import.meta.env.VITE_SUPABASE_STORAGE_URL;
-
-// Gamitin ang bucket URL para sa mga standalone images
-const heroImg = `${BUCKET_URL}/heroimg.png`;
-const celebrationImg = `${BUCKET_URL}/images.png`;
-const pastriesImg = `${BUCKET_URL}/imagee.png`;
+// Ang bucket base URL ay hindi na build-time constant mula sa frontend .env.
+// Kinukuha na ito sa runtime mula sa backend (GET /online-ordering/config),
+// na siyang nagde-derive nito diretso sa naka-configure na Supabase client.
+// Dito, mga filename na lang ang nakalista; sa component pa lang sila
+// pinagsasama sa fetched storageUrl para bumuo ng buong image URL.
+const HERO_FILE = 'heroimg.png';
+const CELEBRATION_FILE = 'images.png';
+const PASTRIES_FILE = 'imagee.png';
 
 const STEPS = [
   { n: '01', title: 'Browse the menu', copy: 'Cakes, pastries and celebration packages, all in one place.' },
@@ -19,29 +20,21 @@ const STEPS = [
   { n: '04', title: 'Enjoy', copy: 'Show your digital receipt at the counter and take it home.' },
 ];
 
-const GALLERY = [
-  `${BUCKET_URL}/image1.png`,
-  `${BUCKET_URL}/image2.png`,
-  `${BUCKET_URL}/image3.png`,
-  `${BUCKET_URL}/image4.png`,
-  `${BUCKET_URL}/image5.png`,
-  `${BUCKET_URL}/image6.png`,
-  `${BUCKET_URL}/image7.png`,
-  `${BUCKET_URL}/image8.png`,
-  `${BUCKET_URL}/image9.png`,
-  `${BUCKET_URL}/image10.png`,
+const GALLERY_FILES = [
+  'image1.png', 'image2.png', 'image3.png', 'image4.png', 'image5.png',
+  'image6.png', 'image7.png', 'image8.png', 'image9.png', 'image10.png',
 ];
 
-const FEATURES = [
+const FEATURE_META = [
   {
     title: 'Celebration Packages',
     copy: 'Themed cakes, cupcakes and balloons in one hassle-free set.',
-    image: celebrationImg,
+    file: CELEBRATION_FILE,
   },
   {
     title: 'Filipino Common Pastries',
     copy: 'Classic crinkles, brownies and premium ensaymada, baked daily.',
-    image: pastriesImg,
+    file: PASTRIES_FILE,
   },
 ];
 
@@ -113,6 +106,45 @@ function CreationsCarousel({ items, className = '' }) {
 
 export default function Home() {
   const navigate = useNavigate();
+  const [storageUrl, setStorageUrl] = useState(null);
+  const [configError, setConfigError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/config`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.success && data.storageUrl) {
+          setStorageUrl(data.storageUrl);
+        } else {
+          setConfigError(true);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load storage config:', err);
+        if (!cancelled) setConfigError(true);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Wala pang natatanggap na storageUrl (loading pa, or nag-fail) -> huwag
+  // munang i-render ang mga larawan na may sirang src.
+  const imgUrl = (file) => (storageUrl ? `${storageUrl}/${file}` : null);
+
+  const heroImg = imgUrl(HERO_FILE);
+  const GALLERY = GALLERY_FILES.map(imgUrl);
+  const FEATURES = FEATURE_META.map(f => ({ ...f, image: imgUrl(f.file) }));
+
+  if (!storageUrl && !configError) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center">
+        <p className="text-sm text-[#8A7264]">Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FCFAF9] text-[#5A453C] font-sans">

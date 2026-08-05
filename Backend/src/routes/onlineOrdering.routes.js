@@ -5,7 +5,8 @@ import {
   createPaymongoLink, 
   uploadInspiration, 
   placeOrder,
-  markOrderCompleted 
+  markOrderCompleted,
+  getPublicConfig 
 } from '../controller/onlineOrdering.controller.js';
 
 const router = express.Router();
@@ -14,6 +15,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/products', getMenuProducts);
+router.get('/config', getPublicConfig);
 router.post('/paymongo-checkout', createPaymongoLink);
 
 // Bagong Endpoints:
