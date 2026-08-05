@@ -1,6 +1,23 @@
 // backend/src/controllers/onlineOrdering.controller.js
-import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder, completeOrderAndDeductStock, createProduct, updateProduct } from '../services/onlineOrdering.services.js';
+import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder, completeOrderAndDeductStock, createProduct, updateProduct, getStorageBaseUrl } from '../services/onlineOrdering.services.js';
 import { supabase } from '../config/supabase.js'; 
+
+export const getPublicConfig = async (req, res) => {
+  try {
+    // 'homepage-images' == yung bucket na ginagamit ng Home.jsx para sa
+    // hero/gallery/feature images. Dagdagan na lang ito ng ibang key kung
+    // may iba pang bucket/config na kakailanganin pang i-expose sa frontend.
+    const storageUrl = getStorageBaseUrl('homepage-images');
+ 
+    res.status(200).json({
+      success: true,
+      storageUrl
+    });
+  } catch (error) {
+    console.error('Get Public Config Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch config' });
+  }
+};
 
 export const getMenuProducts = async (req, res) => {
   try {

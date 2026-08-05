@@ -59,6 +59,12 @@ export const fetchMenuProducts = async (filters = {}) => {
   return productsWithStock;
 };
 
+export const getStorageBaseUrl = (bucketName) => {
+  const { data } = supabase.storage.from(bucketName).getPublicUrl('');
+  // getPublicUrl('') returns ".../object/public/<bucket>/" (may trailing slash)
+  return data.publicUrl.replace(/\/$/, '');
+};
+
 export const uploadImageToBucket = async (file, bucketName = 'inspiration-images') => {
   const fileExt = file.originalname.split('.').pop();
   const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
