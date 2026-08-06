@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui';
+import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES } from '../../utils/unitUtils';
@@ -101,9 +101,10 @@ export default function CelebrationTab() {
 
         <div className="px-4 pb-4 mt-4">
           {isLoading && (
-            <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl animate-pulse">
-              Naglo-load ng celebration materials...
-            </div>
+              <>
+                <CardSkeleton count={3} />
+                <TableSkeleton columns={5} rows={5} />
+              </>
           )}
 
           {!isLoading && (

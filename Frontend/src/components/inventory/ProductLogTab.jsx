@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Search, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Table, Tr, Td, Card, Pagination } from '../../components/ui';
+import { Table, Tr, Td, Card, Pagination, CardSkeleton, TableSkeleton } from '../../components/ui/index';
 
 const PER_PAGE = 10;
 
@@ -101,9 +101,10 @@ export default function ProductLogTab() {
               Para hindi agad lumabas ang "Wala pang production record"
               kahit hindi pa talaga tapos ang fetch. */}
           {isLoading && (
-            <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl animate-pulse">
-              Naglo-load ng production log...
-            </div>
+              <>
+                <CardSkeleton count={3} />
+                <TableSkeleton columns={5} rows={5} />
+              </>
           )}
 
           {!isLoading && (

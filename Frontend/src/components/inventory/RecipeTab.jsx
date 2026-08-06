@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal } from '../../components/ui';
+import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 
@@ -84,6 +84,7 @@ export default function RecipeTab() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [confirmTarget, setConfirmTarget] = useState(null); // Modal state para sa production confirmation
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isDeletingRef = useRef(false);
@@ -317,11 +318,6 @@ export default function RecipeTab() {
         showToast('Please specify a yield unit.', 'warning');
         return;
       }
-      const yieldOverflow = getQtyError(yld, { max: MAX_QTY, label: 'Yield' });
-      if (yieldOverflow) { showToast(yieldOverflow, 'warning'); return; }
-
-      const costOverflow = getCostError(cost);
-      if (costOverflow) { showToast(costOverflow, 'warning'); return; }
 
       const validRows = rows.filter(row => row.itemId || row.qty || row.unit);
       if (!validRows.length) {
@@ -349,16 +345,6 @@ export default function RecipeTab() {
           return;
         }
 
-        const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
-        if (rowQtyErr) {
-          showToast(rowQtyErr, 'warning');
-          return;
-        }
-
-        // IMPORTANT: dati, WALA talagang overflow/typo check dito (hindi
-        // tulad ng RawTab/CelebrationTab na may getQtyError). Kaya kahit
-        // sablay na number (extra zero, atbp.) ang ilagay, tahimik na
-        // nasa-save. Ngayon, gagamitin din natin ang parehong guard.
         const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
         if (rowQtyErr) {
           showToast(rowQtyErr, 'warning');
@@ -406,9 +392,14 @@ export default function RecipeTab() {
     }
   };
 
-  const handleDirectConfirm = async (recipe, goalNum) => {
+  // Kumpirmasyon at actual execution ng batch production
+  const handleExecuteConfirm = async () => {
+    if (!confirmTarget) return;
+    const { recipe, goalNum } = confirmTarget;
+
     if (!goalNum || goalNum <= 0) {
       showToast('Target Goal must be a positive number.', 'error');
+      setConfirmTarget(null);
       return;
     }
     if (confirmingIds[recipe.id]) return;
@@ -420,6 +411,8 @@ export default function RecipeTab() {
 
     if (!UUID_RE.test(recipeId) || !UUID_RE.test(resolvedProductId || '')) {
       showToast('Recipe/product data not fully loaded yet — refresh the page and try again.', 'warning');
+      setConfirmTarget(null);
+      setConfirmingIds(prev => ({ ...prev, [recipe.id]: false }));
       return;
     }
 
@@ -449,6 +442,7 @@ export default function RecipeTab() {
       showToast("Batch wasn't logged — check the server console for validation errors.", 'warning');
     } finally {
       setConfirmingIds(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
+      setConfirmTarget(null);
     }
   };
 
@@ -512,9 +506,10 @@ export default function RecipeTab() {
 
         <div className="px-4 pb-4 mt-4">
           {isLoading && (
-            <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl animate-pulse">
-              Naglo-load ng recipes...
-            </div>
+            <>
+              <CardSkeleton count={3} />
+              <TableSkeleton columns={5} rows={5} />
+            </>
           )}
 
           {!isLoading && (
@@ -563,7 +558,13 @@ export default function RecipeTab() {
                       {quotaError && <p className="text-[10px] text-red-600 font-medium mt-1">{quotaError}</p>}
                     </div>
                     {canMake && (
-                      <Button size="sm" variant="primary" disabled={!!confirmingIds[r.id]} className="bg-emerald-600 text-xs px-3 border-none py-2 h-auto" onClick={() => handleDirectConfirm(r, quotaNum)}>
+                      <Button 
+                        size="sm" 
+                        variant="primary" 
+                        disabled={!!confirmingIds[r.id]} 
+                        className="bg-emerald-600 text-xs px-3 border-none py-2 h-auto" 
+                        onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
+                      >
                         <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
                       </Button>
                     )}
@@ -606,7 +607,17 @@ export default function RecipeTab() {
                     <Td><span className="font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-md border">{currentStock} {r.yieldUnit}</span></Td>
                     <Td align="right">
                       <div className="flex items-center justify-end gap-2">
-                        {canMake && <Button size="sm" variant="primary" disabled={!!confirmingIds[r.id]} className="bg-emerald-600 border-none" onClick={() => handleDirectConfirm(r, quotaNum)}><CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}</Button>}
+                        {canMake && (
+                          <Button 
+                            size="sm" 
+                            variant="primary" 
+                            disabled={!!confirmingIds[r.id]} 
+                            className="bg-emerald-600 border-none" 
+                            onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
+                          >
+                            <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
+                          </Button>
+                        )}
                         <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
                         <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
@@ -690,9 +701,9 @@ export default function RecipeTab() {
                 const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${rowItem?.name || 'ingredient'}` }) : null;
 
                 return (
-                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-1">
-                    <div className="flex gap-2 items-center">
-                      <div className="flex-1 min-w-0">
+                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                      <div className="w-full sm:flex-1 sm:min-w-0">
                         <Select
                           value={row.itemId}
                           onChange={e => {
@@ -707,37 +718,39 @@ export default function RecipeTab() {
                         </Select>
                       </div>
 
-                      <div className="w-24">
-                        <input
-                          value={row.qty}
-                          type="text"
-                          inputMode="decimal"
-                          onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
-                          placeholder="Qty"
-                          className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
-                        />
-                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
+                          <input
+                            value={row.qty}
+                            type="text"
+                            inputMode="decimal"
+                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
+                            placeholder="Qty"
+                            className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
+                          />
+                        </div>
 
-                      <div className="w-28">
-                        <Select
-                          value={row.unit}
-                          onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
-                          className="w-full"
-                          required
+                        <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
+                          <Select
+                            value={row.unit}
+                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
+                            className="w-full"
+                            required
+                          >
+                            <option value="">Unit</option>
+                            {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                          </Select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setRows(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : [{ itemId: '', qty: '', unit: '' }])}
+                          className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
+                          title="Remove row"
                         >
-                          <option value="">Unit</option>
-                          {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
-                        </Select>
+                          <Trash2 size={14} />
+                        </button>
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setRows(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : [{ itemId: '', qty: '', unit: '' }])}
-                        className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
-                        title="Remove row"
-                      >
-                        <Trash2 size={14} />
-                      </button>
                     </div>
 
                     {rowQtyErr && (
@@ -759,6 +772,41 @@ export default function RecipeTab() {
         </div>
       </Modal>
 
+      {/* PRODUCTION CONFIRMATION MODAL */}
+      <ConfirmModal
+        isOpen={!!confirmTarget}
+        onClose={() => !confirmingIds[confirmTarget?.recipe?.id] && setConfirmTarget(null)}
+        onConfirm={handleExecuteConfirm}
+        title="I-confirm ang Batch Production"
+        message={
+          confirmTarget ? (
+            <div className="space-y-3 text-left text-sm text-gray-600">
+              <p>Sigurado ka bang gusto mong simulan ang production para sa <strong>{confirmTarget.recipe.product}</strong>?</p>
+              <div className="bg-brand-50 p-3 rounded-xl border border-brand-100 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Target Goal:</span>
+                  <strong className="text-brand-900">{confirmTarget.goalNum} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Mabubuong Batches:</span>
+                  <strong className="text-brand-900">{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1))} batch(es)</strong>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-brand-200/60">
+                  <span className="text-gray-700 font-medium">Total na Malilikha:</span>
+                  <strong className="text-emerald-700">+{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1)) * (Number(confirmTarget.recipe.yield) || 1)} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
+                </div>
+              </div>
+              <p className="text-[11px] text-amber-600 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
+                ⚠️ Awtomatikong mababawasan ang kaukulang raw ingredients sa inventory kapag kinumpirma ito.
+              </p>
+            </div>
+          ) : ''
+        }
+        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Kina-confirm...' : 'Kumpirmahin Production'}
+        variant="primary"
+      />
+
+      {/* DELETE RECIPE CONFIRMATION MODAL */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)}

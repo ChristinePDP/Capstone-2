@@ -20,8 +20,25 @@ const STOCK_SUBTABS = [
 ];
 
 export default function InventoryPage() {
-  const [mainTab, setMainTab] = useState('stocks');
-  const [subTab, setSubTab]   = useState('raw');
+  // ── 1. Kukunin muna sa localStorage ang huling napiling tab ──
+  const [mainTab, setMainTab] = useState(() => {
+    return localStorage.getItem('inv_main_tab') || 'stocks';
+  });
+
+  const [subTab, setSubTab] = useState(() => {
+    return localStorage.getItem('inv_sub_tab') || 'raw';
+  });
+
+  // ── 2. Helper functions para mag-save sa localStorage kapag nagpalit ng tab ──
+  const handleMainTabChange = (key) => {
+    setMainTab(key);
+    localStorage.setItem('inv_main_tab', key);
+  };
+
+  const handleSubTabChange = (key) => {
+    setSubTab(key);
+    localStorage.setItem('inv_sub_tab', key);
+  };
 
   // Kukunin natin ang data mula sa AppContext para sa dynamic KPI
   const { ingredients = [], materials = [], recipes = [], productionLogs = [] } = useApp();
@@ -50,8 +67,16 @@ export default function InventoryPage() {
       ];
     }
     if (subTab === 'product') {
-      const todayStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      const todayCount = productionLogs.filter(pl => pl.dt?.includes(todayStr.split(',')[0]) && pl.dt?.includes(todayStr.split(', ')[1])).length;
+      // Ikumpara ang aktwal na petsa (Asia/Manila) sa halip na mag-substring
+      // match ng localized string laban sa raw ISO timestamp — hindi kasi
+      // talaga nagtutugma ang mga format nun kaya laging 0 ang resulta dati.
+      const manilaDateKey = (dateInput) => {
+        if (!dateInput) return null;
+        return new Date(dateInput).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // 'YYYY-MM-DD'
+      };
+      const todayKey = manilaDateKey(new Date());
+      const todayCount = productionLogs.filter(pl => manilaDateKey(pl.dt) === todayKey).length;
+
       return [
         { label: 'Total Production Entries', val: productionLogs.length, color: '' },
         { label: 'Produced Today', val: todayCount, color: '' },
@@ -67,7 +92,7 @@ export default function InventoryPage() {
         {MAIN_TABS.map(tab => (
           <button
             key={tab.key}
-            onClick={() => setMainTab(tab.key)}
+            onClick={() => handleMainTabChange(tab.key)}
             className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               mainTab === tab.key
                 ? 'bg-white text-brand-900 shadow-sm'
@@ -85,7 +110,6 @@ export default function InventoryPage() {
           
           {/* 2. DYNAMIC KPI CARDS (Nasa taas) */}
           {kpiData && (
-            // Dynamic grid columns: Kung 1 lang ang laman ng array, magiging grid-cols-1 siya
             <div className={` grid gap-4 ${kpiData.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
               {kpiData.map((kpi, idx) => (
                 <Card key={idx} className="p-5">
@@ -105,7 +129,7 @@ export default function InventoryPage() {
             {STOCK_SUBTABS.map(tab => (
               <button
                 key={tab.key}
-                onClick={() => setSubTab(tab.key)}
+                onClick={() => handleSubTabChange(tab.key)}
                 className={`pb-3 text-sm font-bold border-b-2 transition-all -mb-0.5 ${
                   subTab === tab.key
                     ? 'border-brand-800 text-brand-900'

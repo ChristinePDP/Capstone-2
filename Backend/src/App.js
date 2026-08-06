@@ -13,12 +13,11 @@ import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 
 const app = express(); 
 
-// I-update ang CORS. Kailangan ng specific na origin kapag gumagamit ng credentials.
 app.use(cors({
-  // Ilagay yung exact IP na gamit mo sa selpon ngayon
-  origin: ['http://localhost:5173', 'http://10.202.120.170:5173'], 
+  origin: true, // Ito ang magic word! Automatic niyang ia-allow kung anong URL man ang gamit mo ngayon.
   credentials: true 
-})); 
+}));
+
 app.use(express.json()); 
 app.use(cookieParser());
 

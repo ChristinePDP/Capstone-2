@@ -123,6 +123,7 @@ export function AppProvider({ children }) {
         recipeId: log.recipe_id,
         productId: log.product_id,
         notes: log.notes || '',
+        
       }));
 
       setIngredients(normalizedIngredients);

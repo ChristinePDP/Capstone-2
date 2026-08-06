@@ -4,7 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, createContext, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom'; // Dinagdag para sa Portal fix[cite: 13]
-import { X, Search, CheckCircle, XCircle } from 'lucide-react';
+import { X, Search, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 
 // ─── Badge ────────────────────────────────────────────────────
 export function Badge({ children, variant = 'default', className = '' }) {
@@ -49,22 +49,11 @@ export function Button({ children, variant = 'primary', size = 'md', className =
 }
 
 // ─── Input Fields ─────────────────────────────────────────────
-// `suffix` (opsyonal): maliit na badge na naka-overlay sa loob mismo,
-// dulo-kanan ng input — ginagamit para sa unit (hal. "ml", "kg") sa
-// halip na itago lang ito sa label. Mas mabilis makilala ng mata kung
-// anong unit ang hinihingi ng field habang nagta-type.
-export function Input({ label, hint, required, error, suffix, className = '', ...props }) {
+export function Input({ label, hint, required, error, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1">
       {label && <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>}
-      <div className="relative">
-        <input className={`w-full px-3 py-2 border border-brand-200 rounded-lg text-sm text-brand-900 font-sans outline-none focus:border-brand-400 bg-white placeholder:text-brand-300 transition-colors ${error ? 'border-red-400' : ''} ${suffix ? 'pr-12' : ''} ${className}`} {...props} />
-        {suffix && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-brand-400 pointer-events-none select-none">
-            {suffix}
-          </span>
-        )}
-      </div>
+      <input className={`px-3 py-2 border border-brand-200 rounded-lg text-sm text-brand-900 font-sans outline-none focus:border-brand-400 bg-white placeholder:text-brand-300 transition-colors ${error ? 'border-red-400' : ''} ${className}`} {...props} />
       {hint && <span className="text-[11px] text-brand-400">{hint}</span>}
       {error && <span className="text-[11px] text-red-500">{error}</span>}
     </div>
@@ -219,6 +208,65 @@ export function LevelBar({ stock, min }) {
   );
 }
 
+// ─── Skeleton Loading (modern placeholder blocks, kapalit ng
+// plain-text na "Naglo-load..." — mas mukhang "loading na totoo" kesa
+// sa static na text lang) ──────────────────────────────────────────
+
+// Isang pulsing gray block — building block ng lahat ng skeleton
+// layouts sa ibaba. `w`/`h` ay Tailwind width/height classes.
+export function Skeleton({ className = '', w = 'w-full', h = 'h-4' }) {
+  return <div className={`${w} ${h} bg-brand-100 rounded-md animate-pulse ${className}`} />;
+}
+
+// Skeleton para sa desktop table view — humuhugis ng ilang "row" na
+// may mga column, tugma sa dami ng columns na ipinasa. `rows` ay
+// bilang ng fake rows (default 4).
+export function TableSkeleton({ columns = 4, rows = 4 }) {
+  return (
+    <div className="hidden md:block">
+      <table className="w-full">
+        <tbody className="divide-y divide-brand-50">
+          {Array.from({ length: rows }).map((_, r) => (
+            <tr key={r}>
+              {Array.from({ length: columns }).map((__, c) => (
+                <td key={c} className="px-3 py-4">
+                  <Skeleton w={c === 0 ? 'w-32' : 'w-16'} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Skeleton para sa mobile card view — humuhugis ng ilang fake card,
+// tugma sa karaniwang "pangalan + stock + status + buttons" layout na
+// ginagamit sa RawTab/CelebrationTab.
+export function CardSkeleton({ count = 3 }) {
+  return (
+    <div className="block md:hidden space-y-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
+          <div className="flex justify-between items-start mb-3">
+            <div className="space-y-2">
+              <Skeleton w="w-32" h="h-3.5" />
+              <Skeleton w="w-20" h="h-3" />
+            </div>
+            <Skeleton w="w-14" h="h-5" className="rounded-full" />
+          </div>
+          <Skeleton w="w-full" h="h-1.5" className="rounded-full mb-3" />
+          <div className="flex justify-end gap-2">
+            <Skeleton w="w-16" h="h-7" />
+            <Skeleton w="w-16" h="h-7" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Toast System ─────────────────────────────────────────────
 const ToastContext = createContext(null);
 
@@ -251,25 +299,15 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ show }}>
       {children}
-      {/* IMPORTANT: dalawang kulay LANG dapat ang toast — green para sa
-          success, red para sa lahat ng iba pa (error/danger/warning).
-          Dati may 3rd na "warning" (amber) na hiwalay pa, at pati ang
-          "success" ay hindi totoong green (brand-800 lang) — nakalilito
-          dahil hindi agad ma-distinguish sa isang tingin kung
-          successful ba o may problema. Kaya dito, i-treat na ang
-          "warning" bilang parte ng red bucket sa halip na hiwalay na
-          kulay — hindi na kailangang galawin ang lahat ng showToast()
-          calls sa ibang components na gumagamit pa rin ng 'warning'. */}
       <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
-        {toasts.map(t => {
-          const isSuccess = t.type === 'success';
-          return (
-            <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${isSuccess ? 'bg-green-600 text-white' : 'bg-red-700 text-white'}`}>
-              {isSuccess ? <CheckCircle size={16} /> : <XCircle size={16} />}
-              {t.message}
-            </div>
-          );
-        })}
+        {toasts.map(t => (
+          <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${t.type === 'success' ? 'bg-green-700 text-white' : t.type === 'warning' ? 'bg-amber-700 text-white' : 'bg-red-700 text-white'}`}>
+            {t.type === 'success' && <CheckCircle size={16} />}
+            {t.type === 'warning' && <AlertCircle size={16} />}
+            {(t.type === 'error' || t.type === 'danger') && <XCircle size={16} />}
+            {t.message}
+          </div>
+        ))}
       </div>
     </ToastContext.Provider>
   );
@@ -283,7 +321,27 @@ export const useToast = () => {
 
 // ─── Confirm Modal (UPDATED WITH PORTAL FIX) ──────────────────
 export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger' }) {
+  const [isProcessing, setIsProcessing] = useState(false);
   if (!isOpen) return null;
+
+  // IMPORTANT: dati, tumatawag ito ng onConfirm() at onClose() nang
+  // magkasunod sa parehong tick, hindi hinihintay kung async ang
+  // onConfirm. Kaya kahit "in progress" pa ang totoong operation (hal.
+  // delete/void na tumatawag ng backend), agad na sumasara ang modal —
+  // parang "successful" na kahit hindi pa talaga tapos. Ngayon,
+  // hinihintay muna ang resolution ng onConfirm (gumagana ito kahit
+  // sync o async ang function, dahil resolve agad ang `await` sa
+  // non-Promise na value) bago mag-close.
+  const handleConfirm = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsProcessing(false);
+    }
+    onClose();
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-brand-900/60 backdrop-blur-sm">
@@ -291,8 +349,8 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
         <h3 className=" text-lg font-bold text-brand-800 mb-2">{title}</h3>
         <p className="text-sm text-brand-500 mb-6 leading-relaxed">{message}</p>
         <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant={variant} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
+          <Button variant="secondary" disabled={isProcessing} onClick={onClose}>Cancel</Button>
+          <Button variant={variant} disabled={isProcessing} onClick={handleConfirm}>{isProcessing ? 'Please wait...' : confirmLabel}</Button>
         </div>
       </div>
     </div>,

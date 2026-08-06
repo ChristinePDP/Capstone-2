@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal } from '../../components/ui';
+import { useToast, Button, Modal, Input, Select, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 
 const PER_PAGE = 10;
@@ -12,7 +12,6 @@ const REASONS = {
   material: ['Popped/Butas', 'Damaged', 'Misprinted', 'Lost', 'Other']
 };
 
-// HELPER: Para maging local at malinis ang format ng petsa
 const formatLocal = (isoString) => {
   if (!isoString) return '—';
   try {
@@ -43,19 +42,11 @@ export default function WasteTab() {
   const [filterType, setFilterType] = useState('All');
   const [filterDate, setFilterDate] = useState('All');
 
-  // Void (cancel/reverse a mistaken log) — hindi totoong delete, may
-  // audit trail pa rin. Bulk-select pattern ito: mag-check ka ng mga
-  // row, tapos isang "Void Selected" button lang sa itaas ng table —
-  // hindi na paulit-ulit na button sa bawat gilid ng row (redundant).
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBulkVoidConfirm, setShowBulkVoidConfirm] = useState(false);
   const [isVoiding, setIsVoiding] = useState(false);
   const isVoidingRef = useRef(false);
 
-  // Progressive disclosure: hindi laging nakikita ang checkboxes.
-  // Kailangan mo munang pindutin ang "Select to Void" bago lumabas ang
-  // mga checkbox — malinaw na "pinto" papasok sa void mode, hindi basta
-  // nakalatag na parang default na bahagi ng table.
   const [selectionMode, setSelectionMode] = useState(false);
 
   const enterSelectionMode = () => setSelectionMode(true);
@@ -64,11 +55,9 @@ export default function WasteTab() {
     setSelectedIds(new Set());
   };
 
-  // Modal forms management
   const [modalOpen, setModalOpen] = useState(false);
   const [logType, setLogType] = useState('ingredient');
 
-  // Form Fields
   const [ingName, setIngName] = useState('');
   const [ingQty, setIngQty] = useState('');
   const [ingUnit, setIngUnit] = useState('kg');
@@ -131,15 +120,8 @@ export default function WasteTab() {
   };
 
   const handleLog = async () => {
-    // Guard: hindi papayagan ang double-submit habang naka-save pa
-    // (nag-iiwas sa dobleng bawas ng stock kapag pinindot ng dalawang beses).
     if (isSaving) return;
 
-    // FIX: required-field validation now runs BEFORE the stock-sufficiency
-    // check (per logType). Previously the stock check ran first and, when
-    // no item was selected, `selectedItemStock` defaulted to 0 — so any
-    // positive qty always tripped "Not enough stock!" instead of the
-    // intended "Please fill in..." missing-field message.
     let finalItem = '';
     let rawQty = 0;
     let computedCost = 0;
@@ -187,17 +169,7 @@ export default function WasteTab() {
       return;
     }
 
-    // Overflow / typo guard — kahit sapat sa stock, i-double check pa rin
-    // kung baka may extra zero na naidagdag nang hindi sinasadya.
     const qtyOverflowError = getQtyError(rawQty, { max: MAX_QTY, label: 'Quantity' });
-    if (qtyOverflowError) {
-      showToast(qtyOverflowError, 'error');
-      return;
-    }
-
-    // Overflow / typo guard — kahit sapat sa stock, i-double check pa rin
-    // kung baka may extra zero na naidagdag nang hindi sinasadya.
-    const qtyOverflowError = getQtyError(rawQty, { max: MAX_QTY, label: 'Dami' });
     if (qtyOverflowError) {
       showToast(qtyOverflowError, 'error');
       return;
@@ -259,7 +231,7 @@ export default function WasteTab() {
 
   const handleBulkVoid = async () => {
     if (isVoidingRef.current || selectedLogs.length === 0) return;
-    isVoidingRef.current = true; // instant, hindi naka-batch — protection vs. premature modal close
+    isVoidingRef.current = true;
     setIsVoiding(true);
 
     const results = await Promise.allSettled(
@@ -285,31 +257,31 @@ export default function WasteTab() {
   return (
     <div className="space-y-4">
       <Card>
-        {/* HEADER SECTION - Same structure as RecipeTab */}
+        {/* HEADER SECTION */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800 flex items-center gap-2">
-              <AlertTriangle size={16} className="text-red-500" />
+            <h3 className="font-bold text-brand-800 flex items-center gap-2 text-base">
+              <AlertTriangle size={18} className="text-amber-600 shrink-0" />
               Waste Log
             </h3>
-            <p className="text-xs text-brand-400 mt-0.5">Log spoiled, expired, or unsold items to deduct them from current stock.</p>
+            <p className="text-xs text-brand-400 mt-0.5">Log spoiled, expired, or unsold items to deduct from stock.</p>
           </div>
 
-
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {/* ACTION BUTTONS (Only Void is RED) */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <Button
-              variant="danger"
+              variant="secondary"
               size="sm"
               onClick={() => handleOpenLogModal('ingredient')}
-              className="w-full sm:w-auto justify-center text-xs"
+              className="flex-1 sm:flex-none justify-center text-xs"
             >
               <Plus size={13} className="mr-1" /> Spoiled Ingredient
             </Button>
             <Button
-              variant="dark"
+              variant="secondary"
               size="sm"
               onClick={() => handleOpenLogModal('product')}
-              className="w-full sm:w-auto justify-center text-xs"
+              className="flex-1 sm:flex-none justify-center text-xs"
             >
               <Plus size={13} className="mr-1" /> Unsold Product
             </Button>
@@ -317,16 +289,16 @@ export default function WasteTab() {
               variant="secondary"
               size="sm"
               onClick={() => handleOpenLogModal('material')}
-              className="w-full sm:w-auto justify-center text-xs"
+              className="flex-1 sm:flex-none justify-center text-xs"
             >
               <Plus size={13} className="mr-1" /> Damaged Material
             </Button>
             {!selectionMode && (
               <Button
-                variant="ghost"
+                variant="danger"
                 size="sm"
                 onClick={enterSelectionMode}
-                className="w-full sm:w-auto justify-center text-xs border border-brand-200"
+                className="w-full sm:w-auto justify-center text-xs"
               >
                 <ListChecks size={13} className="mr-1" /> Select to Void
               </Button>
@@ -334,57 +306,61 @@ export default function WasteTab() {
           </div>
         </div>
 
-        {/* SEARCH & FILTER SECTION */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/40 min-w-0">
-          <div className="relative w-full sm:max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
-            <input 
-              type="text" 
-              placeholder="Search waste log..." 
-              value={search} 
-              onChange={e => { setSearch(e.target.value); setPage(1); }} 
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white" 
-            />
+        {/* SEARCH, FILTER & RESPONSIVE ESTIMATED LOSS */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/30">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 min-w-0">
+            <div className="relative w-full sm:w-64">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input 
+                type="text" 
+                placeholder="Search waste log..." 
+                value={search} 
+                onChange={e => { setSearch(e.target.value); setPage(1); }} 
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-brand-200 rounded-lg outline-none focus:border-brand-500 bg-white" 
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700">
+                <Filter size={13} className="text-gray-400 shrink-0" />
+                <select className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1); }}>
+                  <option value="All">All Categories</option>
+                  <option value="ingredient">Raw Ingredient</option>
+                  <option value="product">Finished Product</option>
+                  <option value="material">Celebration Material</option>
+                </select>
+              </div>
+
+              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700">
+                <select className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(1); }}>
+                  <option value="All">All Time</option>
+                  <option value="Today">Today</option>
+                  <option value="This Week">This Week</option>
+                  <option value="This Month">This Month</option>
+                </select>
+              </div>
+            </div>
           </div>
-          
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Filter size={14} className="text-brand-400 shrink-0" />
-            <select className="flex-1 sm:flex-none text-xs border border-brand-200 rounded-lg px-2 py-1.5 bg-white font-medium text-brand-700 outline-none focus:border-brand-400" value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1); }}>
-              <option value="All">All Categories</option>
-              <option value="ingredient">Raw Ingredient</option>
-              <option value="product">Finished Product</option>
-              <option value="material">Celebration Material</option>
-            </select>
-            <select className="flex-1 sm:flex-none text-xs border border-brand-200 rounded-lg px-2 py-1.5 bg-white font-medium text-brand-700 outline-none focus:border-brand-400" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(1); }}>
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
-              <option value="This Month">This Month</option>
-            </select>
-          </div>
-          
-          {/* TOTAL LOSS STAT */}
-           <div className="sm:ml-auto flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 bg-white px-3 py-1.5 rounded-lg border border-brand-100 shadow-sm w-full sm:w-auto min-w-0">
-             <span className="text-[11px] font-bold text-brand-400 uppercase tracking-wider leading-tight">Estimated Loss:</span>
-             <span className="text-[15px] font-black text-red-600 whitespace-nowrap leading-tight sm:ml-auto">₱{totalCostFiltered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+
+          {/* ESTIMATED LOSS STAT - RESPONSIVE MOBILE DISPLAY */}
+          <div className="flex items-center justify-between md:justify-end gap-2 bg-red-50/80 border border-red-200/80 px-3.5 py-2 rounded-lg w-full md:w-auto shrink-0">
+            <span className="text-xs font-bold text-red-900/80 uppercase tracking-wider">Estimated Loss:</span>
+            <span className="text-base font-black text-red-600 whitespace-nowrap">₱{totalCostFiltered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
         </div>
 
-        {/* SELECTION MODE BANNER — lumalabas lang kapag pumasok sa void
-            mode via "Select to Void" button. Malinaw na nagsasabi kung
-            anong nangyayari, at may "Cancel" para makalabas anumang oras
-            kahit wala pang na-che-check. */}
+        {/* SELECTION MODE BANNER */}
         {selectionMode && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 border-b border-amber-200">
-            <span className="text-xs font-bold text-amber-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-red-50 border-b border-red-200 text-xs">
+            <span className="font-bold text-red-900">
               {selectedIds.size > 0
                 ? `${selectedIds.size} record${selectedIds.size > 1 ? 's' : ''} selected — tap a row's checkbox to void`
-                : 'Selecting records to void — tap the checkboxes on the rows you want to void'}
+                : 'Select records to void by clicking their checkboxes'}
             </span>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex items-center gap-2 self-end sm:self-auto">
               {selectedIds.size > 0 && (
                 <Button size="sm" variant="danger" onClick={() => setShowBulkVoidConfirm(true)}>
-                  <RotateCcw size={13} className="mr-1" /> Void Selected
+                  <RotateCcw size={13} className="mr-1" /> Void Selected ({selectedIds.size})
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={exitSelectionMode}>
@@ -394,59 +370,70 @@ export default function WasteTab() {
           </div>
         )}
 
-        {/* ─── RESPONSIVE SPLIT VIEWS ─── */}
-        <div className="px-4 pb-4 mt-4">
+        {/* CONTENT AREA */}
+        <div className="p-4">
           
-          {/* 📱 MOBILE CARD LAYOUT */}
-          <div className="block md:hidden space-y-4">
-            {pagedLogs.map(log => (
-              <div key={log.id} className={`w-full min-w-0 p-4 bg-white border rounded-xl shadow-sm flex flex-col gap-3 ${selectionMode && selectedIds.has(log.id) ? 'border-amber-400 ring-1 ring-amber-300' : 'border-brand-100'}`}>
-                <div className="flex items-start gap-3">
-                  {selectionMode && (
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(log.id)}
-                      onChange={() => toggleSelect(log.id)}
-                      className="mt-1 shrink-0"
-                    />
-                  )}
-                  <div className="flex-1 min-w-0 flex flex-col gap-3">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-2 min-w-0">
-                      <div className="min-w-0 flex-1 w-full">
-                        <h4 className="w-full font-bold text-brand-900 text-sm leading-tight break-all">{log.item}</h4>
-                        <p className="text-[11px] text-brand-400 mt-1">{formatLocal(log.dt)}</p>
-                      </div>
-                      <Badge variant={log.type === 'product' ? 'warning' : 'default'} className="shrink-0 self-start text-[10px]">
-                        {log.type}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs bg-brand-50 p-2.5 rounded-lg border border-brand-100/50 min-w-0">
-                      <div>
-                        <span className="text-brand-400 block mb-0.5 font-medium">Qty:</span>
-                        <span className="font-bold text-brand-700">{log.qty}</span>
-                      </div>
-                      <div>
-                        <span className="text-brand-400 block mb-0.5 font-medium">Loss:</span>
-                        <span className="font-bold text-red-600">₱{log.cost?.toFixed(2)}</span>
+          {/* MOBILE CARDS WITH RED HIGHLIGHT ON SELECTION */}
+          <div className="block md:hidden space-y-3">
+            {pagedLogs.map(log => {
+              const isSelected = selectionMode && selectedIds.has(log.id);
+              return (
+                <div 
+                  key={log.id} 
+                  className={`p-3.5 rounded-xl border transition-all duration-150 space-y-2 min-w-0 ${
+                    isSelected 
+                      ? 'border-red-500 bg-red-50/80 ring-2 ring-red-400 shadow-xs' 
+                      : 'border-brand-100 bg-white shadow-2xs'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      {selectionMode && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(log.id)}
+                          onChange={() => toggleSelect(log.id)}
+                          className="mt-0.5 h-4 w-4 accent-red-600 shrink-0 cursor-pointer"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-brand-900 text-sm truncate">{log.item}</h4>
+                        <p className="text-[11px] text-gray-400">{formatLocal(log.dt)}</p>
                       </div>
                     </div>
+                    <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="capitalize shrink-0 text-[10px]">
+                      {log.type}
+                    </Badge>
+                  </div>
 
-                    <div className="min-w-0">
-                      <span className="inline-block max-w-full break-words text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded font-bold mb-1 border border-red-100">
-                        {log.reason}
-                      </span>
-                      <p className="text-[11px] text-brand-500 line-clamp-2 leading-snug break-words">
-                        <span className="font-semibold text-brand-600">Notes:</span> {log.notes || '—'}
-                      </p>
+                  <div className={`grid grid-cols-2 gap-2 text-xs p-2 rounded-lg border ${isSelected ? 'bg-white/80 border-red-200' : 'bg-brand-50/50 border-brand-100/50'}`}>
+                    <div>
+                      <span className="text-gray-400 block text-[10px] font-medium">Quantity</span>
+                      <span className="font-bold text-gray-800">{log.qty}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-400 block text-[10px] font-medium">Loss</span>
+                      <span className="font-bold text-red-600">₱{log.cost?.toFixed(2)}</span>
                     </div>
                   </div>
+
+                  <div className="text-xs space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-gray-400 text-[11px]">Reason:</span>
+                      <span className="font-semibold text-red-700 bg-red-100/70 px-1.5 py-0.5 rounded text-[11px]">{log.reason}</span>
+                    </div>
+                    {log.notes && (
+                      <p className="text-gray-600 text-[11px] truncate">
+                        <span className="text-gray-400">Notes:</span> {log.notes}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* 💻 DESKTOP TABLE LAYOUT */}
+          {/* DESKTOP TABLE WITH RED HIGHLIGHT ON SELECTION */}
           <div className="hidden md:block overflow-x-auto">
             <Table columns={[
               ...(selectionMode ? [{
@@ -455,7 +442,7 @@ export default function WasteTab() {
                     type="checkbox"
                     checked={allPagedSelected}
                     onChange={toggleSelectAllOnPage}
-                    title="Select all on this page"
+                    className="accent-red-600 cursor-pointer"
                   />
                 )
               }] : []),
@@ -467,68 +454,77 @@ export default function WasteTab() {
               { label: 'Reason' },
               { label: 'Notes' },
             ]}>
-              {pagedLogs.map(log => (
-                <Tr key={log.id} className={selectionMode && selectedIds.has(log.id) ? 'bg-amber-50' : ''}>
-                  {selectionMode && (
+              {pagedLogs.map(log => {
+                const isSelected = selectionMode && selectedIds.has(log.id);
+                return (
+                  <Tr key={log.id} className={isSelected ? 'bg-red-100/70 font-medium' : ''}>
+                    {selectionMode && (
+                      <Td>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(log.id)}
+                          onChange={() => toggleSelect(log.id)}
+                          className="accent-red-600 cursor-pointer"
+                        />
+                      </Td>
+                    )}
+                    <Td className="text-xs text-gray-500 whitespace-nowrap">{formatLocal(log.dt)}</Td>
                     <Td>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(log.id)}
-                        onChange={() => toggleSelect(log.id)}
-                      />
+                      <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="capitalize">
+                        {log.type}
+                      </Badge>
                     </Td>
-                  )}
-                  <Td className="text-xs text-brand-500 font-medium whitespace-nowrap">{formatLocal(log.dt)}</Td>
-                  <Td>
-                    <Badge variant={log.type === 'product' ? 'warning' : 'default'}>
-                      {log.type}
-                    </Badge>
-                  </Td>
-                  <Td className="font-bold text-brand-900">{log.item}</Td>
-                  <Td className="font-medium text-brand-700">{log.qty}</Td>
-                  <Td className="font-semibold text-red-600">₱{log.cost?.toFixed(2)}</Td>
-                  <Td><span className="inline-block text-[11px] uppercase tracking-wider bg-red-50 border border-red-100 text-red-700 px-2 py-0.5 rounded font-bold">{log.reason}</span></Td>
-                  <Td className="text-xs text-brand-500 max-w-xs truncate" title={log.notes}>{log.notes || '—'}</Td>
-                </Tr>
-              ))}
+                    <Td className="font-bold text-brand-900">{log.item}</Td>
+                    <Td>{log.qty}</Td>
+                    <Td className="font-semibold text-red-600">₱{log.cost?.toFixed(2)}</Td>
+                    <Td>
+                      <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded">
+                        {log.reason}
+                      </span>
+                    </Td>
+                    <Td className="text-xs text-gray-500 max-w-xs truncate">{log.notes || '—'}</Td>
+                  </Tr>
+                );
+              })}
             </Table>
           </div>
 
           {!filteredLogs.length && !loading && (
-            <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl mt-2">
+            <div className="text-center text-gray-400 py-10 text-sm">
               No waste records found.
             </div>
           )}
 
           {!!loading && (
-            <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl mt-2 animate-pulse">
-              Naglo-load ng waste log...
-            </div>
+            <>
+              <CardSkeleton count={3} />
+              <TableSkeleton columns={5} rows={5} />
+            </>
           )}
         </div>
 
-        {/* PAGINATION CONTROLS */}
+        {/* PAGINATION */}
         {filteredLogs.length > 0 && (
-          <div className="p-3 border-t border-brand-100 bg-white">
+          <div className="p-3 border-t border-brand-100">
             <Pagination page={page} count={filteredLogs.length} perPage={PER_PAGE} total="logs" onChange={setPage} />
           </div>
         )}
       </Card>
 
-      {/* Creation Modal Form */}
+      {/* MODAL */}
       <Modal 
         isOpen={modalOpen} 
         onClose={() => !isSaving && setModalOpen(false)} 
-        title={`Log ${logType === 'ingredient' ? 'Spoiled / Expired Ingredient' : logType === 'product' ? 'Unsold Product' : 'Damaged Material'}`}
+        title={`Log ${logType === 'ingredient' ? 'Spoiled Ingredient' : logType === 'product' ? 'Unsold Product' : 'Damaged Material'}`}
         footer={
-          <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="danger" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Saving...' : 'Confirm Log'}</Button>
+          <div className="flex gap-2 justify-end w-full sm:w-auto">
+            <Button variant="secondary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button className=" bg-amber-900 flex-1 sm:flex-none" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Saving...' : 'Confirm Log'}</Button>
           </div>
         }
       >
         {logType === 'ingredient' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <Select label="Select Ingredient" required value={ingName} onChange={e => {
               const matched = ingredients.find(i => i.name === e.target.value);
               setIngName(e.target.value);
@@ -539,18 +535,18 @@ export default function WasteTab() {
                 <option key={i.id} value={i.name}>{i.name} (In stock: {i.stock} {i.unit})</option>
               ))}
             </Select>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input label="Quantity Lost" required type="text" inputMode="decimal" value={ingQty} onChange={e => setIngQty(sanitizeNumericText(e.target.value))} min="0" />
               <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
                 {REASONS.ingredient.map(r => <option key={r}>{r}</option>)}
               </Select>
             </div>
-            <Textarea label="Additional Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Expired shelf life, may amag na..." rows={2} />
+            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
           </div>
         )}
 
         {logType === 'material' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <Select label="Select Material" required value={matName} onChange={e => {
               const matched = materials.find(m => m.name === e.target.value);
               setMatName(e.target.value);
@@ -561,18 +557,18 @@ export default function WasteTab() {
                 <option key={m.id} value={m.name}>{m.name} (In stock: {m.stock} {m.unit})</option>
               ))}
             </Select>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input label="Quantity Lost" required type="text" inputMode="decimal" value={matQty} onChange={e => setMatQty(sanitizeNumericText(e.target.value))} min="0" />
               <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
                 {REASONS.material.map(r => <option key={r}>{r}</option>)}
               </Select>
             </div>
-            <Textarea label="Additional Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Napunit while preparing..." rows={2} />
+            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
           </div>
         )}
 
         {logType === 'product' && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <Select label="Select Product" required value={productName} onChange={e => {
               setProductName(e.target.value); setProductQty(''); setProductUnit('pcs');
             }}>
@@ -581,13 +577,13 @@ export default function WasteTab() {
                 <option key={p.id} value={p.name}>{p.name} (Current Stock: {p.stock} pcs)</option>
               ))}
             </Select>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Input label="Quantity" required type="text" inputMode="numeric" value={productQty} onChange={e => setProductQty(sanitizeNumericText(e.target.value))} placeholder="0" />
               <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
                 {REASONS.product.map(r => <option key={r}>{r}</option>)}
               </Select>
             </div>
-            <Textarea label="Additional Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. 5 ensaymada left unsold..." rows={2} />
+            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
           </div>
         )}
       </Modal>
@@ -599,13 +595,12 @@ export default function WasteTab() {
         title="Void Waste Records"
         message={
           selectedLogs.length === 1
-            ? `Void "${selectedLogs[0]?.item}" (${selectedLogs[0]?.qty})? Stock will be restored — this doesn't permanently delete the record, it stays for the audit trail.`
-            : `Void ${selectedLogs.length} selected records? Stock will be restored for each — walang totoong delete, mananatili sila para sa audit trail.`
+            ? `Void "${selectedLogs[0]?.item}" (${selectedLogs[0]?.qty})? Stock will be restored.`
+            : `Void ${selectedLogs.length} selected records? Stock will be restored for each.`
         }
         confirmLabel={isVoiding ? 'Voiding...' : 'Void'}
         variant="danger"
       />
-
     </div>
   );
 }
