@@ -1,5 +1,8 @@
 // backend/src/controllers/onlineOrdering.controller.js
-import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder, completeOrderAndDeductStock, createProduct, updateProduct, getStorageBaseUrl } from '../services/onlineOrdering.services.js';
+import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder, 
+  completeOrderAndDeductStock, createProduct, 
+  getStorageBaseUrl, 
+  updateProduct } from '../services/onlineOrdering.services.js';
 import { supabase } from '../config/supabase.js'; 
 
 export const getPublicConfig = async (req, res) => {
@@ -191,3 +194,4 @@ export const markOrderCompleted = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+

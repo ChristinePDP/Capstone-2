@@ -13,6 +13,7 @@ const BLANK_PRODUCT = {
   image: '',
   dailyLimit: 0,
   allowFileUpload: false, 
+  eventTags: [],
 };
 
 const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select'];
@@ -78,10 +79,9 @@ function Textarea({ label, className = '', ...props }) {
   );
 }
 
-// COMPONENT 1: Product Details (Image, Name, Category, Order Type, Inclusion/Description)
-// Own boxed card. Stretches to match the height of its sibling via a parent grid with items-stretch.
+// COMPONENT 1: Product Details (Image, Name, Category, Order Type, Inclusion/Description, Occasions)
 const ProductDetailsForm = forwardRef(function ProductDetailsForm(
-  { form, onChange, previewUrl, fileInputRef, onFileSelect, className = '' },
+  { form, onChange, previewUrl, fileInputRef, onFileSelect, availableTags = [], className = '' },
   ref
 ) {
   return (
@@ -126,13 +126,52 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
 
       {/* 4. Inclusion / Description */}
       <Textarea label="Inclusion / Description" value={form.inclusion} onChange={e => onChange('inclusion', e.target.value)} placeholder="e.g. 7x5 Themed Cake w/ Toppers" rows={2} />
+
+      {/* 5. Occasions / Event Tags */}
+      <div className="pt-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 block">Occasions / Events (Optional)</p>
+        
+        {availableTags.length === 0 ? (
+          <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
+            No active events in the Occasion Manager.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {availableTags.map(tag => {
+              const isSelected = form.eventTags?.includes(tag);
+              const displayTag = tag.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+              
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => {
+                    const newTags = isSelected 
+                      ? form.eventTags.filter(t => t !== tag)
+                      : [...(form.eventTags || []), tag];
+                    onChange('eventTags', newTags);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all border ${
+                    isSelected 
+                      ? 'bg-[#3B1F0A] text-white border-[#3B1F0A] shadow-md' 
+                      : 'bg-[#FCFAF9] text-[#8A7264] border-[#DED4CC] hover:bg-[#F5EFEB]'
+                  }`}
+                >
+                  {displayTag}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[10px] text-[#8A7264] mt-2 italic font-light">
+          Leave blank for everyday products (e.g. pandesal, regular bread) or let the AI automatically assign seasonal tags based on the product's name and description.
+        </p>
+      </div>
     </div>
   );
 });
 
-// COMPONENT 2: Multiple Price Options (fixed price OR variable price groups/matrix)
-// Own boxed card. Height is fixed by the parent to match Component 1's rendered height;
-// if the content is taller than that, this card scrolls internally instead of growing.
+// COMPONENT 2: Multiple Price Options
 function MultiplePriceOptions({
   pricingMode,
   onPricingModeChange,
@@ -166,14 +205,11 @@ function MultiplePriceOptions({
         </label>
       </div>
 
-      {/* Body: top-aligned. In variable mode, Price Groups stays fixed/sticky and only the
-          Price Matrix section below it scrolls internally (scrollbar-thin) when it overflows. */}
       <div className="flex-1 min-h-0 flex flex-col">
       {pricingMode === 'fixed' ? (
         <Input label="Price" required type="number" value={price} onChange={e => onPriceChange(e.target.value)} placeholder="0" />
       ) : (
         <div className="flex flex-col flex-1 min-h-0 gap-4">
-          {/* Price Groups — fixed, does not scroll */}
           <div className="shrink-0">
             <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">Price Groups (e.g. Size, Theme)</p>
             <div className="flex flex-col gap-2">
@@ -190,7 +226,6 @@ function MultiplePriceOptions({
             </button>
           </div>
 
-          {/* Price Matrix — the only part that scrolls */}
           {generatedCombos.length > 0 && (
             <div className="border-t border-[#EAE4E0] pt-4 flex flex-col flex-1 min-h-0">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 shrink-0">Price Matrix</p>
@@ -267,13 +302,32 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   );
   const [priceMatrix, setPriceMatrix] = useState(product?.price_matrix || []);
 
+  const [availableTags, setAvailableTags] = useState([]); // Wala nang general fallback dito
+
   const fileInputRef = useRef(null);
   const isEditing = !!product?.id;
 
-  // Measure Component 1's rendered height so Component 2 can be fixed to match it.
-  // If Component 2's own content is taller than this, it scrolls internally instead of growing.
   const detailsCardRef = useRef(null);
   const [detailsHeight, setDetailsHeight] = useState(null);
+
+  // FETCH TAGS MULA SA DATABASE KUNG BUKAS ANG MODAL
+  useEffect(() => {
+    const fetchTags = async () => {
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/occasions?active=true`);
+        const data = await response.json();
+        if (data.success && data.data) {
+          const fetchedTags = data.data.map(occ => occ.event_tag).filter(Boolean);
+          setAvailableTags([...new Set(fetchedTags)]);
+        }
+      } catch (error) {
+        console.error("Failed to fetch occasion tags:", error);
+      }
+    };
+    if (isOpen) {
+      fetchTags();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const el = detailsCardRef.current;
@@ -281,7 +335,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     const measure = () => setDetailsHeight(el.getBoundingClientRect().height);
     const observer = new ResizeObserver(measure);
     observer.observe(el);
-    measure(); // set initial height immediately, don't wait for the first resize event
+    measure();
     return () => observer.disconnect();
   }, []);
 
@@ -293,12 +347,10 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     };
   }, [previewUrl]);
 
-  // Order Slip Field Handlers
   const addField = () => setFields(prev => [...prev, { id: crypto.randomUUID(), label: '', type: 'Text', options: '' }]);
   const updateField = (id, key, value) => setFields(prev => prev.map(f => (f.id === id ? { ...f, [key]: value } : f)));
   const removeField = (id) => setFields(prev => prev.filter(f => f.id !== id));
 
-  // Date Exception Handlers
   const addException = () => {
     if (!exceptionDate) return;
     setExceptions(prev => [...prev.filter(e => e.date !== exceptionDate), { date: exceptionDate, slots: Number(exceptionSlots) }]);
@@ -306,7 +358,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   };
   const removeException = (date) => setExceptions(prev => prev.filter(e => e.date !== date));
 
-  // Variable Pricing Handlers
   const addPriceGroup = () => setPriceGroups(prev => [...prev, { id: crypto.randomUUID(), name: '', options: '' }]);
   const updatePriceGroup = (id, key, value) => setPriceGroups(prev => prev.map(g => (g.id === id ? { ...g, [key]: value } : g)));
   const removePriceGroup = (id) => setPriceGroups(prev => prev.filter(g => g.id !== id));
@@ -415,7 +466,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             order_slip_fields: cleanFields, 
             pricing_mode: pricingMode,
             price_groups: finalPriceGroups,
-            price_matrix: finalPriceMatrix
+            price_matrix: finalPriceMatrix,
+            event_tags: form.eventTags || [] 
         };
 
         const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/add`, {
@@ -459,12 +511,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     >
       <div className="w-full flex flex-col gap-6 lg:gap-8">
         
-        {/* TOP SECTION: Component 1 (Left) & Component 2 (Right) — each is its own boxed card.
-            Component 1 sizes naturally; Component 2 is fixed to that same height and scrolls
-            internally (scrollbar-thin) if its own content is taller. */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-start">
-
-          {/* COMPONENT 1: Product Details (image, name, category, order type, inclusion/description) */}
           <ProductDetailsForm
             ref={detailsCardRef}
             form={form}
@@ -472,9 +519,9 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             previewUrl={previewUrl}
             fileInputRef={fileInputRef}
             onFileSelect={handleFileSelect}
+            availableTags={availableTags} 
           />
 
-          {/* COMPONENT 2: Multiple Price Options */}
           <MultiplePriceOptions
             style={detailsHeight ? { height: detailsHeight, maxHeight: detailsHeight } : undefined}
             pricingMode={pricingMode}
@@ -491,7 +538,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           />
         </div>
 
-        {/* ORDER SLIP FIELDS (Customization) */}
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
             <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A]">Order Slip Fields</p>
@@ -522,7 +568,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </button>
         </div>
 
-        {/* PRE-ORDER LIMITS */}
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
           <div className="flex items-center gap-3 mb-2">
             <input type="checkbox" id="limitToggle" className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer" defaultChecked={form.dailyLimit > 0} />
