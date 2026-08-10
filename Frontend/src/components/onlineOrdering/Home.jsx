@@ -1,14 +1,13 @@
-import { useRef, useState, useEffect } from 'react';
+// src/components/onlineOrdering/Home.jsx
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { 
+  ChevronLeft, ChevronRight, Sparkles, ArrowRight, Star
+} from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
+import EventAdsModal from '../onlineOrdering/eventAdsModal';
 
-// Ang bucket base URL ay hindi na build-time constant mula sa frontend .env.
-// Kinukuha na ito sa runtime mula sa backend (GET /online-ordering/config),
-// na siyang nagde-derive nito diretso sa naka-configure na Supabase client.
-// Dito, mga filename na lang ang nakalista; sa component pa lang sila
-// pinagsasama sa fetched storageUrl para bumuo ng buong image URL.
 const HERO_FILE = 'heroimg.png';
 const CELEBRATION_FILE = 'images.png';
 const PASTRIES_FILE = 'imagee.png';
@@ -60,7 +59,6 @@ function CreationsCarousel({ items, className = '' }) {
     <div className={`relative w-full ${className}`}>
       <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
 
-      {/* Smaller navigation buttons for mobile */}
       <button
         onClick={() => scrollByAmount(-1)}
         disabled={atStart}
@@ -70,7 +68,6 @@ function CreationsCarousel({ items, className = '' }) {
         <ChevronLeft size={16} className="sm:w-[18px] sm:h-[18px]" />
       </button>
 
-      {/* Reduced height and padding for mobile */}
       <div
         ref={trackRef}
         onScroll={updateEdges}
@@ -104,10 +101,163 @@ function CreationsCarousel({ items, className = '' }) {
   );
 }
 
+// --- Ticket-style carousel for the AI DSS picks, with visible left/right arrow controls ---
+function TicketCarousel({ products, theme, navigate }) {
+  const trackRef = useRef(null);
+  const [atStart, setAtStart] = useState(true);
+  const [atEnd, setAtEnd] = useState(false);
+
+  const updateEdges = () => {
+    const el = trackRef.current;
+    if (!el) return;
+    setAtStart(el.scrollLeft <= 4);
+    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    updateEdges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
+  const scrollByAmount = (dir) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: 'smooth' });
+  };
+
+  return (
+    <div className="relative w-full">
+      {/* Desktop / tablet arrow controls */}
+      <button
+        onClick={() => scrollByAmount(-1)}
+        disabled={atStart}
+        aria-label="Previous picks"
+        className={`hidden sm:flex absolute -left-3 lg:-left-5 top-[38%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full ${theme.badgeBg} text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300`}
+      >
+        <ChevronLeft size={20} />
+      </button>
+
+      <div
+        ref={trackRef}
+        onScroll={updateEdges}
+        className="no-scrollbar flex gap-5 sm:gap-6 overflow-x-auto overscroll-x-contain snap-x snap-proximity scroll-smooth pb-8 pt-6 px-1"
+      >
+        {products.map((p, idx) => {
+          const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
+          const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
+
+          const tilt = idx % 2 === 0 ? '-rotate-1' : 'rotate-1';
+
+          return (
+            <div
+              key={p.id}
+              className="snap-start shrink-0 w-[180px] sm:w-[220px] [contain:layout]"
+            >
+              <div
+                onClick={() => navigate('/onlineOrdering/menu')}
+                className={`bg-white rounded-2xl flex flex-col group cursor-pointer relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] ${tilt} transform-gpu hover:rotate-0 hover:-translate-y-2 hover:shadow-xl transition-all duration-300 ease-out`}
+              >
+                {/* Corner sticker seal */}
+                <div className={`absolute -top-3 -right-3 z-20 w-9 h-9 rounded-full ${theme.badgeBg} border-2 border-white shadow-md flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform duration-300`}>
+                  <span className="text-white scale-110">{theme.smallIcon}</span>
+                </div>
+
+                {/* Top Image Section */}
+                <div className="p-2.5 pb-0">
+                  <div className="aspect-[4/3] w-full rounded-[14px] overflow-hidden relative bg-[#F5EFEB]">
+                    <img
+                      src={p.image_url}
+                      alt={p.name}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-in-out"
+                    />
+                    {/* Dynamic Tag */}
+                    <div className={`absolute top-2 left-2 ${theme.badgeBg} text-white px-2.5 py-1 rounded-md shadow-md flex items-center gap-1.5`}>
+                      {theme.smallIcon}
+                      <span className="text-[9px] font-bold uppercase tracking-widest">{theme.badge}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ticket stub tear line */}
+                <div className="relative w-full h-0 my-3">
+                  <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_-2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+                  <div className="absolute left-3 right-3 top-0 border-t-2 border-dotted border-[#DED4CC]"></div>
+                  <div className="absolute -right-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+                </div>
+
+                {/* Bottom Details Section */}
+                <div className="px-5 pb-5 pt-2 flex flex-col items-center text-center flex-1">
+                  <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#8A7264] mb-2 w-full truncate">
+                    {p.category}
+                  </span>
+                  <h3 className="font-bold text-sm sm:text-base text-[#3B1F0A] leading-snug line-clamp-2 mb-3 w-full group-hover:text-black transition-colors">
+                    {p.name}
+                  </h3>
+                  <div className="mt-auto flex flex-col items-center w-full">
+                    <p className="text-[10px] text-[#8A7264] font-semibold uppercase tracking-wider mb-1">
+                      {isVariable ? 'Starts at' : 'Price'}
+                    </p>
+                    <p className="text-base sm:text-lg font-black px-3 py-1 rounded-full bg-[#F5EFEB] text-[#3B1F0A]">
+                      ₱{Number(minPrice).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={() => scrollByAmount(1)}
+        disabled={atEnd}
+        aria-label="Next picks"
+        className={`hidden sm:flex absolute -right-3 lg:-right-5 top-[38%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full ${theme.badgeBg} text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300`}
+      >
+        <ChevronRight size={20} />
+      </button>
+
+      {/* Mobile arrow controls */}
+      <div className="flex sm:hidden justify-center items-center gap-4 -mt-2">
+        <button
+          onClick={() => scrollByAmount(-1)}
+          disabled={atStart}
+          aria-label="Previous picks"
+          className={`w-9 h-9 rounded-full ${theme.badgeBg} text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all`}
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span className={`font-mono text-[9px] uppercase tracking-[0.2em] ${theme.textColor}`}>Swipe for more</span>
+        <button
+          onClick={() => scrollByAmount(1)}
+          disabled={atEnd}
+          aria-label="Next picks"
+          className={`w-9 h-9 rounded-full ${theme.badgeBg} text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all`}
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [storageUrl, setStorageUrl] = useState(null);
   const [configError, setConfigError] = useState(false);
+  
+  // New unified state for the cached JSON payload
+  const [adData, setAdData] = useState(null);
+
+  const bgParticles = useMemo(
+    () =>
+      [...Array(6)].map(() => ({
+        left: Math.random() * 100,
+        delay: Math.random() * 10,
+        duration: 12 + Math.random() * 10,
+      })),
+    []
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -127,11 +277,25 @@ export default function Home() {
         if (!cancelled) setConfigError(true);
       });
 
+    // Fetch AI Ads directly from the cache endpoint
+    // NOTE: nag-match ito ngayon sa parehong base path na ginagamit ng
+    // eventAdsModal.jsx (/online-ordering/products/...). Kung sa app.js mo
+    // ay ibang mount path ang productManagement.routes.js (hal.
+    // '/product-management' sa halip na dito), i-update ang parehong
+    // fetch na ito.
+    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/homepage-ads`)
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled) return;
+        if (data.success && data.data) {
+          setAdData(data.data);
+        }
+      })
+      .catch(err => console.error('Failed to load homepage ads:', err));
+
     return () => { cancelled = true; };
   }, []);
 
-  // Wala pang natatanggap na storageUrl (loading pa, or nag-fail) -> huwag
-  // munang i-render ang mga larawan na may sirang src.
   const imgUrl = (file) => (storageUrl ? `${storageUrl}/${file}` : null);
 
   const heroImg = imgUrl(HERO_FILE);
@@ -146,11 +310,92 @@ export default function Home() {
     );
   }
 
+  const floatStyle = `
+    @keyframes floatUp {
+      0% { transform: translateY(100vh) rotate(0deg) scale(0.8); opacity: 0; }
+      20% { opacity: 0.6; }
+      80% { opacity: 0.6; }
+      100% { transform: translateY(-20vh) rotate(360deg) scale(1.2); opacity: 0; }
+    }
+    .animate-float-bg {
+      animation: floatUp 15s linear infinite;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  `;
+
+  // Merge JSON AI theme with necessary frontend components like standard icons
+  const activeTheme = adData ? {
+    ...adData.theme,
+    icon: <Sparkles size={18} className="opacity-80" />,
+    smallIcon: <Star size={8} className="fill-white" />,
+    particle: <Sparkles size={24} className="opacity-50" />
+  } : null;
+
   return (
     <div className="min-h-screen bg-[#FCFAF9] text-[#5A453C] font-sans">
+      <style>{floatStyle}</style>
+      <EventAdsModal />
       <Header page="home" />
       <main>
-        {/* Hero — Tinanggal ang negative translation sa mobile at nilagyan ng py-6 */}
+        
+        {/* HIGH-END DYNAMIC AI DSS SECTION */}
+        {activeTheme && adData.products && adData.products.length > 0 && (
+          <section className={`w-full ${activeTheme.bgGradient} py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] transition-colors duration-700`}>
+            
+            <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-30 mix-blend-overlay">
+              {bgParticles.map((p, i) => (
+                <div 
+                  key={i} 
+                  className={`absolute bottom-0 animate-float-bg ${activeTheme.textColor}`}
+                  style={{ 
+                    left: `${p.left}%`, 
+                    animationDelay: `${p.delay}s`,
+                    animationDuration: `${p.duration}s` 
+                  }}
+                >
+                  {activeTheme.particle}
+                </div>
+              ))}
+            </div>
+
+            <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center lg:items-stretch gap-8 lg:gap-12">
+              
+              <div className="w-full lg:w-[320px] shrink-0 flex flex-col justify-center text-center lg:text-left">
+                <div className="inline-flex items-center justify-center lg:justify-start gap-2 mb-4">
+                  <div className={`p-2 rounded-full bg-white/50 backdrop-blur-sm shadow-sm border border-white/40 ${activeTheme.textColor}`}>
+                     {activeTheme.icon}
+                  </div>
+                  <span className={`font-mono text-[11px] uppercase tracking-[0.25em] font-bold ${activeTheme.textColor}`}>
+                    {activeTheme.badge}
+                  </span>
+                </div>
+                <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif text-[#3B1F0A] leading-[1.15] mb-4 drop-shadow-sm transition-all duration-500">
+                  {activeTheme.title}
+                </h2>
+                <p className="text-[#5A453C] text-sm sm:text-base leading-relaxed mb-6 max-w-md mx-auto lg:mx-0 opacity-90">
+                  {activeTheme.subtitle}
+                </p>
+                <button 
+                  onClick={() => navigate('/onlineOrdering/menu')}
+                  className={`inline-flex items-center justify-center lg:justify-start gap-2 ${activeTheme.textColor} font-bold text-xs hover:opacity-70 transition-opacity uppercase tracking-widest group`}
+                >
+                  View full menu 
+                  <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
+                    <ArrowRight size={14} />
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex-1 w-full min-w-0">
+                <TicketCarousel products={adData.products} theme={activeTheme} navigate={navigate} />
+              </div>
+
+            </div>
+          </section>
+        )}
+
+        {/* Hero Section */}
         <section className="w-full bg-[#E8E2DD] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
           <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:translate-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-8 sm:gap-12 lg:gap-16 items-center">
@@ -167,7 +412,7 @@ export default function Home() {
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                   <button
                     onClick={() => navigate('/onlineOrdering/menu')}
-                    className="bg-[#3B1F0A] text-white px-6 py-3.5 sm:px-10 sm:py-4 text-xs sm:text-sm uppercase tracking-[0.15em] font-semibold rounded-full hover:bg-[#2A1608] transition-colors w-full sm:w-auto text-center"
+                    className="bg-[#3B1F0A] text-white px-6 py-3.5 sm:px-10 sm:py-4 text-xs sm:text-sm uppercase tracking-[0.15em] font-semibold rounded-full hover:bg-[#2A1608] transition-colors w-full sm:w-auto text-center shadow-lg"
                   >
                     Explore Menu
                   </button>

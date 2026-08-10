@@ -7,6 +7,8 @@ import AnalyticsPage from './pages/analyticsPage';
 import OnlineOrderingPage from './pages/onlineOrderingPage';
 import ProductModal from './components/onlineOrdering/Productmodal';
 import QrScanner from './components/onlineOrdering/MobileScanner';
+import OccasionManager from './components/onlineOrdering/OccasionManager';
+import EventAdsModal from './components/onlineOrdering/eventAdsModal';
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -75,6 +77,9 @@ export default function App() {
           <Route path="/onlineOrdering/*" element={<OnlineOrderingPage />} />
           <Route path="/productmodal" element={<ProductModal />} />
           <Route path="/qr" element={<QrScanner />} />
+
+          <Route path="/occasions" element={<OccasionManager />} />
+           <Route path="/eventads" element={<EventAdsModal />} />
 
           {/* ── 404 ── */}
           <Route path="*" element={<NotFound />} />

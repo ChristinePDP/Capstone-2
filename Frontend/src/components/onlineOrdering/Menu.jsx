@@ -5,6 +5,8 @@ import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
+
+
 function ProductModal({ product, onClose, onAddToCart }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);

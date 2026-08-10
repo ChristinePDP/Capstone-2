@@ -6,14 +6,12 @@ import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 
 export const fetchMenuProducts = async (filters = {}) => {
-  let products = []; // Default as empty array
+  let products = []; 
   
   try {
     const result = await ProductModel.findAll(filters);
     
     // BULLETPROOF CHECK: 
-    // Kung ang ibinato ng model ay { data: [...] }, kunin ang data.
-    // Kung array na siya agad, gamitin diretso.
     if (result && Array.isArray(result.data)) {
       products = result.data;
     } else if (Array.isArray(result)) {
@@ -61,7 +59,6 @@ export const fetchMenuProducts = async (filters = {}) => {
 
 export const getStorageBaseUrl = (bucketName) => {
   const { data } = supabase.storage.from(bucketName).getPublicUrl('');
-  // getPublicUrl('') returns ".../object/public/<bucket>/" (may trailing slash)
   return data.publicUrl.replace(/\/$/, '');
 };
 
@@ -97,7 +94,6 @@ export const createDatabaseOrder = async (payload) => {
     throw new Error(`Customer Error: ${custError.message}`);
   }
 
-  // FIXXXX: Idinagdag na natin ang order_number dito para ma-save sa DB!
   const orderToInsert = {
     order_number: payload.orderNumber || `ORD-${Date.now().toString().slice(-4)}`,
     customer_id: customerData.id,
