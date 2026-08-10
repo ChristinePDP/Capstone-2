@@ -1,55 +1,14 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef } from 'react';
+import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal } from '../../components/ui';
+import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
+import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 
 const PAGE_SIZE = 8;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const UNIT_ALIASES = {
-  gram: 'g', grams: 'g', g: 'g',
-  kilogram: 'kg', kilograms: 'kg', kg: 'kg',
-  milliliter: 'ml', milliliters: 'ml', ml: 'ml',
-  liter: 'l', liters: 'l', litre: 'l', litres: 'l', l: 'l',
-  piece: 'pcs', pieces: 'pcs', pc: 'pcs', pcs: 'pcs',
-};
-
-const UNIT_GROUPS = {
-  mass: ['kg', 'g'],
-  volume: ['l', 'ml'],
-  count: ['pcs'],
-};
-
-const normalizeText = (value = '') => String(value).trim().toLowerCase();
-const normalizeUnit = (unit = '') => UNIT_ALIASES[normalizeText(unit)] || normalizeText(unit);
 const roundQty = (value) => +Number(value || 0).toFixed(4);
-
-const getUnitGroup = (unit = '') => {
-  const normalized = normalizeUnit(unit);
-  return Object.entries(UNIT_GROUPS).find(([, units]) => units.includes(normalized))?.[0] || null;
-};
-
-const getCompatibleUnits = (unit = '') => {
-  const normalized = normalizeUnit(unit);
-  const group = getUnitGroup(normalized);
-  return group ? UNIT_GROUPS[group] : (normalized ? [normalized] : []);
-};
-
-const convertToBase = (value, fromUnit, toUnit) => {
-  const amount = Number(value);
-  const from = normalizeUnit(fromUnit);
-  const to = normalizeUnit(toUnit);
-
-  if (!Number.isFinite(amount)) return NaN;
-  if (!from || !to || from === to) return amount;
-
-  const group = getUnitGroup(from);
-  if (!group || group !== getUnitGroup(to)) return NaN;
-
-  const factors = { kg: 1, g: 0.001, l: 1, ml: 0.001, pcs: 1 };
-  if (!(from in factors) || !(to in factors)) return NaN;
-  return amount * (factors[from] / factors[to]);
-};
 
 const inventoryKey = (name, unit, type = '') => `${normalizeText(name)}|${normalizeUnit(unit)}|${normalizeText(type)}`;
 
@@ -112,27 +71,32 @@ const buildShortfallEntry = (entry, stockItem) => {
 
 export default function RecipeTab() {
   const context = useApp() || {};
+  const isLoading = !!context.loading;
   const recipes = useMemo(() => context.recipes || [], [context.recipes]);
   const ingredients = useMemo(() => context.ingredients || [], [context.ingredients]);
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const products = useMemo(() => context.products || [], [context.products]);
   const orders = useMemo(() => context.orders || [], [context.orders]);
-  const { addRecipe, updateRecipe, deleteRecipe, confirmBatch, formatPHP } = context;
+  const { addRecipe, updateRecipe, deleteRecipe, confirmBatch } = context;
 
   const { show: showToast } = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [confirmTarget, setConfirmTarget] = useState(null); // Modal state para sa production confirmation
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const isDeletingRef = useRef(false);
 
   const [rows, setRows] = useState([{ itemId: '', qty: '', unit: '' }]);
   const [productId, setProductId] = useState('');
-  const [cost, setCost] = useState('');
   const [yld, setYld] = useState('');
   const [yldUnit, setYldUnit] = useState('pcs');
 
   const [quotas, setQuotas] = useState({});
   const [localStocks, setLocalStocks] = useState({});
+  const [confirmingIds, setConfirmingIds] = useState({});
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -251,7 +215,7 @@ export default function RecipeTab() {
 
     for (const r of recipes) {
       const targetGoal = Number(quotas[r.id]);
-      if (!targetGoal || targetGoal <= 0) continue;
+      if (!targetGoal || targetGoal <= 0 || targetGoal > MAX_QTY) continue;
       const maxUnits = calculateMaxUnits(r, ingredients);
       if (maxUnits >= targetGoal) continue;
 
@@ -306,7 +270,6 @@ export default function RecipeTab() {
   const openAdd = () => {
     setEditRecipe(null);
     setProductId('');
-    setCost('');
     setYld('');
     setYldUnit('pcs');
     setRows([{ itemId: '', qty: '', unit: '' }]);
@@ -316,9 +279,8 @@ export default function RecipeTab() {
   const openEdit = (r) => {
     setEditRecipe(r);
     setProductId(r.productId || products.find(p => normalizeText(p.name) === normalizeText(r.product))?.id || '');
-    setCost(r.estimatedCost);
     setYld(r.yield);
-    setYldUnit(r.yieldUnit);
+    setYldUnit(r.yieldUnit || 'pcs');
     setRows((r.ingredients || []).map(i => {
       const item = inventoryOptions.find(option => normalizeText(option.name) === normalizeText(i.name || i.item_name || '') && normalizeText(option.sourceType) === normalizeText(i.itemType || i.item_type || option.sourceType));
       return {
@@ -331,27 +293,35 @@ export default function RecipeTab() {
   };
 
   const handleSave = async () => {
+    if (isSaving) return;
     try {
       if (!productId) {
-        showToast('Pumili muna ng product.', 'warning');
+        showToast('Please select a product first.', 'warning');
         return;
       }
 
       const matchedProduct = products.find(p => p.id === productId);
       if (!matchedProduct?.id) {
-        showToast('Hindi makita ang product sa products list.', 'warning');
+        showToast('Product not found in the products list.', 'warning');
         return;
       }
 
       const numericYield = Number(yld);
       if (!Number.isFinite(numericYield) || numericYield <= 0) {
-        showToast('Invalid ang yield. Pumili ng numerong mas mataas sa zero.', 'warning');
+        showToast('Invalid yield — must be greater than zero.', 'warning');
+        return;
+      }
+      const yieldOverflow = getQtyError(yld, { max: MAX_QTY, label: 'Yield' });
+      if (yieldOverflow) { showToast(yieldOverflow, 'warning'); return; }
+
+      if (!yldUnit || !yldUnit.trim()) {
+        showToast('Please specify a yield unit.', 'warning');
         return;
       }
 
       const validRows = rows.filter(row => row.itemId || row.qty || row.unit);
       if (!validRows.length) {
-        showToast('Kailangan ng kahit isang ingredient row.', 'warning');
+        showToast('Add at least one ingredient row.', 'warning');
         return;
       }
 
@@ -359,19 +329,25 @@ export default function RecipeTab() {
 
       for (const row of validRows) {
         if (!row.itemId) {
-          showToast('Pumili muna ng ingredient o material sa bawat row.', 'warning');
+          showToast('Select an ingredient or material for each row.', 'warning');
           return;
         }
 
         const inventoryItem = inventoryById[row.itemId];
         if (!inventoryItem) {
-          showToast('May row na hindi valid ang ingredient/material selection.', 'warning');
+          showToast('One of the rows has an invalid ingredient/material selection.', 'warning');
           return;
         }
 
         const qtyValue = Number(row.qty);
         if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
-          showToast(`Invalid ang quantity para sa ${inventoryItem.name}.`, 'warning');
+          showToast(`Invalid quantity for ${inventoryItem.name}.`, 'warning');
+          return;
+        }
+
+        const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
+        if (rowQtyErr) {
+          showToast(rowQtyErr, 'warning');
           return;
         }
 
@@ -379,7 +355,7 @@ export default function RecipeTab() {
         const baseUnit = normalizeUnit(inventoryItem.unit);
         const normalizedQty = convertToBase(qtyValue, selectedUnit, baseUnit);
         if (!Number.isFinite(normalizedQty)) {
-          showToast(`Hindi supported ang unit conversion para sa ${inventoryItem.name}.`, 'warning');
+          showToast(`Unit conversion not supported for ${inventoryItem.name} — check kung tugma ang units.`, 'warning');
           return;
         }
 
@@ -394,11 +370,11 @@ export default function RecipeTab() {
       const data = {
         product_id: matchedProduct.id,
         yield_quantity: numericYield,
-        yield_unit: yldUnit || 'pcs',
-        estimated_cost: Number(cost) || 0,
+        yield_unit: yldUnit.trim(),
         ingredients: normalizedIngredients,
       };
 
+      setIsSaving(true);
       if (editRecipe?.id) {
         if (updateRecipe) await updateRecipe(editRecipe.id, data);
         showToast('Recipe updated.', 'success');
@@ -410,19 +386,33 @@ export default function RecipeTab() {
       setModalOpen(false);
     } catch (err) {
       console.error('Recipe save failed:', err);
-      showToast(err?.message || 'May naganap na error sa pag-save ng recipe.', 'error');
+      showToast(err?.message || 'Something went wrong while saving the recipe.', 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handleDirectConfirm = async (recipe, goalNum) => {
-    if (!goalNum || goalNum <= 0) return;
+  // Kumpirmasyon at actual execution ng batch production
+  const handleExecuteConfirm = async () => {
+    if (!confirmTarget) return;
+    const { recipe, goalNum } = confirmTarget;
+
+    if (!goalNum || goalNum <= 0) {
+      showToast('Target Goal must be a positive number.', 'error');
+      setConfirmTarget(null);
+      return;
+    }
+    if (confirmingIds[recipe.id]) return;
+    setConfirmingIds(prev => ({ ...prev, [recipe.id]: true }));
 
     const product = products.find(p => p.id === recipe.productId) || products.find(p => normalizeText(p.name) === normalizeText(recipe.product));
     const resolvedProductId = recipe.productId || product?.id;
     const recipeId = recipe.id;
 
     if (!UUID_RE.test(recipeId) || !UUID_RE.test(resolvedProductId || '')) {
-      showToast('Hindi pa loaded ang backend UUIDs para sa recipe/product. Refresh the page and try again.', 'warning');
+      showToast('Recipe/product data not fully loaded yet — refresh the page and try again.', 'warning');
+      setConfirmTarget(null);
+      setConfirmingIds(prev => ({ ...prev, [recipe.id]: false }));
       return;
     }
 
@@ -446,22 +436,30 @@ export default function RecipeTab() {
       const newStock = actualCurrentStock + Number(totalProduced);
       setLocalStocks(prev => ({ ...prev, [recipe.id]: newStock }));
       setQuotas(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
-      showToast(`✓ ${totalProduced} ${recipe.yieldUnit || 'pcs'} ng ${recipe.product} na-produce.`, 'success');
+      showToast(`✓ Produced ${totalProduced} ${recipe.yieldUnit || 'pcs'} of ${recipe.product}.`, 'success');
     } catch (err) {
       console.error('confirmBatch failed:', err);
-      showToast('Hindi na-log ang batch. Tingnan ang server console para sa validation error.', 'warning');
+      showToast("Batch wasn't logged — check the server console for validation errors.", 'warning');
+    } finally {
+      setConfirmingIds(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
+      setConfirmTarget(null);
     }
   };
 
   const handleDeleteRecipe = async () => {
-    if (!deleteTarget?.id) return;
+    if (!deleteTarget?.id || isDeletingRef.current) return;
+    isDeletingRef.current = true;
+    setIsDeleting(true);
     try {
       if (deleteRecipe) await deleteRecipe(deleteTarget.id);
       showToast('Recipe deleted.', 'success');
       setDeleteTarget(null);
     } catch (err) {
       console.error('deleteRecipe failed:', err);
-      showToast(err?.message || 'Hindi ma-delete ang recipe.', 'error');
+      showToast(err?.message || "Couldn't delete the recipe.", 'error');
+    } finally {
+      isDeletingRef.current = false;
+      setIsDeleting(false);
     }
   };
 
@@ -507,13 +505,24 @@ export default function RecipeTab() {
         </div>
 
         <div className="px-4 pb-4 mt-4">
+          {isLoading && (
+            <>
+              <CardSkeleton count={3} />
+              <TableSkeleton columns={5} rows={5} />
+            </>
+          )}
+
+          {!isLoading && (
+          <>
+          {/* Mobile View */}
           <div className="block md:hidden space-y-4">
             {paged.map(r => {
               const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
               const quota = quotas[r.id] || '';
               const quotaNum = Number(quota);
-              const hasInput = quotaNum > 0;
+              const hasInput = quotaNum > 0 && quotaNum <= MAX_QTY;
               const canMake = hasInput && maxUnits >= quotaNum;
+              const quotaError = quota !== '' ? getQtyError(quota, { max: MAX_QTY, label: 'Target Goal' }) : null;
               const matchedProduct = products.find(p => p.id === r.productId) || products.find(p => normalizeText(p.name) === normalizeText(r.product));
               const currentStock = localStocks[r.id] !== undefined
                 ? localStocks[r.id]
@@ -524,7 +533,7 @@ export default function RecipeTab() {
                   <div className="flex justify-between items-start">
                     <div>
                       <h4 className="font-bold text-brand-900 text-base">{r.product}</h4>
-                      <p className="text-[11px] text-brand-400 mt-0.5">Cost/Batch: {formatPHP(r.estimatedCost)} · Yield: {r.yield} {r.yieldUnit}</p>
+                      <p className="text-[11px] text-brand-400 mt-0.5">Yield: {r.yield} {r.yieldUnit}</p>
                     </div>
                     <div className="flex gap-1.5">
                       <button onClick={() => openEdit(r)} className="p-1.5 text-brand-500 bg-brand-50 rounded-lg"><Edit2 size={13} /></button>
@@ -539,11 +548,24 @@ export default function RecipeTab() {
 
                   <div className="flex items-center gap-2 pt-2 border-t border-brand-50">
                     <div className="flex-1">
-                      <input type="number" placeholder="Target Goal" value={quota} onChange={e => setQuotas(prev => ({ ...prev, [r.id]: e.target.value }))} className={`w-full px-2 py-1.5 text-xs text-center border font-bold rounded-lg ${hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-red-50 text-red-700 border-red-300') : 'bg-white'}`} />
+                      <input
+                        type="text" inputMode="numeric"
+                        placeholder="Target Goal"
+                        value={quota}
+                        onChange={e => setQuotas(prev => ({ ...prev, [r.id]: sanitizeNumericText(e.target.value) }))}
+                        className={`w-full px-2 py-1.5 text-xs text-center border font-bold rounded-lg ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-red-50 text-red-700 border-red-300') : 'bg-white'}`}
+                      />
+                      {quotaError && <p className="text-[10px] text-red-600 font-medium mt-1">{quotaError}</p>}
                     </div>
                     {canMake && (
-                      <Button size="sm" variant="primary" className="bg-emerald-600 text-xs px-3 border-none py-2 h-auto" onClick={() => handleDirectConfirm(r, quotaNum)}>
-                        <CheckCircle2 size={12} className="mr-1" /> Confirm
+                      <Button 
+                        size="sm" 
+                        variant="primary" 
+                        disabled={!!confirmingIds[r.id]} 
+                        className="bg-emerald-600 text-xs px-3 border-none py-2 h-auto" 
+                        onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
+                      >
+                        <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
                       </Button>
                     )}
                   </div>
@@ -552,14 +574,16 @@ export default function RecipeTab() {
             })}
           </div>
 
+          {/* Desktop View */}
           <div className="hidden md:block">
-            <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Expense per Batch' }, { label: 'Stock Capacity' }, { label: 'Production Target' }, { label: 'Finished Production' }, { label: 'Actions', align: 'right' }]}>
+            <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Stock Capacity' }, { label: 'Production Target' }, { label: 'Finished Production' }, { label: 'Actions', align: 'right' }]}>
               {paged.map(r => {
                 const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
                 const quota = quotas[r.id] || '';
                 const quotaNum = Number(quota);
-                const hasInput = quotaNum > 0;
+                const hasInput = quotaNum > 0 && quotaNum <= MAX_QTY;
                 const canMake = hasInput && maxUnits >= quotaNum;
+                const quotaError = quota !== '' ? getQtyError(quota, { max: MAX_QTY, label: 'Target Goal' }) : null;
                 const matchedProduct = products.find(p => p.id === r.productId) || products.find(p => normalizeText(p.name) === normalizeText(r.product));
                 const currentStock = localStocks[r.id] !== undefined
                   ? localStocks[r.id]
@@ -569,13 +593,31 @@ export default function RecipeTab() {
                   <Tr key={r.id}>
                     <Td><p className="font-bold text-brand-900 text-sm">{r.product}</p></Td>
                     <Td><p className="font-semibold text-brand-700">{r.yield} {r.yieldUnit}</p></Td>
-                    <Td><p className="font-semibold text-brand-500">{formatPHP(r.estimatedCost)}</p></Td>
                     <Td><span className={`font-bold px-2 py-1 rounded-md border ${maxUnits === 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{maxUnits} {r.yieldUnit}</span></Td>
-                    <Td><input type="number" value={quota} onChange={e => setQuotas(prev => ({ ...prev, [r.id]: e.target.value }))} placeholder="0" className={`w-20 px-2 py-1 text-center font-bold border rounded-lg ${hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700') : 'bg-white'}`} /></Td>
+                    <Td>
+                      <input
+                        type="text" inputMode="numeric"
+                        value={quota}
+                        onChange={e => setQuotas(prev => ({ ...prev, [r.id]: sanitizeNumericText(e.target.value) }))}
+                        placeholder="0"
+                        className={`w-20 px-2 py-1 text-center font-bold border rounded-lg ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700') : 'bg-white'}`}
+                      />
+                      {quotaError && <p className="text-[10px] text-red-600 font-medium mt-1 max-w-[100px]">{quotaError}</p>}
+                    </Td>
                     <Td><span className="font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-md border">{currentStock} {r.yieldUnit}</span></Td>
                     <Td align="right">
                       <div className="flex items-center justify-end gap-2">
-                        {canMake && <Button size="sm" variant="primary" className="bg-emerald-600 border-none" onClick={() => handleDirectConfirm(r, quotaNum)}><CheckCircle2 size={12} className="mr-1" /> Confirm</Button>}
+                        {canMake && (
+                          <Button 
+                            size="sm" 
+                            variant="primary" 
+                            disabled={!!confirmingIds[r.id]} 
+                            className="bg-emerald-600 border-none" 
+                            onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
+                          >
+                            <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
+                          </Button>
+                        )}
                         <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
                         <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
@@ -587,6 +629,8 @@ export default function RecipeTab() {
           </div>
 
           {!paged.length && <div className="text-center py-8 text-brand-300">Walang recipe na nahanap.</div>}
+          </>
+          )}
         </div>
 
         {filteredRecipes.length > PAGE_SIZE && (
@@ -600,69 +644,176 @@ export default function RecipeTab() {
         )}
       </Card>
 
+      {/* REFACTORED RECIPE MODAL */}
       <Modal
         isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={editRecipe ? 'Edit Recipe' : 'Add Recipe'}
+        onClose={() => !isSaving && setModalOpen(false)}
+        title={editRecipe ? `Edit Recipe — ${editRecipe.product}` : 'Add New Recipe'}
+        subtitle="I-configure ang timpla at tamang dami ng sangkap per batch."
         size="lg"
         footer={
-          <div className="flex gap-3 ml-auto">
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSave}>Save Recipe</Button>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="primary" disabled={isSaving} onClick={handleSave}>
+              {isSaving ? 'Saving...' : editRecipe ? 'Save Changes' : 'Save Recipe'}
+            </Button>
           </div>
         }
       >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Select label="Product Name" required value={productId} onChange={e => setProductId(e.target.value)}>
-              <option value="">Select product</option>
-              {productOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </Select>
-            <Input label="Est. Cost per Batch (₱)" type="number" value={cost} onChange={e => setCost(e.target.value)} placeholder="0.00" />
-            <Input label="Actual Yield per Batch" required type="number" value={yld} onChange={e => setYld(e.target.value)} placeholder="12" />
-            <Input label="Yield Unit" value={yldUnit} onChange={e => setYldUnit(e.target.value)} placeholder="pcs" />
-          </div>
-          <div>
-            <p className="text-xs font-bold uppercase text-brand-500 mb-2">Ingredients</p>
-            {rows.map((row, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <Select
-                  value={row.itemId}
-                  onChange={e => {
-                    const selected = inventoryById[e.target.value];
-                    setRows(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
-                  }}
-                  className="flex-2 min-w-0"
-                  required
-                >
-                  <option value="">Select ingredient/material</option>
-                  {inventoryOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+        <div className="space-y-5">
+          {/* SECTION 1: BASIC RECIPE DETAILS */}
+          <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
+            <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
+              <Tag size={13} className="text-brand-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">1. Recipe Details</span>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-1">
+                <Select label="Product Name" required value={productId} onChange={e => setProductId(e.target.value)}>
+                  <option value="">Select product</option>
+                  {productOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
                 </Select>
-                <input value={row.qty} type="number" onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, qty: e.target.value } : r))} placeholder="Qty" className="w-20 px-2 py-1 text-sm border rounded-lg" />
-                <Select
-                  value={row.unit}
-                  onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
-                  className="w-24"
-                  required
-                >
-                  <option value="">Unit</option>
-                  {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
-                </Select>
-                <button onClick={() => setRows(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : [{ itemId: '', qty: '', unit: '' }])} className="p-2 text-red-500 bg-red-50 rounded"><Trash2 size={14} /></button>
               </div>
-            ))}
-            <button onClick={() => setRows(prev => [...prev, { itemId: '', qty: '', unit: '' }])} className="w-full border border-dashed py-2 text-xs text-brand-500 rounded-lg">+ Row</button>
+              <div>
+                <Input label="Actual Yield per Batch" required type="text" inputMode="decimal" value={yld} onChange={e => setYld(sanitizeNumericText(e.target.value))} placeholder="e.g. 12" />
+                {getQtyError(yld, { max: MAX_QTY, label: 'Yield' }) && <p className="text-[11px] text-red-600 mt-1 font-medium">{getQtyError(yld, { max: MAX_QTY, label: 'Yield' })}</p>}
+              </div>
+              <div>
+                <Input label="Yield Unit" required value={yldUnit} onChange={e => setYldUnit(e.target.value)} placeholder="pcs" />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: INGREDIENTS & MATERIALS BREAKDOWN */}
+          <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-brand-100">
+              <div className="flex items-center gap-1.5">
+                <Package size={13} className="text-brand-500" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Ingredients & Materials</span>
+              </div>
+              <span className="text-[11px] text-brand-400 font-semibold">{rows.length} {rows.length === 1 ? 'item' : 'items'} added</span>
+            </div>
+
+            <div className="space-y-2.5">
+              {rows.map((row, i) => {
+                const rowItem = inventoryById[row.itemId];
+                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${rowItem?.name || 'ingredient'}` }) : null;
+
+                return (
+                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                      <div className="w-full sm:flex-1 sm:min-w-0">
+                        <Select
+                          value={row.itemId}
+                          onChange={e => {
+                            const selected = inventoryById[e.target.value];
+                            setRows(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
+                          }}
+                          className="w-full"
+                          required
+                        >
+                          <option value="">Select ingredient or material</option>
+                          {inventoryOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                        </Select>
+                      </div>
+
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
+                          <input
+                            value={row.qty}
+                            type="text"
+                            inputMode="decimal"
+                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
+                            placeholder="Qty"
+                            className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
+                          <Select
+                            value={row.unit}
+                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
+                            className="w-full"
+                            required
+                          >
+                            <option value="">Unit</option>
+                            {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                          </Select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setRows(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : [{ itemId: '', qty: '', unit: '' }])}
+                          className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
+                          title="Remove row"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {rowQtyErr && (
+                      <p className="text-[11px] text-red-600 font-medium pl-1">{rowQtyErr}</p>
+                    )}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={() => setRows(prev => [...prev, { itemId: '', qty: '', unit: '' }])}
+                className="w-full border border-dashed border-brand-300 hover:border-brand-500 bg-brand-50/40 hover:bg-brand-50 text-brand-600 font-bold py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1 mt-2"
+              >
+                <Plus size={13} /> Add Ingredient / Material
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
 
+      {/* PRODUCTION CONFIRMATION MODAL */}
+      <ConfirmModal
+        isOpen={!!confirmTarget}
+        onClose={() => !confirmingIds[confirmTarget?.recipe?.id] && setConfirmTarget(null)}
+        onConfirm={handleExecuteConfirm}
+        title="I-confirm ang Batch Production"
+        message={
+          confirmTarget ? (
+            <div className="space-y-3 text-left text-sm text-gray-600">
+              <p>Sigurado ka bang gusto mong simulan ang production para sa <strong>{confirmTarget.recipe.product}</strong>?</p>
+              <div className="bg-brand-50 p-3 rounded-xl border border-brand-100 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Target Goal:</span>
+                  <strong className="text-brand-900">{confirmTarget.goalNum} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Mabubuong Batches:</span>
+                  <strong className="text-brand-900">{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1))} batch(es)</strong>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-brand-200/60">
+                  <span className="text-gray-700 font-medium">Total na Malilikha:</span>
+                  <strong className="text-emerald-700">+{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1)) * (Number(confirmTarget.recipe.yield) || 1)} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
+                </div>
+              </div>
+              <p className="text-[11px] text-amber-600 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
+                ⚠️ Awtomatikong mababawasan ang kaukulang raw ingredients sa inventory kapag kinumpirma ito.
+              </p>
+            </div>
+          ) : ''
+        }
+        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Kina-confirm...' : 'Kumpirmahin Production'}
+        variant="primary"
+      />
+
+      {/* DELETE RECIPE CONFIRMATION MODAL */}
       <ConfirmModal
         isOpen={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
+        onClose={() => !isDeletingRef.current && setDeleteTarget(null)}
         onConfirm={handleDeleteRecipe}
         title="Delete Recipe"
         message={`Burahin ang recipe para sa "${deleteTarget?.product}"?`}
-        confirmLabel="Delete"
+        confirmLabel={isDeleting ? 'Dinedelete...' : 'Delete'}
         variant="danger"
       />
     </div>

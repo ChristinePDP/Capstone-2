@@ -63,6 +63,37 @@ const ProductModel = {
     if (error) throw error;
     return { data, error };
   },
+
+  /**
+   * Ibawas ang `qty` sa stock_quantity ng product na may pangalang
+   * `name`. Ginagamit ito kapag nag-log ng "unsold/damaged product"
+   * bilang waste — dati, WALANG nangyayari dito (hindi na-deduct ang
+   * product stock kapag waste_type === 'product'), kaya nananatiling
+   * mali ang "Finished Production" count.
+   */
+  deductByName: async (name, qty) => {
+    const { data } = await getSupabase().from('products').select('stock_quantity').eq('name', name).single();
+    if (!data) return;
+    const current = Number(data.stock_quantity || 0);
+    return getSupabase().from('products')
+      .update({ stock_quantity: Math.max(0, current - Number(qty)) })
+      .eq('name', name);
+  },
+
+  /**
+   * Kabaligtaran ng deductByName — idinadagdag pabalik ang `qty`.
+   * Ginagamit ito kapag "vinoid" (kinansela) ang isang waste log na
+   * dati ay nagbawas ng product stock — para maibalik sa dating stock
+   * bago naganap ang maling log.
+   */
+  restoreByName: async (name, qty) => {
+    const { data } = await getSupabase().from('products').select('stock_quantity').eq('name', name).single();
+    if (!data) return;
+    const current = Number(data.stock_quantity || 0);
+    return getSupabase().from('products')
+      .update({ stock_quantity: current + Number(qty) })
+      .eq('name', name);
+  },
 };
 
 export { ProductModel };

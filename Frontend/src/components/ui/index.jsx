@@ -208,6 +208,65 @@ export function LevelBar({ stock, min }) {
   );
 }
 
+// ─── Skeleton Loading (modern placeholder blocks, kapalit ng
+// plain-text na "Naglo-load..." — mas mukhang "loading na totoo" kesa
+// sa static na text lang) ──────────────────────────────────────────
+
+// Isang pulsing gray block — building block ng lahat ng skeleton
+// layouts sa ibaba. `w`/`h` ay Tailwind width/height classes.
+export function Skeleton({ className = '', w = 'w-full', h = 'h-4' }) {
+  return <div className={`${w} ${h} bg-brand-100 rounded-md animate-pulse ${className}`} />;
+}
+
+// Skeleton para sa desktop table view — humuhugis ng ilang "row" na
+// may mga column, tugma sa dami ng columns na ipinasa. `rows` ay
+// bilang ng fake rows (default 4).
+export function TableSkeleton({ columns = 4, rows = 4 }) {
+  return (
+    <div className="hidden md:block">
+      <table className="w-full">
+        <tbody className="divide-y divide-brand-50">
+          {Array.from({ length: rows }).map((_, r) => (
+            <tr key={r}>
+              {Array.from({ length: columns }).map((__, c) => (
+                <td key={c} className="px-3 py-4">
+                  <Skeleton w={c === 0 ? 'w-32' : 'w-16'} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Skeleton para sa mobile card view — humuhugis ng ilang fake card,
+// tugma sa karaniwang "pangalan + stock + status + buttons" layout na
+// ginagamit sa RawTab/CelebrationTab.
+export function CardSkeleton({ count = 3 }) {
+  return (
+    <div className="block md:hidden space-y-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
+          <div className="flex justify-between items-start mb-3">
+            <div className="space-y-2">
+              <Skeleton w="w-32" h="h-3.5" />
+              <Skeleton w="w-20" h="h-3" />
+            </div>
+            <Skeleton w="w-14" h="h-5" className="rounded-full" />
+          </div>
+          <Skeleton w="w-full" h="h-1.5" className="rounded-full mb-3" />
+          <div className="flex justify-end gap-2">
+            <Skeleton w="w-16" h="h-7" />
+            <Skeleton w="w-16" h="h-7" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Toast System ─────────────────────────────────────────────
 const ToastContext = createContext(null);
 
@@ -242,7 +301,7 @@ export function ToastProvider({ children }) {
       {children}
       <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
         {toasts.map(t => (
-          <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${t.type === 'success' ? 'bg-brand-800 text-white' : t.type === 'warning' ? 'bg-amber-700 text-white' : 'bg-red-700 text-white'}`}>
+          <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${t.type === 'success' ? 'bg-green-700 text-white' : t.type === 'warning' ? 'bg-amber-700 text-white' : 'bg-red-700 text-white'}`}>
             {t.type === 'success' && <CheckCircle size={16} />}
             {t.type === 'warning' && <AlertCircle size={16} />}
             {(t.type === 'error' || t.type === 'danger') && <XCircle size={16} />}
@@ -262,7 +321,27 @@ export const useToast = () => {
 
 // ─── Confirm Modal (UPDATED WITH PORTAL FIX) ──────────────────
 export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger' }) {
+  const [isProcessing, setIsProcessing] = useState(false);
   if (!isOpen) return null;
+
+  // IMPORTANT: dati, tumatawag ito ng onConfirm() at onClose() nang
+  // magkasunod sa parehong tick, hindi hinihintay kung async ang
+  // onConfirm. Kaya kahit "in progress" pa ang totoong operation (hal.
+  // delete/void na tumatawag ng backend), agad na sumasara ang modal —
+  // parang "successful" na kahit hindi pa talaga tapos. Ngayon,
+  // hinihintay muna ang resolution ng onConfirm (gumagana ito kahit
+  // sync o async ang function, dahil resolve agad ang `await` sa
+  // non-Promise na value) bago mag-close.
+  const handleConfirm = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsProcessing(false);
+    }
+    onClose();
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-brand-900/60 backdrop-blur-sm">
@@ -270,8 +349,8 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
         <h3 className=" text-lg font-bold text-brand-800 mb-2">{title}</h3>
         <p className="text-sm text-brand-500 mb-6 leading-relaxed">{message}</p>
         <div className="flex gap-3 justify-end">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant={variant} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
+          <Button variant="secondary" disabled={isProcessing} onClick={onClose}>Cancel</Button>
+          <Button variant={variant} disabled={isProcessing} onClick={handleConfirm}>{isProcessing ? 'Please wait...' : confirmLabel}</Button>
         </div>
       </div>
     </div>,

@@ -38,17 +38,40 @@ const IngredientService = {
 
   restock: async (id, body) => {
     console.log('--- 2. PUMASOK SA SERVICE ---');
-    
+
+    // Overflow / typo guard (tugma sa ginagawa na ng MaterialService) —
+    // hinaharangan dito ang mga sablay na numero bago pa maka-apekto
+    // sa totoong stock sa database.
+    const addedQty = Number(body.added_qty);
+    const totalCost = Number(body.total_cost || 0);
+
+    if (!Number.isFinite(addedQty) || addedQty <= 0) {
+      throw new AppError('Invalid ang dami na inilagay. Dapat positibong number.', 400);
+    }
+    if (addedQty > 1000000 || totalCost > 1000000) {
+      throw new AppError('Masyadong malaki ang numero na inilagay. Pakibabaan ang quantity o cost.', 400);
+    }
+
     const { data: current, error: findErr } = await IngredientModel.findById(id);
     if (findErr || !current) throw new AppError('Ingredient not found', 404);
 
-    const newTotalStock = current.stock_quantity + Number(body.added_qty);
+    const newTotalStock = current.stock_quantity + addedQty;
     console.log('BAGONG TOTAL STOCK:', newTotalStock);
 
-    const { data, error } = await IngredientModel.update(id, {
-      stock_quantity: newTotalStock,
-      minimum_stock: Number(body.minimum_stock)
-    });
+    // IMPORTANT: hindi na dapat "i-update" ang minimum_stock dito sa
+    // Restock — tinanggal na ito sa Restock modal ng frontend (dapat
+    // sa "Ayusin ang Detalye" na lang babaguhin ang minimum_stock).
+    // Kung basta natin "Number(body.minimum_stock)" gagawin nang hindi
+    // sinusuri, at wala namang ipinasa ang frontend, magiging NaN ito
+    // at masisira ang existing value sa database. Kaya isasama lang
+    // natin sa update object kung talagang may ipinasang value.
+    const updatePayload = { stock_quantity: newTotalStock };
+    if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
+      const parsedMin = Number(body.minimum_stock);
+      if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
+    }
+
+    const { data, error } = await IngredientModel.update(id, updatePayload);
     if (error || !data) throw new AppError('Failed to update ingredient', 500);
 
     console.log('--- 3. MAGSE-SAVE NA SA LOGS TABLE ---');
@@ -56,8 +79,8 @@ const IngredientService = {
       item_type: 'raw',
       item_name: current.name,
       transaction_type: 'IN',
-      quantity: Number(body.added_qty),
-      cost: Number(body.total_cost || 0),
+      quantity: addedQty,
+      cost: totalCost,
       action: 'Restock'
     };
     console.log('DATA NA IPAPASA SA SUPABASE:', logPayload);
@@ -98,6 +121,9 @@ const MaterialService = {
     const addedQty = Number(body.added_qty);
     const totalCost = Number(body.total_cost || 0);
 
+    if (!Number.isFinite(addedQty) || addedQty <= 0) {
+      throw new AppError('Invalid ang dami na inilagay. Dapat positibong number.', 400);
+    }
     if (addedQty > 1000000 || totalCost > 1000000) {
       throw new AppError('Masyadong malaki ang numero na inilagay. Pakibabaan ang quantity o cost.', 400);
     }
@@ -109,11 +135,17 @@ const MaterialService = {
     // 3. Compute ang bagong stock
     const newTotalStock = Number(current.stock_quantity || 0) + addedQty;
 
-    // 4. I-update sa database
-    const { data, error } = await MaterialModel.update(id, {
-      stock_quantity: newTotalStock,
-      minimum_stock: Number(body.minimum_stock)
-    });
+    // 4. I-update sa database — hindi na dapat i-overwrite ang
+    // minimum_stock dito (tinanggal na sa Restock modal ng frontend;
+    // sa "Ayusin ang Detalye" na lang dapat babaguhin ito). Isasama
+    // lang ito sa update kung talagang may ipinasang value.
+    const updatePayload = { stock_quantity: newTotalStock };
+    if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
+      const parsedMin = Number(body.minimum_stock);
+      if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
+    }
+
+    const { data, error } = await MaterialModel.update(id, updatePayload);
 
     if (error) {
       console.error("SUPABASE UPDATE ERROR:", error);
@@ -152,6 +184,65 @@ const MaterialService = {
   },
 };
 
+// INVENTORY HISTORY (restock / production / waste trail)
+const InventoryLogService = {
+  getHistory: async (filters) => {
+    return InventoryLogModel.getHistory(filters);
+  },
+
+  // ── VOID RESTOCK (kanselahin nang may audit trail) ──────────────
+  // Kanselahin ang isang MALING restock entry — ibinabalik (ibinabawas)
+  // ang dami na dati'y naidagdag, at naka-mark na lang bilang voided
+  // ang log (hindi totoong "delete", audit trail pa rin).
+  voidRestock: async (logId, force = false) => {
+    const log = await InventoryLogModel.findById(logId);
+    if (!log) throw new AppError('Restock log not found', 404);
+    if (log.voided_at) throw new AppError('Naka-void na ang restock entry na ito.', 400);
+    if (log.action !== 'Restock' || log.transaction_type !== 'IN') {
+      throw new AppError('Hindi ito isang restock entry — hindi ito puwedeng i-void dito.', 400);
+    }
+
+    // Piliin ang tamang model base sa item_type ('raw' o 'material')
+    const Model = log.item_type === 'raw' ? IngredientModel : MaterialModel;
+
+    const result = await Model.reverseRestock(log.item_name, log.quantity, force);
+
+    if (result.notFound) {
+      throw new AppError(`"${log.item_name}" ay hindi na mahanap sa kasalukuyang inventory (baka na-delete na).`, 404);
+    }
+
+    // IMPORTANT: kung hindi sapat ang kasalukuyang stock para ma-reverse
+    // nang buo, itigil muna dito — huwag basta i-clamp nang tahimik.
+    // Ibabalik ang detalye papunta sa frontend para maipakita sa user
+    // (via ConfirmModal) bago sila pumayag na ituloy (force = true).
+    if (result.insufficient) {
+      throw new AppError(
+        `Hindi ma-void nang buo: ${log.quantity} ${'unit' in log ? log.unit : ''} ang dapat i-reverse, `
+        + `pero ${result.currentStock} na lang ang kasalukuyang stock ng "${log.item_name}" `
+        + `(baka nagamit na ito sa production o waste). Kumpirmahin kung gusto mo pa ring ituloy — `
+        + `mapupunta sa 0 ang stock nito.`,
+        409
+      );
+    }
+
+    // Markahan ang orihinal na log bilang voided
+    await InventoryLogModel.markVoided(logId);
+
+    // Bagong "OUT" entry bilang paliwanag/ebidensya ng pagtatama —
+    // walang butas sa audit trail kahit magkamali sa restock.
+    await InventoryLogModel.logHistory({
+      item_type: log.item_type,
+      item_name: log.item_name,
+      transaction_type: 'OUT',
+      quantity: log.quantity,
+      cost: 0,
+      action: 'Void Restock (Pagtatama)',
+    });
+
+    return { voided: true, newStock: result.newStock };
+  },
+};
+
 // PRODUCTION
 const ProductionService = {
   getAll: async (limit) => {
@@ -182,10 +273,25 @@ const ProductionService = {
 
     // 4. Bawasan ang actual stock sa database at MAG-LOG SA HISTORY
     for (const d of deductions) {
-      if (d.item_type === 'raw') {
-        await IngredientModel.deductByName(d.item_name, d.quantity);
-      } else {
-        await MaterialModel.deductByName(d.item_name, d.quantity);
+      try {
+        if (d.item_type === 'raw') {
+          // Ipinapasa ang d.unit (unit na naka-declare sa recipe) — kung
+          // magkaiba ito sa aktwal na unit ng stock sa database (hal.
+          // recipe = "g" pero stock = "kg"), awtomatiko itong iko-convert
+          // sa loob ng deductByName bago ibawas. Kung hindi ma-convert
+          // (di-magkatugmang klase ng unit), mag-e-error ito.
+          await IngredientModel.deductByName(d.item_name, d.quantity, d.unit);
+        } else {
+          await MaterialModel.deductByName(d.item_name, d.quantity, d.unit);
+        }
+      } catch (deductErr) {
+        // Itigil agad ang batch confirmation kung hindi ligtas i-deduct
+        // ang isang ingredient — mas mabuting malaman agad ng user kaysa
+        // tahimik na magkamali ang stock count.
+        throw new AppError(
+          `Hindi na-tuloy ang batch: ${deductErr.message}`,
+          400
+        );
       }
 
       await InventoryLogModel.logHistory({
@@ -307,11 +413,25 @@ const WasteService = {
   },
 
   log: async (body) => {
-    // 1. Logic for deducting stocks
-    if (body.waste_type === 'ingredient') {
-      await IngredientModel.deductByName(body.item_name, body.quantity);
-    } else if (body.waste_type === 'material') {
-      await MaterialModel.deductByName(body.item_name, body.quantity);
+    // 1. Logic for deducting stocks — ipinapasa rin ang body.unit para
+    // pareho ring protektado ito (tingnan ang paliwanag sa
+    // ProductionService.confirmBatch tungkol sa unit-aware deduction).
+    //
+    // IMPORTANT BUG FIX: dati, WALANG nangyayari kapag ang
+    // body.waste_type === 'product' — hindi na-deduct ang product
+    // stock (hal. "Finished Production") kapag nag-log ng
+    // unsold/damaged na produkto. Idinagdag na ngayon ang branch para
+    // dito.
+    try {
+      if (body.waste_type === 'ingredient') {
+        await IngredientModel.deductByName(body.item_name, body.quantity, body.unit);
+      } else if (body.waste_type === 'material') {
+        await MaterialModel.deductByName(body.item_name, body.quantity, body.unit);
+      } else if (body.waste_type === 'product') {
+        await ProductModel.deductByName(body.item_name, body.quantity);
+      }
+    } catch (deductErr) {
+      throw new AppError(`Hindi na-log ang waste: ${deductErr.message}`, 400);
     }
 
     // 2. Correct way to call Supabase via WasteModel
@@ -319,7 +439,17 @@ const WasteService = {
     if (response.error) throw response.error;
 
     // 3. I-SAVE SA INVENTORY LOGS (Para sa 'OUT' analytics)
-    if (body.waste_type === 'ingredient' || body.waste_type === 'material') {
+    //
+    // IMPORTANT: ang inventory_logs.item_type column ay isang Postgres
+    // ENUM (inv_item_type) na 'raw' at 'material' LANG ang pinapayagan
+    // — WALA itong 'product' na value. Kaya HINDI natin dapat isama
+    // ang waste_type === 'product' dito (mage-error ang insert kung
+    // gagawin natin, "invalid input value for enum inv_item_type").
+    // Hindi naman kailangan dito ang product waste — nakatala na ito
+    // nang buo sa waste_logs table mismo (item_name, quantity, cost,
+    // atbp.), at ang product stock naman ay direktang na-deduct na sa
+    // products table via ProductModel.deductByName sa itaas.
+    if (['ingredient', 'material'].includes(body.waste_type)) {
       await InventoryLogModel.logHistory({
         item_type: body.waste_type === 'ingredient' ? 'raw' : 'material',
         item_name: body.item_name,
@@ -332,6 +462,50 @@ const WasteService = {
 
     return response.data;
   },
+
+  // ── VOID (kanselahin nang may audit trail) ──────────────────────
+  // Hindi ito totoong "delete" — nananatili ang record sa database
+  // (naka-mark na lang bilang voided, tinatago sa normal na listahan),
+  // AT ibinabalik ang stock na naibawas dati dahil sa maling log.
+  // Bukod pa dito, may bagong "IN" entry na nalilikha sa inventory_logs
+  // bilang paliwanag/ebidensya ng pag-correct — walang butas sa
+  // pagsubaybay kahit magkamali.
+  void: async (id) => {
+    const { data: log, error: findErr } = await WasteModel.findById(id);
+    if (findErr || !log) throw new AppError('Waste record not found', 404);
+    if (log.voided_at) throw new AppError('Naka-void na ang record na ito.', 400);
+
+    try {
+      if (log.waste_type === 'ingredient') {
+        await IngredientModel.restoreByName(log.item_name, log.quantity, log.unit);
+      } else if (log.waste_type === 'material') {
+        await MaterialModel.restoreByName(log.item_name, log.quantity, log.unit);
+      } else if (log.waste_type === 'product') {
+        await ProductModel.restoreByName(log.item_name, log.quantity);
+      }
+    } catch (err) {
+      throw new AppError(`Hindi ma-void: ${err.message}`, 400);
+    }
+
+    const { data: updated, error: voidErr } = await WasteModel.markVoided(id);
+    if (voidErr) throw new AppError('Failed to mark waste log as voided', 500);
+
+    // Tingnan ang paliwanag sa itaas (WasteService.log) — hindi rin dapat
+    // isama ang 'product' dito, dahil enum lang ang inventory_logs.item_type
+    // ('raw'/'material' lang) — mag-e-error kung 'product' ang ipapasa.
+    if (['ingredient', 'material'].includes(log.waste_type)) {
+      await InventoryLogModel.logHistory({
+        item_type: log.waste_type === 'ingredient' ? 'raw' : 'material',
+        item_name: log.item_name,
+        transaction_type: 'IN',
+        quantity: Number(log.quantity),
+        cost: 0,
+        action: 'Void Waste (Pagtatama)'
+      });
+    }
+
+    return updated;
+  },
 };
 
-export { ProductService, WasteService, RecipeService, ProductionService, MaterialService, IngredientService };
+export { ProductService, WasteService, RecipeService, ProductionService, MaterialService, IngredientService, InventoryLogService };
