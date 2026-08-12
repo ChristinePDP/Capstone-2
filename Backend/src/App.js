@@ -8,6 +8,7 @@ import analyticsRoutes from './routes/analytics.routes.js';
 import onlineOrderingRoutes from './routes/onlineOrdering.routes.js';
 import qrScaner from './routes/Qr.routes.js';
 import productManagementRoutes from './routes/productManagement.routes.js';
+import ordersRoutes from './routes/orders.routes.js'; // <-- ADDED
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 
@@ -35,6 +36,7 @@ app.get('/', (req, res) => res.json({ status: 'CakeLytics backend is running' })
 
 app.use('/api', authRoutes); 
 app.use('/api/inventory', inventoryRoutes); 
+app.use('/api/allOrders', ordersRoutes); // <-- ADDED (kaya /api/allOrders/...)
 app.use('/api/analytics', analyticsRoutes); 
 app.use('/api/online-ordering', onlineOrderingRoutes);
 app.use('/api/Qr', qrScaner);

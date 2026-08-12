@@ -25,7 +25,6 @@ export default function CelebrationTab() {
   
   const isDeletingRef = useRef(false);
 
-  // Pinakabagong data mula sa materials list
   const currentEditMat = materials.find(m => m.id === editMat?.id) || editMat;
 
   const filtered = materials.filter(m =>
@@ -85,7 +84,6 @@ export default function CelebrationTab() {
           </Button>
         </div>
 
-        {/* Search */}
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
           <div className="relative max-w-xs">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
@@ -109,7 +107,6 @@ export default function CelebrationTab() {
 
           {!isLoading && (
             <>
-              {/* MOBILE CARDS VIEW */}
               <div className="block md:hidden space-y-3">
                 {paged.map(mat => {
                   const st = ingStatus(mat.stock, mat.min);
@@ -136,7 +133,6 @@ export default function CelebrationTab() {
                 })}
               </div>
 
-              {/* DESKTOP TABLE VIEW */}
               <div className="hidden md:block">
                 <Table columns={[
                   { label: 'Item Name' },
@@ -206,6 +202,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
   const [stock, setStock] = useState('');
   const [min, setMin] = useState(material?.min ?? '');
   const [cost, setCost] = useState(''); 
+  const [expiry, setExpiry] = useState(''); // 👈 BAGONG DAGDAG
 
   const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
   const [editingDetails, setEditingDetails] = useState(false);
@@ -222,7 +219,6 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
   const costError = getCostError(cost);
   const detailsCostError = getCostError(detailsCost);
 
-  // Suriin kung may pagbabagong ginawa sa mga detalye
   const isDetailsModified = isEdit && (
     name.trim() !== (material?.name ?? '').trim() ||
     unit !== (material?.unit ?? 'pcs') ||
@@ -269,7 +265,15 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
 
       setConfirmPayload({
         isNew: true,
-        newData: { name: name.trim(), unit, stock_quantity: addedQty, minimum_stock: parseFloat(min), cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, category: 'Celebration Material' },
+        newData: { 
+          name: name.trim(), 
+          unit, 
+          stock_quantity: addedQty, 
+          minimum_stock: parseFloat(min), 
+          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
+          category: 'Celebration Material',
+          expiration_date: expiry || null // 👈 BAGONG DAGDAG
+        },
         addedQty,
         itemName: name.trim(),
         itemUnit: unit,
@@ -299,7 +303,13 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     const detailsPayload = isDetailsModified || editingDetails
       ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
       : null;
-    const restockPayload = stock ? { added_qty: addedQty, total_cost: cost ? parseFloat(cost) : 0 } : null;
+      
+    // 👈 BAGONG DAGDAG SA RESTOCK PAYLOAD
+    const restockPayload = stock ? { 
+      added_qty: addedQty, 
+      total_cost: cost ? parseFloat(cost) : 0,
+      expiration_date: expiry || null 
+    } : null;
 
     setConfirmPayload({
       detailsPayload,
@@ -319,6 +329,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
       setConfirmPayload(null);
       setStock('');
       setCost('');
+      setExpiry(''); // 👈 Reset form
       onClose();
     } catch (err) {
       showToast(err.message || 'Failed to save', 'error');
@@ -357,7 +368,6 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
         }
       >
         <div className="space-y-5">
-          {/* Header Banner */}
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
@@ -373,10 +383,8 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
             </div>
           )}
 
-          {/* ADD NEW MATERIAL FORM */}
           {!isEdit && (
             <div className="space-y-5">
-              {/* Basic Information */}
               <div className="space-y-3">
                 <div className="flex items-center gap-1.5">
                   <Tag size={13} className="text-brand-400" />
@@ -398,7 +406,6 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
 
               <div className="border-t border-brand-100" />
 
-              {/* Stock Levels */}
               <div className="space-y-3">
                 <div className="flex items-center gap-1.5">
                   <Package size={13} className="text-brand-400" />
@@ -418,28 +425,36 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
 
               <div className="border-t border-brand-100" />
 
-              {/* Cost & Financials */}
               <div className="space-y-3">
                 <div className="flex items-center gap-1.5">
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
-                <div>
-                  <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
-                  {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-                  {!costError && cost && addedQty > 0 && (
-                    <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {unit} ({addedQty} {unit})</p>
-                  )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
+                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
+                    {!costError && cost && addedQty > 0 && (
+                      <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {unit} ({addedQty} {unit})</p>
+                    )}
+                  </div>
+                  <div>
+                    {/* 👈 BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA ADD NEW */}
+                    <Input 
+                      label="Expiration Date (Optional)" 
+                      type="date" 
+                      value={expiry} 
+                      onChange={e => setExpiry(e.target.value)} 
+                    />
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* EDIT DETAILS AND RESTOCK FORM */}
           {isEdit && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
               
-              {/* SECTION A: MATERIAL DETAILS CARD */}
               <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-brand-100">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-500">Material Details</span>
@@ -531,7 +546,6 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
                 </div>
               </div>
 
-              {/* SECTION B: ADD STOCK CARD */}
               <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
                 <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
                   <RefreshCw size={13} className="text-brand-500" />
@@ -567,13 +581,22 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
                       <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {material?.unit} ({addedQty} {material?.unit})</p>
                     )}
                   </div>
+
+                  <div>
+                    {/* 👈 BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA RESTOCK */}
+                    <Input 
+                      label="Expiration Date (Optional)" 
+                      type="date" 
+                      value={expiry} 
+                      onChange={e => setExpiry(e.target.value)} 
+                    />
+                  </div>
                 </div>
               </div>
 
             </div>
           )}
 
-          {/* Restock History Panel */}
           {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" />}
         </div>
       </Modal>

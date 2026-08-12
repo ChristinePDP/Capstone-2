@@ -14,11 +14,28 @@ export const formatPHP = (amount) => {
 
 const AppContext = createContext(null);
 
+// Ang Orders endpoints ay naka-mount sa ROOT ng API bilang `/api/allOrders`
+// (HINDI sa ilalim ng `/inventory`), kaya kailangan nating gumawa ng buong
+// absolute URL dito para ma-bypass ang `/inventory` baseURL ng `apiClient`.
+// Ginagamit pa rin natin ang PAREHONG `apiClient` axios instance (may auth
+// interceptors, credentials, atbp) — kapag absolute na ang URL na ipinasa
+// sa isang axios call, hindi na ito ipe-prepend ng axios sa baseURL nito.
+const ORDERS_API_URL = `${import.meta.env.VITE_API_URL}/allOrders`;
+
 const normalizeName = (value = '') => String(value).trim().toLowerCase();
 
 // Kinukuha ang error message mula sa axios error object
 const getErrMsg = (err, fallback) =>
   err.response?.data?.message || err.message || fallback;
+
+// NOTE: HINDI na natin nire-rename/nino-normalize ang fields ng order
+// (hal. product_name -> productName) dahil ang AllOrdersPage.jsx mismo
+// ay dinisenyo para direktang basahin ang RAW na snake_case shape mula
+// sa Supabase (order.customers.name, order.order_items[].product_name,
+// order.grand_total, order.pickup_date, order.order_number, atbp — via
+// `order.grandTotal || order.grand_total` na mga fallback). Kaya sadyang
+// ipinapasa na lang natin ang response mula sa backend nang walang
+// modification — iyon mismo ang inaasahang shape.
 
 export function AppProvider({ children }) {
   // ── State ──
@@ -28,7 +45,7 @@ export function AppProvider({ children }) {
   const [productionLogs, setProductionLogs] = useState([]);
   const [wasteLogs,      setWasteLogs]      = useState([]);
   const [products,       setProducts]       = useState([]);
-  const [orders]                            = useState([]);
+  const [orders,         setOrders]         = useState([]); // <-- FIXED: may setter na
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
@@ -49,13 +66,14 @@ export function AppProvider({ children }) {
         }
       };
 
-      const [ing, mat, rec, prodLog, wst, prd] = await Promise.all([
+      const [ing, mat, rec, prodLog, wst, prd, ord] = await Promise.all([
         safeFetch('/ingredients'),
         safeFetch('/materials'),
         safeFetch('/recipes'),
         safeFetch('/production'),
         safeFetch('/waste'),
-        safeFetch('/products')
+        safeFetch('/products'),
+        safeFetch(ORDERS_API_URL), // <-- ADDED (absolute URL — /api/allOrders, hindi /inventory/orders)
       ]);
 
       const normalizedIngredients = (ing.data || []).map(item => ({
@@ -131,6 +149,7 @@ export function AppProvider({ children }) {
       setRecipes(normalizedRecipes);
       setProductionLogs(normalizedProductionLogs);
       setProducts(normalizedProducts);
+      setOrders(ord.data || []); // <-- ADDED (raw shape — tugma sa AllOrdersPage.jsx)
 
       // Mapping para sa Waste
       setWasteLogs((wst.data || []).map(w => ({
@@ -157,7 +176,47 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  const fetchOrders = async () => {};
+  // ── Orders (All Orders page) ────
+  // Hiwalay na fetch para pwedeng i-refresh lang ang orders nang hindi
+  // kailangang i-reload lahat ng inventory data.
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await apiClient.get(ORDERS_API_URL);
+      const list = res.data?.data || [];
+      setOrders(list);
+      return list;
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to fetch orders'), { cause: err });
+    }
+  }, []);
+
+  // Kinukuha ang isang order (with items + customer) — useful sa modal/detail view
+  const fetchOrderById = useCallback(async (id) => {
+    try {
+      const res = await apiClient.get(`${ORDERS_API_URL}/${id}`);
+      return res.data?.data;
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to fetch order'), { cause: err });
+    }
+  }, []);
+
+  // I-edit ang status ng order (Confirmed/Ready/Completed/Cancelled).
+  // Ang `id` dito ay yung `order.id` na ipinapasa ng AllOrdersPage.jsx
+  // (tingnan ang handleStatusChange doon) — UUID ng row sa `orders` table.
+  const updateOrderStatus = async (id, status) => {
+    try {
+      const res = await apiClient.patch(`${ORDERS_API_URL}/${id}/status`, { status });
+      const updated = res.data?.data;
+
+      // Palitan lang sa list yung na-edit na order (walang re-fetch ng
+      // buong listahan) — mas mabilis ang UI update.
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+
+      return updated;
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to update order status'), { cause: err });
+    }
+  };
 
   // ── Product actions ────
   const addProduct = async () => {};
@@ -172,10 +231,9 @@ export function AppProvider({ children }) {
   const deleteProduct = async () => {};
   const uploadProductImage = async () => {};
 
-  // ── Order actions ────
+  // ── Order actions (add/online — di pa saklaw ng task na ito) ────
   const addOrder = async () => {};
   const addOnlineOrder = async () => {};
-  const updateOrderStatus = async () => {};
 
   // ── Ingredient actions ────
   const addIngredient = async (data) => {
@@ -236,12 +294,9 @@ export function AppProvider({ children }) {
       throw new Error(getErrMsg(err, 'Failed to delete material'), { cause: err });
     }
   };
-  // Sa AppContext.jsx, sa restockMaterial function
   const restockMaterial = async (id, data) => {
-    console.log("FETCHING URL:", `/materials/${id}/restock`);
     try {
-      const res = await apiClient.patch(`/materials/${id}/restock`, data);
-      console.log("RESTOCK RESPONSE:", res.status);
+      await apiClient.patch(`/materials/${id}/restock`, data);
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to restock'), { cause: err });
@@ -322,8 +377,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  // ── Void Restock (ADDED HERE) ────
-  // Kanselahin (void) ang isang MALING restock entry
+  // ── Void Restock ────
   const voidRestockLog = async (logId, force = false) => {
     try {
       await apiClient.patch(`/logs/${logId}/void${force ? '?force=true' : ''}`);
@@ -337,14 +391,15 @@ export function AppProvider({ children }) {
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     loading, error,
-    fetchAll, fetchOrders,
+    fetchAll,
+    fetchOrders, fetchOrderById, updateOrderStatus, // <-- ADDED / WIRED
     addProduct, updateProduct, deleteProduct, uploadProductImage,
-    addOrder, addOnlineOrder, updateOrderStatus,
+    addOrder, addOnlineOrder,
     addIngredient, updateIngredient, deleteIngredient, restockIngredient,
     addMaterial, updateMaterial, deleteMaterial, restockMaterial,
     addRecipe, updateRecipe, deleteRecipe,
     confirmBatch,
-    logWaste, voidWasteLog, voidRestockLog, // <-- ADDED voidRestockLog HERE
+    logWaste, voidWasteLog, voidRestockLog,
     fetchInventoryHistory,
     formatPHP
   };

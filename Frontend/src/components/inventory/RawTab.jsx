@@ -26,7 +26,6 @@ export default function IngredientsTab() {
   
   const isDeletingRef = useRef(false);
 
-  // Kuhanin ang pinakabagong data mula sa ingredients array para hindi maging stale ang modal
   const currentEditIng = ingredients.find(ing => ing.id === editIng?.id) || editIng;
 
   const filtered = ingredients.filter(ing =>
@@ -34,7 +33,6 @@ export default function IngredientsTab() {
   );
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  // Pinagsamang Save Logic (Add / Edit / Restock)
   const handleSave = async (payload) => {
     if (payload.isNew) {
       await addIngredient(payload.newData);
@@ -110,7 +108,6 @@ export default function IngredientsTab() {
 
           {!isLoading && (
             <>
-              {/* Mobile Cards View */}
               <div className="block md:hidden space-y-3">
                 {paged.map(ing => {
                   const st = ingStatus(ing.stock, ing.min);
@@ -137,7 +134,6 @@ export default function IngredientsTab() {
                 })}
               </div>
 
-              {/* Desktop Table View */}
               <div className="hidden md:block">
                 <Table columns={[
                   { label: 'Ingredient Name' },
@@ -203,18 +199,15 @@ export default function IngredientsTab() {
   );
 }
 
-/* ========================================================================
-   INGREDIENT MODAL COMPONENT
-   ======================================================================== */
 function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const { show: showToast } = useToast();
   
-  // State variables
   const [name, setName]               = useState(ingredient?.name ?? '');
   const [unit, setUnit]               = useState(ingredient?.unit ?? 'kg');
   const [stock, setStock]             = useState('');
   const [min, setMin]                 = useState(ingredient?.min ?? '');
   const [cost, setCost]               = useState(''); 
+  const [expiry, setExpiry]           = useState(''); // BAGONG DAGDAG
   const [detailsCost, setDetailsCost] = useState(String(ingredient?.costPerUnit ?? ''));
 
   const [editingDetails, setEditingDetails] = useState(false);
@@ -223,7 +216,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
   const isEdit = !!ingredient?.id;
 
-  // Numerical Calculations & Errors
   const finalizedStock = parseFractionInput(stock);
   const addedQty       = parseFloat(finalizedStock) || 0;
   
@@ -232,7 +224,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const costError        = getCostError(cost);
   const detailsCostError = getCostError(detailsCost);
 
-  // Suriin kung may pagbabagong ginawa sa mga detalye
   const isDetailsModified = isEdit && (
     name.trim() !== (ingredient?.name ?? '').trim() ||
     unit !== (ingredient?.unit ?? 'kg') ||
@@ -264,7 +255,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     setEditingDetails(false);
   };
 
-  // Validation
   const handleValidate = () => {
     if (isSaving) return;
 
@@ -286,7 +276,8 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
           stock_quantity: addedQty, 
           minimum_stock: parseFloat(min), 
           cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
-          category: 'Raw Material' 
+          category: 'Raw Material',
+          expiration_date: expiry || null // BAGONG DAGDAG
         },
         addedQty,
         itemName: name.trim(),
@@ -317,7 +308,13 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     const detailsPayload = isDetailsModified || editingDetails
       ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
       : null;
-    const restockPayload = stock ? { added_qty: addedQty, total_cost: cost ? parseFloat(cost) : 0 } : null;
+      
+    // BAGONG DAGDAG SA RESTOCK PAYLOAD
+    const restockPayload = stock ? { 
+      added_qty: addedQty, 
+      total_cost: cost ? parseFloat(cost) : 0,
+      expiration_date: expiry || null 
+    } : null;
 
     setConfirmPayload({
       detailsPayload,
@@ -337,6 +334,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       setConfirmPayload(null);
       setStock('');
       setCost('');
+      setExpiry(''); // Reset
       onClose(); 
     } catch (err) {
       showToast(err.message || 'Failed to save', 'error');
@@ -378,7 +376,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
         }
       >
         <div className="space-y-5">
-          {/* Header Banner */}
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
@@ -394,7 +391,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
             </div>
           )}
 
-          {/* ADD NEW INGREDIENT FORM */}
           {!isEdit && (
             <div className="space-y-5">
               <div className="space-y-3">
@@ -445,19 +441,28 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
-                <div>
-                  <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
-                  {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
+                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
+                  </div>
+                  <div>
+                    {/* BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA ADD NEW */}
+                    <Input 
+                      label="Expiration Date (Optional)" 
+                      type="date" 
+                      value={expiry} 
+                      onChange={e => setExpiry(e.target.value)} 
+                    />
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* EDIT DETAILS AND RESTOCK FORM */}
           {isEdit && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
               
-              {/* SECTION A: DETAILS CARD */}
               <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-brand-100">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-500">Ingredient Details</span>
@@ -549,7 +554,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 </div>
               </div>
 
-              {/* SECTION B: RESTOCK CARD */}
               <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
                 <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
                   <RefreshCw size={13} className="text-brand-500" />
@@ -582,13 +586,22 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     />
                     {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
                   </div>
+
+                  <div>
+                    {/* BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA RESTOCK */}
+                    <Input 
+                      label="Expiration Date (Optional)" 
+                      type="date" 
+                      value={expiry} 
+                      onChange={e => setExpiry(e.target.value)} 
+                    />
+                  </div>
                 </div>
               </div>
 
             </div>
           )}
 
-          {/* Restock History Panel */}
           {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" />}
         </div>
       </Modal>

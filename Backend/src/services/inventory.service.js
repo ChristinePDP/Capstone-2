@@ -81,7 +81,9 @@ const IngredientService = {
       transaction_type: 'IN',
       quantity: addedQty,
       cost: totalCost,
-      action: 'Restock'
+      action: 'Restock',
+      remaining_quantity: addedQty, 
+      expiration_date: body.expiration_date || null
     };
     console.log('DATA NA IPAPASA SA SUPABASE:', logPayload);
 
@@ -160,7 +162,9 @@ const MaterialService = {
         transaction_type: 'IN',
         quantity: addedQty,
         cost: totalCost,
-        action: 'Restock'
+        action: 'Restock',
+        remaining_quantity: addedQty, 
+        expiration_date: body.expiration_date || null
       };
 
       const logResult = await InventoryLogModel.logHistory(logPayload);
