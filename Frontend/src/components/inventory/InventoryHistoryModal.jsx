@@ -17,31 +17,6 @@ const formatDT = (iso) => {
 const PAGE_SIZE = 5;
 
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
-// Inline panel (HINDI hiwalay na modal) na ipinapakita sa loob mismo
-// ng "Manage Stock" modal — para iisang tingin lang para makita ang
-// stock ngayon AT ang dating restock history, sa halip na magbukas pa
-// ng ibang modal.
-//
-// DESIGN NOTES (sagot sa mga tanong tungkol sa dami ng history):
-//   1. Naka-limit na ito sa backend (InventoryLogController) sa
-//      pinaka-huling 90 araw bilang default window — kaya hindi ito
-//      "infinite" kahit matagal nang ginagamit ang item. Kung
-//      kailangan pa ring mas mahabang range, dagdag na feature na iyon
-//      (hindi kasama dito) sa halip na basta i-hide ang mga lumang
-//      entries.
-//   2. Hindi na kailangang aktibong "tanggalin" sa listahan ang mga
-//      matagal nang restock — kung nagamit na sa production/waste ang
-//      stock mula doon, awtomatiko namang babawalan (ng backend, HTTP
-//      409) ang pag-void nito, may extra confirmation pa ("Kulang na
-//      ang kasalukuyang stock") bago pilitin. Kaya ligtas pa ring
-//      makita ang lahat ng recent history nang walang risk.
-//   3. Ang totoong problema dati ay VISUAL — may sarili pang scroll
-//      (max-h-52 overflow-y-auto) SA LOOB ng listahan, kasabay pa ng
-//      Prev/Next pagination sa ibaba — dalawang magkaibang paraan ng
-//      pag-navigate nang sabay-sabay, nakalilito. Tinanggal na ang
-//      inner scroll; pagination na lang (5 per page) gamit ang shared
-//      Pagination component (parehong ginagamit sa RawTab, WasteTab,
-//      atbp. — consistent sa buong app).
 export function RestockHistoryPanel({ itemName, itemType }) {
   const { fetchInventoryHistory, voidRestockLog } = useApp() || {};
   const { show } = useToast();
@@ -49,9 +24,6 @@ export function RestockHistoryPanel({ itemName, itemType }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Void mode — walang checkbox na basta nakikita, kailangan munang
-  // i-click ang "Select to Void" para lumabas ang mga checkbox (mas
-  // malinaw sa user na sinasadya niya itong gawin).
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [confirmLog, setConfirmLog] = useState(null);
@@ -115,10 +87,6 @@ export function RestockHistoryPanel({ itemName, itemType }) {
     return () => { cancelled = true; };
   }, [itemName, itemType]);
 
-  // IMPORTANT: hindi na natin ginagamit ang useEffect+setPage para
-  // i-clamp ang page (dating pattern, nagdulot ng "set-state-in-effect"
-  // warning) — direkta na lang kinakalkula ang "safePage" habang
-  // nagre-render.
   const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
 
@@ -148,7 +116,6 @@ export function RestockHistoryPanel({ itemName, itemType }) {
     setSelectedIds([]);
   };
 
-  // Isahang pag-void.
   const runVoid = async (log, force = false) => {
     if (!voidRestockLog || !log) return;
     setVoidingId(log.id);
@@ -174,7 +141,6 @@ export function RestockHistoryPanel({ itemName, itemType }) {
     }
   };
 
-  // Maramihang pag-void.
   const runBulkVoid = async () => {
     if (!selectedIds.length || !voidRestockLog) return;
     setIsBulkConfirmOpen(false);
@@ -275,7 +241,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
 
         {!loading && !errorMsg && logs.length > 0 && (
           <>
-            {/* 📱 MOBILE CARDS — walang scroll-in-scroll, natural height lang */}
+            {/* 📱 MOBILE CARDS */}
             <div className="block sm:hidden divide-y divide-brand-100 bg-white">
               {pagedLogs.map((log, idx) => {
                 const isVoided = Boolean(log.voided_at);
@@ -303,6 +269,12 @@ export function RestockHistoryPanel({ itemName, itemType }) {
                           )}
                         </div>
                         <p className="text-[11px] text-brand-500">{formatDT(log.created_at)}</p>
+                        {/* BAGONG DAGDAG: Expiration Date */}
+                        {log.expiration_date && (
+                          <p className="text-[10px] font-medium text-amber-600 mt-0.5">
+                            Exp: {new Date(log.expiration_date).toLocaleDateString('en-PH')}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</p>
@@ -314,7 +286,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
               })}
             </div>
 
-            {/* 💻 DESKTOP TABLE — natural height, walang overflow-y wrapper */}
+            {/* 💻 DESKTOP TABLE */}
             <table className="hidden sm:table w-full text-left text-sm">
               <thead className="bg-brand-50/90 border-b border-brand-100 text-[10px] uppercase tracking-wider text-brand-500">
                 <tr>
@@ -330,6 +302,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
                   )}
                   <th className="px-3 py-2 font-bold">Petsa at Oras</th>
                   <th className="px-3 py-2 font-bold">Action</th>
+                  <th className="px-3 py-2 font-bold">Expiration</th>
                   <th className="px-3 py-2 font-bold text-right">Qty</th>
                   <th className="px-3 py-2 font-bold text-right">Halaga</th>
                 </tr>
@@ -359,6 +332,9 @@ export function RestockHistoryPanel({ itemName, itemType }) {
                         ) : (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">Restock</span>
                         )}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] font-medium text-amber-600 whitespace-nowrap">
+                        {log.expiration_date ? new Date(log.expiration_date).toLocaleDateString('en-PH') : '—'}
                       </td>
                       <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</td>
                       <td className="px-3 py-2 text-right text-xs text-brand-600 font-medium">{log.cost > 0 ? `₱${Number(log.cost).toFixed(2)}` : '—'}</td>
