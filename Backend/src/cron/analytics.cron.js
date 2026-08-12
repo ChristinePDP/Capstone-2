@@ -12,7 +12,7 @@ import {
 //   'event_ads_homepage' cache papuntang { active: false } — kaya safe
 //   siyang tawagin kahit walang event, hindi na kailangan ng dagdag
 //   na if-check dito sa cron.
-import { generateHomepageAds, generateEventAds } from '../services/productManagement.service.js'; 
+import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js'; 
 
 const setupAnalyticsCron = (
   scheduler = cron,

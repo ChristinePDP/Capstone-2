@@ -130,7 +130,7 @@ function EventModal({
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden border border-[#EAE4E0]">
         
         <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-serif font-bold text-[#3B1F0A]">
+          <h2 className="text-xl font-bold text-[#3B1F0A]">
             {isEditing ? 'Edit Event' : 'Add New Event'}
           </h2>
           <button 
@@ -293,8 +293,8 @@ function EventModal({
 }
 
 // ============================================================
-// PARENT COMPONENT: OccasionManager
-// Dito na-connect sa backend (/occasions endpoints) yung
+// PARENT COMPONENT: EventManager
+// Dito na-connect sa backend (/events endpoints) yung
 // Add / Edit / Delete na galing sa EventModal. Walang mock/seed
 // data — talagang mula sa database ang lahat ng makikita dito.
 // ============================================================
@@ -314,7 +314,7 @@ const parseResponse = async (res) => {
   return result.data;
 };
 
-export default function OccasionManager() {
+export default function EventManager() {
   const [events, setEvents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -324,16 +324,16 @@ export default function OccasionManager() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // Kunin lahat ng occasions mula sa backend
-  const fetchOccasions = async () => {
+  // Kunin lahat ng events mula sa backend
+  const fetchEvents = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/occasions`);
+      const res = await fetch(`${API_BASE}/events`);
       const data = await parseResponse(res);
       setEvents(data || []);
     } catch (err) {
-      console.error('Fetch Occasions Error:', err);
+      console.error('Fetch Events Error:', err);
       setError(err.message);
     } finally {
       setIsLoading(false);
@@ -341,7 +341,7 @@ export default function OccasionManager() {
   };
 
   useEffect(() => {
-    fetchOccasions();
+    fetchEvents();
   }, []);
 
   const handleOpenAdd = () => {
@@ -368,17 +368,17 @@ export default function OccasionManager() {
     setError(null);
     try {
       const isUpdate = isEditing && formData.id;
-      const res = await fetch(`${API_BASE}/occasions${isUpdate ? `/${formData.id}` : ''}`, {
+      const res = await fetch(`${API_BASE}/events${isUpdate ? `/${formData.id}` : ''}`, {
         method: isUpdate ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
 
       await parseResponse(res);
-      await fetchOccasions(); // i-refresh yung list galing sa totoong database
+      await fetchEvents(); // i-refresh yung list galing sa totoong database
       handleCloseModal();
     } catch (err) {
-      console.error('Save Occasion Error:', err);
+      console.error('Save Event Error:', err);
       setError(err.message);
     } finally {
       setIsSaving(false);
@@ -390,12 +390,12 @@ export default function OccasionManager() {
     setIsSaving(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/occasions/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/events/${id}`, { method: 'DELETE' });
       await parseResponse(res);
-      await fetchOccasions();
+      await fetchEvents();
       handleCloseModal();
     } catch (err) {
-      console.error('Delete Occasion Error:', err);
+      console.error('Delete Event Error:', err);
       setError(err.message);
     } finally {
       setIsSaving(false);
@@ -408,100 +408,103 @@ export default function OccasionManager() {
 
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/occasions/${event.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/events/${event.id}`, { method: 'DELETE' });
       await parseResponse(res);
       setEvents(prev => prev.filter(ev => ev.id !== event.id));
     } catch (err) {
-      console.error('Quick Delete Occasion Error:', err);
+      console.error('Quick Delete Event Error:', err);
       setError(err.message);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF7F4] p-8">
-      <div className="max-w-4xl mx-auto">
+    <div>
+      {/* Palaging ipakita ang scrollbar ng page (kahit maikli lang ang laman
+          gaya ngayon dahil kaunti pa lang ang events) para hindi
+          "gumagalaw"/lumiliit ang layout tuwing nagpapalit ng dami ng laman
+          ang page. */}
+      <style>{`html { overflow-y: scroll; }`}</style>
 
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-[#3B1F0A]">Occasion Manager</h1>
-            <p className="text-xs text-[#8A7264] mt-1">Manage seasonal events and AI product recommendations</p>
-          </div>
-          <button
-            onClick={handleOpenAdd}
-            className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md flex items-center gap-1.5 shrink-0"
-          >
-            <Plus size={14} /> Add New Event
-          </button>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[#3B1F0A]">Event Manager</h1>
+          <p className="text-xs text-[#8A7264] mt-1">Manage seasonal events and AI product recommendations</p>
         </div>
+        <button
+          onClick={handleOpenAdd}
+          className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md flex items-center gap-1.5 shrink-0"
+        >
+          <Plus size={14} /> Add New Event
+        </button>
+      </div>
 
-        {error && (
-          <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
-            {error}
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+          {error}
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
+        {isLoading ? (
+          <div className="px-7 py-14 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264]">
+            <Loader2 size={18} className="animate-spin" />
+            Loading events...
           </div>
-        )}
-
-        <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
-          {isLoading ? (
-            <div className="px-7 py-14 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264]">
-              <Loader2 size={18} className="animate-spin" />
-              Loading occasions...
-            </div>
-          ) : events.length === 0 ? (
-            <div className="px-7 py-14 text-center text-xs text-[#8A7264]">
-              No events yet. Click "Add New Event" to create one.
-            </div>
-          ) : (
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-[#F5EFEB] text-[10px] font-bold text-[#8A7264] uppercase tracking-wider">
-                  <th className="px-7 py-3">Event</th>
-                  <th className="px-4 py-3">AI Tag</th>
-                  <th className="px-4 py-3">Date Range</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-7 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EAE4E0]">
-                {events.map((event) => (
-                  <tr key={event.id} className="hover:bg-[#FAF7F4] transition-colors">
-                    <td className="px-7 py-4 text-xs font-semibold text-[#3B1F0A]">{event.event_name}</td>
-                    <td className="px-4 py-4 text-xs text-[#5A453C]">{event.event_tag}</td>
-                    <td className="px-4 py-4 text-xs text-[#5A453C] whitespace-nowrap">
-                      {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                          event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                        }`}
+        ) : events.length === 0 ? (
+          <div className="px-7 py-14 text-center text-xs text-[#8A7264]">
+            No events yet. Click "Add New Event" to create one.
+          </div>
+        ) : (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-[#F5EFEB] text-[10px] font-bold text-[#8A7264] uppercase tracking-wider">
+                <th className="px-7 py-3">Event</th>
+                <th className="px-4 py-3">AI Tag</th>
+                <th className="px-4 py-3">Date Range</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-7 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#EAE4E0]">
+              {events.map((event) => (
+                <tr key={event.id} className="hover:bg-[#FAF7F4] transition-colors">
+                  <td className="px-7 py-4 text-xs font-semibold text-[#3B1F0A]">{event.event_name}</td>
+                  <td className="px-4 py-4 text-xs text-[#5A453C]">{event.event_tag}</td>
+                  <td className="px-4 py-4 text-xs text-[#5A453C] whitespace-nowrap">
+                    {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
+                  </td>
+                  <td className="px-4 py-4">
+                    <span
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                        event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                      }`}
+                    >
+                      {event.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-7 py-4">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleOpenEdit(event)}
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
+                        title="Edit"
                       >
-                        {event.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-7 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleOpenEdit(event)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => handleQuickDelete(event)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => handleQuickDelete(event)}
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <EventModal

@@ -7,15 +7,16 @@ import inventoryRoutes from './routes/inventory.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import onlineOrderingRoutes from './routes/onlineOrdering.routes.js';
 import qrScaner from './routes/Qr.routes.js';
-import productManagementRoutes from './routes/productManagement.routes.js';
-import ordersRoutes from './routes/orders.routes.js'; // <-- ADDED
+// Updated import path and variable name
+import productAndEventRoutes from './routes/productAndEvent.routes.js';
+import ordersRoutes from './routes/orders.routes.js'; 
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 
 const app = express(); 
 
 app.use(cors({
-  origin: true, // Ito ang magic word! Automatic niyang ia-allow kung anong URL man ang gamit mo ngayon.
+  origin: true, 
   credentials: true 
 }));
 
@@ -36,11 +37,13 @@ app.get('/', (req, res) => res.json({ status: 'CakeLytics backend is running' })
 
 app.use('/api', authRoutes); 
 app.use('/api/inventory', inventoryRoutes); 
-app.use('/api/allOrders', ordersRoutes); // <-- ADDED (kaya /api/allOrders/...)
+app.use('/api/allOrders', ordersRoutes); 
 app.use('/api/analytics', analyticsRoutes); 
 app.use('/api/online-ordering', onlineOrderingRoutes);
 app.use('/api/Qr', qrScaner);
-app.use('/api/online-ordering/products', productManagementRoutes);
+
+// Updated route usage
+app.use('/api/online-ordering/products', productAndEventRoutes);
 app.use(errorHandler);
 
 export default app;
