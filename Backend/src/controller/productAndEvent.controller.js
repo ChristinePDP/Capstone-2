@@ -1,20 +1,45 @@
-// backend/controllers/productManagement.controller.js
-import { createDatabaseProduct, uploadImageToProductBucket } from '../services/productManagement.service.js';
-import {
-  getAllOccasions,
-  getOccasionById,
-  createOccasion,
-  updateOccasion,
-  deleteOccasion,
+import { 
+  getAllProducts,
+  createDatabaseProduct, 
+  updateDatabaseProduct,
+  deleteDatabaseProduct,
+  uploadImageToProductBucket,
+  getAllEvents,
+  getEventById,
+  createEvent,
+  updateEvent,
+  deleteEvent,
   generateHomepageAds,
   generateEventAds
-} from '../services/productManagement.service.js';
+} from '../services/productAndEvent.service.js';
 
 import { AnalyticsCacheModel } from '../model/analyticsCache.model.js';
 
+// ============================================================
+// PRODUCT CRUD
+// ============================================================
+
+export const getProducts = async (req, res) => {
+  try {
+    const products = await getAllProducts(req.query);
+    res.status(200).json({
+      success: true,
+      message: 'Products fetched successfully',
+      data: products
+    });
+  } catch (error) {
+    console.error('Fetch Products Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch products.',
+      error: error.message
+    });
+  }
+};
+
 export const addProduct = async (req, res) => {
-  console.log('--- ADD PRODUCT ENDPOINT HIT ---'); // I-log kung na-hit ang endpoint
-  console.log('Incoming Payload:', req.body); // I-log kung ano ang natanggap mula sa frontend
+  console.log('--- ADD PRODUCT ENDPOINT HIT ---');
+  console.log('Incoming Payload:', req.body);
 
   try {
     const productData = req.body;
@@ -29,7 +54,7 @@ export const addProduct = async (req, res) => {
 
     const savedProduct = await createDatabaseProduct(productData);
     
-    console.log('Product Successfully Saved:', savedProduct); // I-log kung success sa database
+    console.log('Product Successfully Saved:', savedProduct);
 
     res.status(201).json({ 
         success: true, 
@@ -37,11 +62,49 @@ export const addProduct = async (req, res) => {
         data: savedProduct 
     });
   } catch (error) {
-    console.error('Product Creation Error Caught:', error); // I-log kung may error sa mismong pag-save
+    console.error('Product Creation Error Caught:', error);
     res.status(500).json({ 
         success: false, 
         message: 'Failed to add product.',
         error: error.message 
+    });
+  }
+};
+
+export const editProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedProduct = await updateDatabaseProduct(id, req.body);
+    res.status(200).json({ 
+      success: true, 
+      message: 'Product updated successfully', 
+      data: updatedProduct 
+    });
+  } catch (error) {
+    console.error('Product Update Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update product.', 
+      error: error.message 
+    });
+  }
+};
+
+export const removeProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedProduct = await deleteDatabaseProduct(id);
+    res.status(200).json({ 
+      success: true, 
+      message: 'Product deleted successfully', 
+      data: deletedProduct 
+    });
+  } catch (error) {
+    console.error('Product Delete Error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete product.', 
+      error: error.message 
     });
   }
 };
@@ -51,8 +114,6 @@ export const uploadProductImage = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
-    
-    // Tatawagin natin ang service function para i-upload
     const publicUrl = await uploadImageToProductBucket(req.file);
     res.status(200).json({ success: true, url: publicUrl });
   } catch (error) {
@@ -62,62 +123,61 @@ export const uploadProductImage = async (req, res) => {
 };
 
 // ============================================================
-// OCCASIONS CRUD (para sa Occasion Manager)
+// EVENTS CRUD
 // ============================================================
 
-export const getOccasions = async (req, res) => {
+export const getEvents = async (req, res) => {
   try {
-    // ?active=true para active occasions lang (gamit ng homepage/AI recs)
     const activeOnly = req.query.active === 'true';
-    const occasions = await getAllOccasions({ activeOnly });
+    const events = await getAllEvents({ activeOnly });
 
     res.status(200).json({
       success: true,
-      message: 'Occasions fetched successfully',
-      data: occasions
+      message: 'Events fetched successfully',
+      data: events
     });
   } catch (error) {
-    console.error('Get Occasions Error:', error);
+    console.error('Get Events Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch occasions.',
+      message: 'Failed to fetch events.',
       error: error.message
     });
   }
 };
 
-export const getOccasion = async (req, res) => {
+export const getEvent = async (req, res) => {
   try {
     const { id } = req.params;
-    const occasion = await getOccasionById(id);
+    const event = await getEventById(id);
 
-    if (!occasion) {
-      return res.status(404).json({ success: false, message: 'Occasion not found.' });
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found.' });
     }
 
     res.status(200).json({
       success: true,
-      message: 'Occasion fetched successfully',
-      data: occasion
+      message: 'Event fetched successfully',
+      data: event
     });
   } catch (error) {
-    console.error('Get Occasion Error:', error);
+    console.error('Get Event Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch occasion.',
+      message: 'Failed to fetch event.',
       error: error.message
     });
   }
 };
 
-export const addOccasion = async (req, res) => {
-  console.log('--- ADD OCCASION ENDPOINT HIT ---');
+export const addEvent = async (req, res) => {
+  console.log('--- ADD EVENT ENDPOINT HIT ---');
   console.log('Incoming Payload:', req.body);
 
   try {
-    const occasionData = req.body;
+    const eventData = req.body;
 
-    if (!occasionData.event_name || !occasionData.event_tag) {
+    if (!eventData.event_name || !eventData.event_tag) {
       console.log('Validation Failed: Missing required fields.');
       return res.status(400).json({
         success: false,
@@ -125,65 +185,69 @@ export const addOccasion = async (req, res) => {
       });
     }
 
-    const savedOccasion = await createOccasion(occasionData);
-    console.log('Occasion Successfully Saved:', savedOccasion);
+    const savedEvent = await createEvent(eventData);
+    console.log('Event Successfully Saved:', savedEvent);
 
     res.status(201).json({
       success: true,
-      message: 'Occasion added successfully',
-      data: savedOccasion
+      message: 'Event added successfully',
+      data: savedEvent
     });
   } catch (error) {
-    console.error('Occasion Creation Error Caught:', error);
+    console.error('Event Creation Error Caught:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to add occasion.',
+      message: 'Failed to add event.',
       error: error.message
     });
   }
 };
 
-export const editOccasion = async (req, res) => {
+export const editEvent = async (req, res) => {
   try {
     const { id } = req.params;
-    const occasionData = req.body;
+    const eventData = req.body;
 
-    const updatedOccasion = await updateOccasion(id, occasionData);
+    const updatedEvent = await updateEvent(id, eventData);
 
     res.status(200).json({
       success: true,
-      message: 'Occasion updated successfully',
-      data: updatedOccasion
+      message: 'Event updated successfully',
+      data: updatedEvent
     });
   } catch (error) {
-    console.error('Occasion Update Error:', error);
+    console.error('Event Update Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to update occasion.',
+      message: 'Failed to update event.',
       error: error.message
     });
   }
 };
 
-export const removeOccasion = async (req, res) => {
+export const removeEvent = async (req, res) => {
   try {
     const { id } = req.params;
-    const deletedOccasion = await deleteOccasion(id);
+    const deletedEvent = await deleteEvent(id);
 
     res.status(200).json({
       success: true,
-      message: 'Occasion deleted successfully',
-      data: deletedOccasion
+      message: 'Event deleted successfully',
+      data: deletedEvent
     });
   } catch (error) {
-    console.error('Occasion Delete Error:', error);
+    console.error('Event Delete Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete occasion.',
+      message: 'Failed to delete event.',
       error: error.message
     });
   }
 };
+
+// ============================================================
+// ADS GENERATORS
+// ============================================================
 
 export const getHomepageAds = async (req, res) => {
   try {
@@ -199,17 +263,10 @@ export const getHomepageAds = async (req, res) => {
   }
 };
 
-// ============================================================
-// EVENT ADS MODAL (hiwalay sa Best Sellers homepage section)
-// ============================================================
-
 export const getEventAds = async (req, res) => {
   try {
     const cachedData = await AnalyticsCacheModel.getByKey('event_ads_homepage');
 
-    // Walang cached data pa, o na-clear kasi walang live occasion ngayon —
-    // 'active: false' pa rin ang ibalik (hindi error) para consistent lang
-    // ang pag-check ng frontend.
     if (!cachedData || !cachedData.payload || cachedData.payload.active === false) {
       return res.status(200).json({ success: true, data: { active: false } });
     }
@@ -219,11 +276,6 @@ export const getEventAds = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
-// ============================================================
-// MANUAL TRIGGERS (para sa testing / admin "regenerate now" button —
-// hindi mo kailangang maghintay ng cron o ng totoong petsa ng event)
-// ============================================================
 
 export const regenerateHomepageAds = async (req, res) => {
   try {

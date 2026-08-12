@@ -12,9 +12,18 @@ const PAGE_TITLES = {
   '/inventory':'Inventory',
 };
 
+// Ang "/productAndEvent" ay may "/*" wildcard sa route nito (para pumasok
+// din ang "/productAndEvent/events" sub-path), kaya hindi ito basta-basta
+// mahahanap sa exact-match na PAGE_TITLES object sa itaas. I-check natin
+// muna kung nagsisimula sa "/productAndEvent" ang pathname bago mag-fallback.
+const resolveTitle = (pathname) => {
+  if (pathname.startsWith('/productAndEvent')) return 'Product and Event Management';
+  return PAGE_TITLES[pathname] || 'Dashboard';
+};
+
 export default function Header({ onMenuClick }) {
   const { pathname } = useLocation();
-  const title = PAGE_TITLES[pathname] || 'Dashboard';
+  const title = resolveTitle(pathname);
 
   const { orders } = useApp();
   const [timeStr, setTimeStr] = useState('');

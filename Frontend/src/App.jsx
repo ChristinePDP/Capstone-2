@@ -6,10 +6,10 @@ import InventoryPage from './pages/InventoryPage';
 import AnalyticsPage from './pages/analyticsPage';
 import OnlineOrderingPage from './pages/onlineOrderingPage';
 import AllOrdersPage from './pages/AllOrdersPage'; // <-- ADDED
-import ProductModal from './components/onlineOrdering/Productmodal';
 import QrScanner from './components/onlineOrdering/MobileScanner';
-import OccasionManager from './components/onlineOrdering/OccasionManager';
 import EventAdsModal from './components/onlineOrdering/eventAdsModal';
+
+import ProductAndEventPage from './pages/productAndEventPage';
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -73,16 +73,18 @@ export default function App() {
 
           {/* ── ANALYTICS PAGES (Private) ── */}
           <Route path="/analytics" element={<ProtectedAdminRoute><AnalyticsPage /></ProtectedAdminRoute>} />
+
+           {/* ── PRODUCT & EVENT MANAGEMENT (Private) ── */}
+          {/* "/*" wildcard para pumasok din ang "/productAndEvent/events" tab route */}
+          <Route path="/productAndEvent/*" element={<ProtectedAdminRoute><ProductAndEventPage /></ProtectedAdminRoute>} />
           
           {/* ── DAGDAG: Explicit redirect kapag eksaktong "/onlineOrdering" lang ang tinype ── */}
           <Route path="/onlineOrdering" element={<Navigate to="/onlineOrdering/home" replace />} />
           
           {/* ── YUNG ORIGINAL MO: Sasalo sa /onlineOrdering/home, /menu, /checkout, etc. ── */}
           <Route path="/onlineOrdering/*" element={<OnlineOrderingPage />} />
-          <Route path="/productmodal" element={<ProductModal />} />
           <Route path="/qr" element={<QrScanner />} />
 
-          <Route path="/occasions" element={<OccasionManager />} />
            <Route path="/eventads" element={<EventAdsModal />} />
 
           {/* ── 404 ── */}

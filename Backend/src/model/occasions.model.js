@@ -1,13 +1,12 @@
 // backend/model/occasions.model.js
-import { supabase } from '../config/supabase.js';
+import { getSupabase } from '../config/supabase.js';
 
 const TABLE_NAME = 'occasions';
 
 export const OccasionModel = {
   // Kunin lahat ng occasions. Pwedeng i-filter para active lang
-  // (ginagamit ito ng homepage/AI recommendation lookup).
   async findAll({ activeOnly = false } = {}) {
-    let query = supabase
+    let query = getSupabase()
       .from(TABLE_NAME)
       .select('*')
       .order('start_month', { ascending: true });
@@ -23,7 +22,7 @@ export const OccasionModel = {
 
   // Kunin ang isang occasion base sa id
   async findById(id) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from(TABLE_NAME)
       .select('*')
       .eq('id', id)
@@ -33,12 +32,11 @@ export const OccasionModel = {
     return data;
   },
 
-  // Gumawa ng bagong occasion. Tinatanggap na array yung insert
-  // (tulad ng ginagawa ng ProductModel.create) para consistent.
+  // Gumawa ng bagong occasion
   async create(occasionRows) {
     const rows = Array.isArray(occasionRows) ? occasionRows : [occasionRows];
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from(TABLE_NAME)
       .insert(rows)
       .select();
@@ -49,7 +47,7 @@ export const OccasionModel = {
 
   // I-update ang existing occasion base sa id
   async update(id, occasionData) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from(TABLE_NAME)
       .update(occasionData)
       .eq('id', id)
@@ -61,7 +59,7 @@ export const OccasionModel = {
 
   // Burahin ang occasion base sa id
   async remove(id) {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from(TABLE_NAME)
       .delete()
       .eq('id', id)

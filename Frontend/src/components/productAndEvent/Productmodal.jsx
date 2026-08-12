@@ -1,4 +1,3 @@
-// src/components/admin/Productmodal.jsx
 import { useState, useRef, useEffect, forwardRef } from 'react';
 import { Upload, Trash2, Plus, X, Loader2 } from 'lucide-react';
 
@@ -79,7 +78,6 @@ function Textarea({ label, className = '', ...props }) {
   );
 }
 
-// COMPONENT 1: Product Details (Image, Name, Category, Order Type, Inclusion/Description, Occasions)
 const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   { form, onChange, previewUrl, fileInputRef, onFileSelect, availableTags = [], className = '' },
   ref
@@ -100,7 +98,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
         <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={onFileSelect} />
       </div>
 
-      {/* 2. Horizontal Alignment: Choose Image File & Product Name */}
+      {/* 2. Choose Image File & Product Name */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
         <div className="w-full sm:w-auto shrink-0">
           <Button variant="secondary" size="md" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
@@ -112,7 +110,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
         </div>
       </div>
 
-      {/* 3. Horizontal Alignment: Category & Order Type */}
+      {/* 3. Category & Order Type */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
           {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -127,13 +125,13 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
       {/* 4. Inclusion / Description */}
       <Textarea label="Inclusion / Description" value={form.inclusion} onChange={e => onChange('inclusion', e.target.value)} placeholder="e.g. 7x5 Themed Cake w/ Toppers" rows={2} />
 
-      {/* 5. Occasions / Event Tags */}
+      {/* 5. Events Tags */}
       <div className="pt-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 block">Occasions / Events (Optional)</p>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 block">Events / Occasions Tags (Optional)</p>
         
         {availableTags.length === 0 ? (
           <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
-            No active events in the Occasion Manager.
+            No active events in the Event Manager.
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -164,34 +162,20 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
           </div>
         )}
         <p className="text-[10px] text-[#8A7264] mt-2 italic font-light">
-          Leave blank for everyday products (e.g. pandesal, regular bread) or let the AI automatically assign seasonal tags based on the product's name and description.
+          Leave blank for everyday products (e.g. pandesal) or let the AI automatically assign seasonal tags based on the product's name.
         </p>
       </div>
     </div>
   );
 });
 
-// COMPONENT 2: Multiple Price Options
 function MultiplePriceOptions({
-  pricingMode,
-  onPricingModeChange,
-  price,
-  onPriceChange,
-  priceGroups,
-  onAddPriceGroup,
-  onUpdatePriceGroup,
-  onRemovePriceGroup,
-  generatedCombos,
-  priceMatrix,
-  onMatrixPriceChange,
-  className = '',
-  style,
+  pricingMode, onPricingModeChange, price, onPriceChange, priceGroups,
+  onAddPriceGroup, onUpdatePriceGroup, onRemovePriceGroup,
+  generatedCombos, priceMatrix, onMatrixPriceChange, className = '', style,
 }) {
   return (
-    <div
-      style={style}
-      className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col ${className}`}
-    >
+    <div style={style} className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col ${className}`}>
       <div className="flex items-center gap-3 mb-4 shrink-0">
         <input
           type="checkbox"
@@ -207,7 +191,7 @@ function MultiplePriceOptions({
 
       <div className="flex-1 min-h-0 flex flex-col">
       {pricingMode === 'fixed' ? (
-        <Input label="Price" required type="number" value={price} onChange={e => onPriceChange(e.target.value)} placeholder="0" />
+        <Input label="Price" required type="number" min="0" value={price} onChange={e => onPriceChange(e.target.value)} placeholder="0" />
       ) : (
         <div className="flex flex-col flex-1 min-h-0 gap-4">
           <div className="shrink-0">
@@ -241,6 +225,7 @@ function MultiplePriceOptions({
                         <span className="font-bold text-[#8A7264] select-none">₱</span>
                         <input
                           type="number"
+                          min="0"
                           placeholder="0"
                           value={currentPrice}
                           onChange={e => onMatrixPriceChange(combo, e.target.value)}
@@ -260,7 +245,6 @@ function MultiplePriceOptions({
   );
 }
 
-// HELPER: Generate Cartesian Product for Variable Pricing Matrix
 function getCartesianProduct(groups) {
   const validGroups = groups.filter(g => g.name.trim() && g.options.trim());
   if (validGroups.length === 0) return [];
@@ -283,8 +267,20 @@ function getCartesianProduct(groups) {
   }, [{}] ); 
 }
 
-export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess }) {
-  const [form, setForm] = useState(product || BLANK_PRODUCT);
+export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete }) {
+  const initialFormState = product ? {
+    name: product.name || '',
+    category: product.category || PRODUCT_CATEGORIES[0],
+    orderType: product.order_type || 'Both',
+    price: product.price || '',
+    inclusion: product.inclusion || '',
+    image: product.image_url || '',
+    dailyLimit: product.daily_limit || 0,
+    allowFileUpload: product.allow_file_upload || false,
+    eventTags: product.event_tags || []
+  } : BLANK_PRODUCT;
+
+  const [form, setForm] = useState(initialFormState);
   const [fields, setFields] = useState(product?.order_slip_fields || []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -295,14 +291,13 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const [exceptionSlots, setExceptionSlots] = useState(0);
   const [exceptions, setExceptions] = useState(product?.dateExceptions || []);
   
-  // Variable Pricing State
   const [pricingMode, setPricingMode] = useState(product?.pricing_mode || 'fixed');
   const [priceGroups, setPriceGroups] = useState(
     product?.price_groups?.map(g => ({ id: crypto.randomUUID(), name: g.name, options: g.options.join(', ') })) || []
   );
   const [priceMatrix, setPriceMatrix] = useState(product?.price_matrix || []);
 
-  const [availableTags, setAvailableTags] = useState([]); // Wala nang general fallback dito
+  const [availableTags, setAvailableTags] = useState([]);
 
   const fileInputRef = useRef(null);
   const isEditing = !!product?.id;
@@ -310,18 +305,42 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const detailsCardRef = useRef(null);
   const [detailsHeight, setDetailsHeight] = useState(null);
 
-  // FETCH TAGS MULA SA DATABASE KUNG BUKAS ANG MODAL
+  useEffect(() => {
+    if (isOpen) {
+      setForm(product ? {
+        name: product.name || '',
+        category: product.category || PRODUCT_CATEGORIES[0],
+        orderType: product.order_type || 'Both',
+        price: product.price || '',
+        inclusion: product.inclusion || '',
+        image: product.image_url || '',
+        dailyLimit: product.daily_limit || 0,
+        allowFileUpload: product.allow_file_upload || false,
+        eventTags: product.event_tags || []
+      } : BLANK_PRODUCT);
+      
+      setFields(product?.order_slip_fields || []);
+      setPricingMode(product?.pricing_mode || 'fixed');
+      setPriceGroups(product?.price_groups?.map(g => ({ id: crypto.randomUUID(), name: g.name, options: g.options.join(', ') })) || []);
+      setPriceMatrix(product?.price_matrix || []);
+      setExceptions(product?.dateExceptions || []);
+      setPreviewUrl('');
+      setSelectedFile(null);
+    }
+  }, [product, isOpen]);
+
+  // Fetch Tags mula sa updated backend URL (/events)
   useEffect(() => {
     const fetchTags = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/occasions?active=true`);
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/events?active=true`);
         const data = await response.json();
         if (data.success && data.data) {
-          const fetchedTags = data.data.map(occ => occ.event_tag).filter(Boolean);
+          const fetchedTags = data.data.map(event => event.event_tag).filter(Boolean);
           setAvailableTags([...new Set(fetchedTags)]);
         }
       } catch (error) {
-        console.error("Failed to fetch occasion tags:", error);
+        console.error("Failed to fetch event tags:", error);
       }
     };
     if (isOpen) {
@@ -395,9 +414,11 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     let finalPriceGroups = [];
     let derivedBasePrice = Number(form.price);
 
-    if (pricingMode === 'fixed' && !form.price) {
-        alert("Please set a Price for the product.");
-        return;
+    if (pricingMode === 'fixed') {
+        if (form.price === '' || isNaN(Number(form.price)) || Number(form.price) < 0) {
+            alert("Please set a valid positive Price for the product.");
+            return;
+        }
     }
 
     if (pricingMode === 'variable') {
@@ -409,8 +430,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
         for (const combo of combos) {
             const match = priceMatrix.find(p => JSON.stringify(p.combo) === JSON.stringify(combo));
-            if (!match || match.price === '' || isNaN(Number(match.price))) {
-                alert(`Please set a valid price for combination: ${Object.values(combo).join(' / ')}`);
+            if (!match || match.price === '' || isNaN(Number(match.price)) || Number(match.price) < 0) {
+                alert(`Please set a valid positive price for combination: ${Object.values(combo).join(' / ')}`);
                 return;
             }
             finalPriceMatrix.push({ combo, price: Number(match.price) });
@@ -470,8 +491,12 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             event_tags: form.eventTags || [] 
         };
 
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/add`, {
-            method: 'POST',
+        const saveUrl = isEditing
+            ? `${import.meta.env.VITE_API_URL}/online-ordering/products/${product.id}`
+            : `${import.meta.env.VITE_API_URL}/online-ordering/products/add`;
+
+        const response = await fetch(saveUrl, {
+            method: isEditing ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
@@ -495,11 +520,18 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
   const generatedCombos = pricingMode === 'variable' ? getCartesianProduct(priceGroups) : [];
 
+  const handleDeleteClick = () => {
+    if (!isEditing || !onDelete) return;
+    if (window.confirm(`Are you sure you want to delete "${form.name}"? This cannot be undone.`)) {
+      onDelete(product.id);
+    }
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose || (() => window.history.back())} title={isEditing ? `Edit Product` : 'Add Product'} size="xl"
       footer={
         <div className="flex items-center justify-between w-full">
-          {isEditing ? <Button variant="danger" onClick={onClose} disabled={isSubmitting}>Delete Product</Button> : <div></div>}
+          {isEditing ? <Button variant="danger" onClick={handleDeleteClick} disabled={isSubmitting}>Delete Product</Button> : <div></div>}
           <div className="flex gap-3 ml-auto">
             <Button variant="secondary" onClick={onClose || (() => window.history.back())} disabled={isSubmitting}>Close</Button>
             <Button variant="dark" onClick={handleSave} disabled={isSubmitting}>
@@ -579,14 +611,14 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
             <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-              <Input label="Default Daily Capacity (Slots)" type="number" value={form.dailyLimit} onChange={e => handleChange('dailyLimit', e.target.value)} placeholder="0" />
+              <Input label="Default Daily Capacity (Slots)" type="number" min="0" value={form.dailyLimit} onChange={e => handleChange('dailyLimit', e.target.value)} placeholder="0" />
             </div>
 
             <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
               <div className="flex flex-row items-center gap-2 mb-3 w-full">
                 <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
-                <input type="number" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
+                <input type="number" min="0" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
               </div>
               <button onClick={addException} className="w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white hover:bg-[#F5EFEB] transition-colors">
                 + Add Date Exception
