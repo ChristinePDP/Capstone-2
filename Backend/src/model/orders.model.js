@@ -22,11 +22,26 @@ const OrdersModel = {
     if (error) throw error;
     return data;
   },
-  
+
   async findAll() {
     const { data, error } = await getSupabase()
       .from(TABLE)
       .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    return data;
+  },
+
+  // BAGONG METHOD — ginagamit ng "All Orders" admin page. Kailangan
+  // dito ang customer info (name, phone) at order items (product_name,
+  // quantity, total_price) kasama ang BAWAT order sa listahan — hindi
+  // lang yung raw na row mula sa `orders` table (na wala nitong joins,
+  // tingnan ang `findAll()` sa itaas).
+  async findAllWithDetails() {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*, customers(name, phone), order_items(*)')
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
@@ -51,7 +66,7 @@ const OrdersModel = {
       .insert(payload)
       .select()
       .single();
-      
+
     if (error) throw error;
     return data;
   },
@@ -61,7 +76,7 @@ const OrdersModel = {
       .from(TABLE)
       .update({ status })
       .eq('id', id)
-      .select('*')
+      .select('*, customers(name, phone), order_items(*)')
       .single();
 
     if (error) throw error;

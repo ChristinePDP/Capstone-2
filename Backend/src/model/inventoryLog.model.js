@@ -57,24 +57,22 @@ const InventoryLogModel = {
   },
 
   getHistory: async ({ startDate, endDate, itemName, itemType, limit = 100 } = {}) => {
-    let query = supabase
-      .from('inventory_logs')
-      // IMPORTANT: idinagdag ang `id` at `voided_at` sa SELECT — kailangan
-      // ito ng RestockHistoryPanel para malaman KUNG ALIN sa mga row ang
-      // ma-void, at para ipakita kung alin na ang naka-void na.
-      .select('id, item_type, item_name, transaction_type, quantity, cost, action, created_at, voided_at')
-      .order('created_at', { ascending: false })
-      .limit(limit);
+      let query = supabase
+        .from('inventory_logs')
+        // DAGDAG: expiration_date
+        .select('id, item_type, item_name, transaction_type, quantity, cost, action, created_at, voided_at, expiration_date')
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (startDate) query = query.gte('created_at', startDate);
-    if (endDate) query = query.lte('created_at', endDate);
-    if (itemName) query = query.eq('item_name', itemName);
-    if (itemType) query = query.eq('item_type', itemType);
+      if (startDate) query = query.gte('created_at', startDate);
+      if (endDate) query = query.lte('created_at', endDate);
+      if (itemName) query = query.eq('item_name', itemName);
+      if (itemType) query = query.eq('item_type', itemType);
 
-    const { data, error } = await query;
-    if (error) throw error;
-    return data;
-  },
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    },
 };
 
 export { InventoryLogModel };

@@ -5,6 +5,7 @@ import LoginPage from './pages/LoginPage';
 import InventoryPage from './pages/InventoryPage';
 import AnalyticsPage from './pages/analyticsPage';
 import OnlineOrderingPage from './pages/onlineOrderingPage';
+import AllOrdersPage from './pages/AllOrdersPage'; // <-- ADDED
 import ProductModal from './components/onlineOrdering/Productmodal';
 import QrScanner from './components/onlineOrdering/MobileScanner';
 import OccasionManager from './components/onlineOrdering/OccasionManager';
@@ -66,6 +67,9 @@ export default function App() {
 
           {/* ── INVENTORY (Private) ── */}
           <Route path="/inventory" element={<ProtectedAdminRoute><InventoryPage /></ProtectedAdminRoute>} />
+
+          {/* ── ALL ORDERS (Private) — BAGO ── */}
+          <Route path="/orders" element={<ProtectedAdminRoute><AllOrdersPage /></ProtectedAdminRoute>} />
 
           {/* ── ANALYTICS PAGES (Private) ── */}
           <Route path="/analytics" element={<ProtectedAdminRoute><AnalyticsPage /></ProtectedAdminRoute>} />

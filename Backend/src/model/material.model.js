@@ -11,9 +11,6 @@ const MaterialModel = {
   setStock: (id, stock_quantity) =>
     supabase.from('celebration_materials').update({ stock_quantity }).eq('id', id).select().single(),
 
-  // Tingnan ang paliwanag sa IngredientModel.deductByName — parehong
-  // proteksyon dito: i-convert kung kailangan, mag-error kung hindi
-  // ma-convert, para hindi masira ang stock count.
   deductByName: async (name, qty, fromUnit) => {
     const { data } = await supabase.from('celebration_materials').select('stock_quantity, unit').eq('name', name).single();
     if (!data) return;
@@ -32,13 +29,36 @@ const MaterialModel = {
       deductQty = converted;
     }
 
+    // --- BAGONG FEFO LOGIC START ---
+    const { data: batches, error: fetchErr } = await supabase
+      .from('inventory_logs')
+      .select('id, remaining_quantity')
+      .eq('item_name', name)
+      .eq('transaction_type', 'IN')
+      .gt('remaining_quantity', 0)
+      .order('expiration_date', { ascending: true, nullsFirst: false });
+
+    if (!fetchErr && batches) {
+      let remainingToDeduct = deductQty;
+      for (const batch of batches) {
+        if (remainingToDeduct <= 0) break;
+        const availableInBatch = Number(batch.remaining_quantity);
+        const deductFromThisBatch = Math.min(availableInBatch, remainingToDeduct);
+        remainingToDeduct -= deductFromThisBatch;
+
+        await supabase
+          .from('inventory_logs')
+          .update({ remaining_quantity: availableInBatch - deductFromThisBatch })
+          .eq('id', batch.id);
+      }
+    }
+    // --- BAGONG FEFO LOGIC END ---
+
     return supabase.from('celebration_materials')
       .update({ stock_quantity: Math.max(0, data.stock_quantity - deductQty) })
       .eq('name', name);
   },
 
-  // Tingnan ang paliwanag sa IngredientModel.restoreByName — parehong
-  // proteksyon dito, para sa Void/reversal feature.
   restoreByName: async (name, qty, fromUnit) => {
     const { data } = await supabase.from('celebration_materials').select('stock_quantity, unit').eq('name', name).single();
     if (!data) return;
@@ -54,8 +74,6 @@ const MaterialModel = {
       .eq('name', name);
   },
 
-  // Tingnan ang paliwanag sa IngredientModel.reverseRestock — parehong
-  // proteksyon dito (sufficiency check + force flag) para sa Void Restock.
   reverseRestock: async (name, qty, force = false) => {
     const { data } = await supabase
       .from('celebration_materials')
