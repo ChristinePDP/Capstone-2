@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Menu.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand } from 'lucide-react';
+import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
@@ -78,48 +78,40 @@ function ProductModal({ product, onClose, onAddToCart }) {
   return (
     <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
       <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[620px] rounded-2xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
-        
-        {/* STICKY HEADER WITH MOBILE RESPONSIVE BUTTONS */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-6 bg-white border-b border-[#EAE4E0] shrink-0 z-10 gap-3 sm:gap-0">
-          <div className="flex-1 pr-0 sm:pr-4 min-w-0">
+
+        {/* STICKY HEADER - title/price only, buttons live at the end of the scrollable body */}
+        <div className="flex items-start justify-between gap-3 p-4 sm:p-6 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
+          <div className="flex-1 min-w-0">
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1 truncate">{product.category}</span>
             <h2 className="text-xl sm:text-2xl font-serif text-[#3B1F0A] leading-tight mb-1.5 truncate">{product.name}</h2>
             <p className="text-sm font-bold text-[#5A453C]">
               {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
             </p>
           </div>
-          
-          <div className="flex flex-row sm:flex-col gap-2 shrink-0 w-full sm:w-32">
-            <button 
-              onClick={handleAdd} 
-              disabled={isVariable && missingCombo}
-              className={`flex-1 sm:w-full px-4 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm ${isVariable && missingCombo ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed' : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'}`}
-            >
-              Add to Cart
-            </button>
-            <button 
-              onClick={onClose} 
-              className="flex-1 sm:w-full px-4 py-2.5 border border-[#DED4CC] rounded-xl text-xs font-bold text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         {/* SCROLLABLE CONTENT BODY - overscroll-contain stops scroll from chaining to the page behind */}
-        <div 
+        <div
           className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain scrollbar-thin"
         >
-          
+
           {isVariable && (
             <div className="flex flex-col gap-4 mb-6">
               <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Product Options</p>
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.price_groups.map((group, index) => (
-                  <div key={index} className="flex flex-col flex-1 basis-40 min-w-[160px]">
+                  <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
                     <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{group.name} *</label>
-                    <select 
-                      className="border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
+                    <select
+                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
                       value={selectedPriceOptions[group.name] || ''}
                       onChange={e => setSelectedPriceOptions(prev => ({ ...prev, [group.name]: e.target.value }))}
                     >
@@ -142,9 +134,9 @@ function ProductModal({ product, onClose, onAddToCart }) {
                 {product.order_slip_fields.map((field, index) => {
                   if (field.type === 'Select') {
                     return (
-                      <div key={index} className="flex flex-col flex-1 basis-40 min-w-[160px]">
+                      <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
                         <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <select className="border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} defaultValue="">
+                        <select className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} defaultValue="">
                           <option value="" disabled>Select {field.label}...</option>
                           {field.options?.map((opt, i) => (
                             <option key={i} value={opt}>{opt}</option>
@@ -157,14 +149,14 @@ function ProductModal({ product, onClose, onAddToCart }) {
                     return (
                       <div key={index} className="flex flex-col w-full basis-full">
                         <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <textarea placeholder={`Enter ${field.label}...`} className="border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors" rows={3} onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                        <textarea placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors" rows={3} onChange={e => handleAnswerChange(field.label, e.target.value)} />
                       </div>
                     );
                   }
                   return (
-                    <div key={index} className="flex flex-col flex-1 basis-40 min-w-[160px]">
+                    <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
                       <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                      <input type={field.type === 'Number' ? 'number' : 'text'} placeholder={`Enter ${field.label}...`} className="border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                      <input type={field.type === 'Number' ? 'number' : 'text'} placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} />
                     </div>
                   );
                 })}
@@ -202,6 +194,23 @@ function ProductModal({ product, onClose, onAddToCart }) {
               )}
             </div>
           )}
+
+          {/* BUTTONS - part of the scrollable body itself, right after the fields (not a sticky footer) */}
+          <div className={`flex flex-col sm:flex-row-reverse gap-2 ${product.allow_file_upload || isVariable || hasFields ? 'mt-6 pt-6 border-t border-[#EAE4E0]' : ''}`}>
+            <button
+              onClick={handleAdd}
+              disabled={isVariable && missingCombo}
+              className={`flex-1 px-4 py-3 rounded-xl text-xs font-bold transition-colors shadow-sm ${isVariable && missingCombo ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed' : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'}`}
+            >
+              Add to Cart
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 border border-[#DED4CC] rounded-xl text-xs font-bold text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -236,6 +245,29 @@ export default function Menu({ cart, setCart }) {
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  const productListRef = useRef(null);
+
+  const BACK_TO_TOP_THRESHOLD = 400;
+
+  // Tracks scroll position from both possible scroll sources: the window
+  // (mobile, where the whole page scrolls) and the internal product list
+  // container (desktop, where only that panel scrolls).
+  const checkScrollPosition = () => {
+    const windowScrollY = window.scrollY || document.documentElement.scrollTop;
+    const listScrollY = productListRef.current ? productListRef.current.scrollTop : 0;
+    setShowBackToTop(windowScrollY > BACK_TO_TOP_THRESHOLD || listScrollY > BACK_TO_TOP_THRESHOLD);
+  };
+
+  useEffect(() => {
+    window.addEventListener('scroll', checkScrollPosition, { passive: true });
+    return () => window.removeEventListener('scroll', checkScrollPosition);
+  }, []);
+
+  const handleBackToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    productListRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const CATEGORY_ORDER = ['Cake', 'Pastry', 'Package', 'Celebration Material'];
 
@@ -324,10 +356,10 @@ export default function Menu({ cart, setCart }) {
 
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-8 lg:gap-10 px-4 sm:px-8 py-4 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
         
-        <div className="flex-1 flex flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6">
+        <div className="relative flex-1 flex flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6">
           <div className="hidden sm:flex gap-2 flex-wrap mb-4 shrink-0">
             {['All', ...CATEGORY_ORDER].map(cat => (
-              <button key={cat} onClick={() => setActiveTab(cat)} className={`px-5 py-2.5 rounded-full text-xs font-semibold uppercase tracking-wide transition-colors ${activeTab === cat ? 'bg-[#3B1F0A] text-white' : 'bg-[#F5EFEB] text-[#8A7264] hover:bg-[#EAE4E0]'}`}>
+              <button key={cat} onClick={() => setActiveTab(cat)} className={`px-5 py-2.5 rounded-full text-xs font-semibold tracking-wide transition-colors ${activeTab === cat ? 'bg-[#3B1F0A] text-white' : 'bg-[#F5EFEB] text-[#8A7264] hover:bg-[#EAE4E0]'}`}>
                 {cat}
               </button>
             ))}
@@ -341,7 +373,7 @@ export default function Menu({ cart, setCart }) {
             <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-[#8A7264] pointer-events-none" size={16} />
           </div>
 
-          <div className="flex-1 lg:overflow-y-scroll lg:pr-2 lg:pb-10">
+          <div ref={productListRef} onScroll={checkScrollPosition} className="flex-1 lg:overflow-y-scroll lg:pr-2 lg:pb-10">
             {isLoading ? (
                <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-[#8A7264]" size={32} /></div>
             ) : (
@@ -399,6 +431,16 @@ export default function Menu({ cart, setCart }) {
               </div>
             )}
           </div>
+
+          {showBackToTop && (
+            <button
+              onClick={handleBackToTop}
+              aria-label="Back to top"
+              className="hidden lg:flex absolute bottom-6 right-8 z-30 w-11 h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] active:scale-95 transition-all"
+            >
+              <ArrowUp size={20} />
+            </button>
+          )}
         </div>
 
         <div className="hidden lg:flex flex-col w-full lg:w-[360px] shrink-0 bg-white rounded-3xl border border-[#EAE4E0] shadow-sm lg:max-h-[calc(100vh-112px)] overflow-hidden">
@@ -519,6 +561,18 @@ export default function Menu({ cart, setCart }) {
             </div>
           </div>
         </div>
+      )}
+
+      {showBackToTop && (
+        <button
+          onClick={handleBackToTop}
+          aria-label="Back to top"
+          className={`lg:hidden fixed right-4 sm:right-6 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] active:scale-95 transition-all ${
+            cartCount > 0 && !isMobileCartOpen ? 'bottom-24' : 'bottom-6'
+          }`}
+        >
+          <ArrowUp size={20} />
+        </button>
       )}
 
       {modal && <ProductModal product={modal} onClose={() => setModal(null)} onAddToCart={addToCart} />}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, forwardRef } from 'react';
-import { Upload, Trash2, Plus, X, Loader2 } from 'lucide-react';
+import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
 
 const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Package', 'Celebration Material'];
 
@@ -79,53 +79,69 @@ function Textarea({ label, className = '', ...props }) {
 }
 
 const ProductDetailsForm = forwardRef(function ProductDetailsForm(
-  { form, onChange, previewUrl, fileInputRef, onFileSelect, availableTags = [], className = '' },
+  { form, onChange, previewUrl, fileInputRef, onFileSelect, onRemoveImage, availableTags = [], className = '' },
   ref
 ) {
+  const hasImage = !!(previewUrl || form.image);
+
   return (
     <div ref={ref} className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4 min-w-0 ${className}`}>
-      {/* 1. Product Image */}
+      {/* 1. Product Image + Product Name/Category/Order Type/Choose File */}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Product Image</p>
-        <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-full aspect-square sm:h-[280px] shadow-sm">
-          <img
-              src={previewUrl || form.image || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&q=80'}
-              alt="product preview"
-              className="w-full h-full object-cover"
-              onError={e => { e.target.src = 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&q=80'; }}
-          />
+        <div className="flex flex-row gap-4 items-start">
+          <div className="relative shrink-0">
+            <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm">
+              {hasImage ? (
+                <img
+                    src={previewUrl || form.image}
+                    alt="product preview"
+                    className="w-full h-full object-cover"
+                    onError={e => { e.target.style.display = 'none'; }}
+                />
+              ) : (
+                <Package size={32} className="text-[#DED4CC]" />
+              )}
+            </div>
+            {hasImage && (
+              <button
+                type="button"
+                onClick={onRemoveImage}
+                title="Remove image"
+                className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+              >
+                <X size={13} />
+              </button>
+            )}
+            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={onFileSelect} />
+          </div>
+
+          <div className="flex-1 min-w-0 flex flex-col gap-3">
+            <Input label="Product Name" required value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="w-full min-w-0">
+                <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Image File</label>
+                <Button variant="secondary" size="md" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={14} /> Choose File
+                </Button>
+              </div>
+              <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
+                {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+              <Select label="Order Type" value={form.orderType} onChange={e => onChange('orderType', e.target.value)}>
+                <option value="Pick-up Today">Pick-up Today</option>
+                <option value="Pre-order">Pre-order</option>
+                <option value="Both">Both</option>
+              </Select>
+            </div>
+          </div>
         </div>
-        <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={onFileSelect} />
       </div>
 
-      {/* 2. Choose Image File & Product Name */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
-        <div className="w-full sm:w-auto shrink-0">
-          <Button variant="secondary" size="md" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload size={14} /> Choose Image File
-          </Button>
-        </div>
-        <div className="flex-1 w-full">
-          <Input label="Product Name" required value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
-        </div>
-      </div>
-
-      {/* 3. Category & Order Type */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
-          {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-        </Select>
-        <Select label="Order Type" value={form.orderType} onChange={e => onChange('orderType', e.target.value)}>
-          <option value="Pick-up Today">Pick-up Today</option>
-          <option value="Pre-order">Pre-order</option>
-          <option value="Both">Both</option>
-        </Select>
-      </div>
-
-      {/* 4. Inclusion / Description */}
+      {/* 3. Inclusion / Description */}
       <Textarea label="Inclusion / Description" value={form.inclusion} onChange={e => onChange('inclusion', e.target.value)} placeholder="e.g. 7x5 Themed Cake w/ Toppers" rows={2} />
 
-      {/* 5. Events Tags */}
+      {/* 4. Events Tags */}
       <div className="pt-2">
         <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 block">Events / Occasions Tags (Optional)</p>
         
@@ -303,7 +319,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const isEditing = !!product?.id;
 
   const detailsCardRef = useRef(null);
-  const [detailsHeight, setDetailsHeight] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -347,16 +362,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
       fetchTags();
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    const el = detailsCardRef.current;
-    if (!el) return;
-    const measure = () => setDetailsHeight(el.getBoundingClientRect().height);
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    measure();
-    return () => observer.disconnect();
-  }, []);
 
   const handleChange = (field, val) => setForm(prev => ({ ...prev, [field]: val }));
 
@@ -402,6 +407,14 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
     handleChange('image', ''); 
+  };
+
+  const handleRemoveImage = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(null);
+    setPreviewUrl('');
+    handleChange('image', '');
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleSave = async () => {
@@ -528,7 +541,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose || (() => window.history.back())} title={isEditing ? `Edit Product` : 'Add Product'} size="xl"
+    <Modal isOpen={isOpen} onClose={onClose || (() => window.history.back())} title={isEditing ? `Edit Product` : 'Add Product'} size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
           {isEditing ? <Button variant="danger" onClick={handleDeleteClick} disabled={isSubmitting}>Delete Product</Button> : <div></div>}
@@ -543,7 +556,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     >
       <div className="w-full flex flex-col gap-6 lg:gap-8">
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-start">
+        <div className="flex flex-col gap-6 lg:gap-8">
           <ProductDetailsForm
             ref={detailsCardRef}
             form={form}
@@ -551,11 +564,11 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             previewUrl={previewUrl}
             fileInputRef={fileInputRef}
             onFileSelect={handleFileSelect}
+            onRemoveImage={handleRemoveImage}
             availableTags={availableTags} 
           />
 
           <MultiplePriceOptions
-            style={detailsHeight ? { height: detailsHeight, maxHeight: detailsHeight } : undefined}
             pricingMode={pricingMode}
             onPricingModeChange={setPricingMode}
             price={form.price}
