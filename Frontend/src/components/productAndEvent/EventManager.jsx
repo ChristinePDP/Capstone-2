@@ -77,8 +77,7 @@ function EventModal({
   onClose, 
   isEditing = false,
   initialData, 
-  onSave,
-  onDelete // BAGONG DAGDAG: prop para sa delete handler
+  onSave
 }) {
   const [form, setForm] = useState({
     event_name: '',
@@ -108,13 +107,6 @@ function EventModal({
 
   const handleSave = () => {
     onSave(form);
-  };
-
-  const handleDelete = () => {
-    // Native browser confirm lang para walang overlapping modals
-    if (window.confirm(`Are you sure you want to delete "${form.event_name}"?`)) {
-      onDelete(form.id); 
-    }
   };
 
   const monthOptions = MONTHS.map(m => ({ value: m.val, label: m.label }));
@@ -256,37 +248,66 @@ function EventModal({
 
         </div>
 
-        {/* MODIFIED FOOTER PARA SA DELETE AND UPDATE */}
-        <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0 flex items-center justify-between">
-          
-          {/* Lilitaw lang ang Delete Button kapag nag-e-edit */}
-          {isEditing ? (
-            <button 
-              onClick={handleDelete}
-              className="text-red-600 bg-red-50 hover:bg-red-100 px-4 py-2.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-            >
-              <Trash2 size={14} /> Delete
-            </button>
-          ) : (
-            <div></div> /* Empty div para hindi masira ang flex layout (space-between) */
-          )}
-
-          <div className="flex items-center gap-3 ml-auto">
-            <button 
-              onClick={onClose} 
-              className="bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors"
-            >
-              Cancel
-            </button>
-            <button 
-              onClick={handleSave} 
-              className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md"
-            >
-              {isEditing ? 'Save Changes' : 'Save Event'}
-            </button>
-          </div>
+        {/* FOOTER: Cancel / Save lang — yung Delete nasa card actions na sa listahan */}
+        <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0 flex items-center justify-end gap-3">
+          <button 
+            onClick={onClose} 
+            className="bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors"
+          >
+            Cancel
+          </button>
+          <button 
+            onClick={handleSave} 
+            className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md"
+          >
+            {isEditing ? 'Save Changes' : 'Save Event'}
+          </button>
         </div>
 
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// CONFIRM TOAST
+// Toast na lumalabas sa ibaba-kanan (hindi buong-screen na overlay
+// gaya ng modal) na may Confirm/Cancel — papalit ito sa native
+// window.confirm() para consistent ang look sa buong app at hindi
+// yung "localhost says" na browser dialog ang lumalabas.
+// ============================================================
+
+function ConfirmToast({ isOpen, message, onConfirm, onCancel, isLoading }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-[70] sm:w-full sm:max-w-sm">
+      <div className="bg-white rounded-2xl shadow-2xl border border-[#EAE4E0] p-5 flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+            <Trash2 size={14} />
+          </div>
+          <p className="text-xs font-semibold text-[#3B1F0A] leading-relaxed pt-1.5">
+            {message}
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={isLoading}
+            className="bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] px-4 py-2 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="bg-red-600 text-white hover:bg-red-700 px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          >
+            {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -323,6 +344,10 @@ export default function EventManager() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // State para sa delete confirmation toast (papalit sa window.confirm)
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Kunin lahat ng events mula sa backend
   const fetchEvents = async () => {
@@ -385,35 +410,31 @@ export default function EventManager() {
     }
   };
 
-  // Delete mula sa loob ng modal
-  const handleDelete = async (id) => {
-    setIsSaving(true);
+  // Binubuksan yung confirm toast — hindi pa dine-delete agad
+  const requestDelete = (event) => {
+    setDeleteTarget(event);
+  };
+
+  const cancelDelete = () => {
+    if (isDeleting) return; // huwag payagan mag-cancel habang nagde-delete
+    setDeleteTarget(null);
+  };
+
+  // Actual delete — tatakbo lang kapag na-confirm sa toast
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/events/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/events/${deleteTarget.id}`, { method: 'DELETE' });
       await parseResponse(res);
-      await fetchEvents();
-      handleCloseModal();
+      setEvents(prev => prev.filter(ev => ev.id !== deleteTarget.id));
+      setDeleteTarget(null);
     } catch (err) {
       console.error('Delete Event Error:', err);
       setError(err.message);
     } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Quick delete diretso sa row, walang kailangang buksan ang modal muna
-  const handleQuickDelete = async (event) => {
-    if (!window.confirm(`Are you sure you want to delete "${event.event_name}"?`)) return;
-
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/events/${event.id}`, { method: 'DELETE' });
-      await parseResponse(res);
-      setEvents(prev => prev.filter(ev => ev.id !== event.id));
-    } catch (err) {
-      console.error('Quick Delete Event Error:', err);
-      setError(err.message);
+      setIsDeleting(false);
     }
   };
 
@@ -444,68 +465,128 @@ export default function EventManager() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
-        {isLoading ? (
-          <div className="px-7 py-14 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264]">
-            <Loader2 size={18} className="animate-spin" />
-            Loading events...
-          </div>
-        ) : events.length === 0 ? (
-          <div className="px-7 py-14 text-center text-xs text-[#8A7264]">
-            No events yet. Click "Add New Event" to create one.
-          </div>
-        ) : (
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-[#F5EFEB] text-[10px] font-bold text-[#8A7264] uppercase tracking-wider">
-                <th className="px-7 py-3">Event</th>
-                <th className="px-4 py-3">AI Tag</th>
-                <th className="px-4 py-3">Date Range</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-7 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#EAE4E0]">
-              {events.map((event) => (
-                <tr key={event.id} className="hover:bg-[#FAF7F4] transition-colors">
-                  <td className="px-7 py-4 text-xs font-semibold text-[#3B1F0A]">{event.event_name}</td>
-                  <td className="px-4 py-4 text-xs text-[#5A453C]">{event.event_tag}</td>
-                  <td className="px-4 py-4 text-xs text-[#5A453C] whitespace-nowrap">
-                    {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
-                  </td>
-                  <td className="px-4 py-4">
-                    <span
-                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                        event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                      }`}
-                    >
-                      {event.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="px-7 py-4">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleOpenEdit(event)}
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
-                        title="Edit"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleQuickDelete(event)}
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
+      {isLoading ? (
+        <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm px-7 py-14 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264]">
+          <Loader2 size={18} className="animate-spin" />
+          Loading events...
+        </div>
+      ) : events.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm px-7 py-14 text-center text-xs text-[#8A7264]">
+          No events yet. Click "Add New Event" to create one.
+        </div>
+      ) : (
+        <>
+          {/* TABLE — makikita mula md breakpoint pataas (tablet/desktop) */}
+          <div className="hidden md:block bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-[#F5EFEB] text-[10px] font-bold text-[#8A7264] uppercase tracking-wider">
+                  <th className="px-7 py-3">Event</th>
+                  <th className="px-4 py-3">AI Tag</th>
+                  <th className="px-4 py-3">Date Range</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-7 py-3 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              </thead>
+              <tbody className="divide-y divide-[#EAE4E0]">
+                {events.map((event) => (
+                  <tr key={event.id} className="hover:bg-[#FAF7F4] transition-colors">
+                    <td className="px-7 py-4 text-xs font-semibold text-[#3B1F0A]">{event.event_name}</td>
+                    <td className="px-4 py-4 text-xs text-[#5A453C]">{event.event_tag}</td>
+                    <td className="px-4 py-4 text-xs text-[#5A453C] whitespace-nowrap">
+                      {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
+                    </td>
+                    <td className="px-4 py-4">
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                          event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {event.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-7 py-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleOpenEdit(event)}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={() => requestDelete(event)}
+                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* CARDS — makikita lang pagbaba sa mobile (below md breakpoint) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-4">
+            {events.map((event) => (
+              <div
+                key={event.id}
+                className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="text-sm font-bold text-[#3B1F0A] leading-snug break-words">
+                    {event.event_name}
+                  </h3>
+                  <span
+                    className={`shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full ${
+                      event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
+                    }`}
+                  >
+                    {event.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider w-16 shrink-0">
+                      AI Tag
+                    </span>
+                    <span className="text-xs text-[#5A453C] break-words">{event.event_tag}</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider w-16 shrink-0">
+                      Dates
+                    </span>
+                    <span className="text-xs text-[#5A453C] whitespace-nowrap">
+                      {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 mt-1 pt-3 border-t border-[#EAE4E0]">
+                  <button
+                    onClick={() => handleOpenEdit(event)}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
+                    title="Edit"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => requestDelete(event)}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <EventModal
         isOpen={isModalOpen}
@@ -513,7 +594,14 @@ export default function EventManager() {
         isEditing={isEditing}
         initialData={selectedEvent}
         onSave={handleSave}
-        onDelete={handleDelete}
+      />
+
+      <ConfirmToast
+        isOpen={!!deleteTarget}
+        message={`Are you sure you want to delete "${deleteTarget?.event_name}"?`}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+        isLoading={isDeleting}
       />
     </div>
   );

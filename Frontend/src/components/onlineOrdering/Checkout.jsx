@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
@@ -24,9 +24,6 @@ function toDateStr(year, month, day) {
 }
 
 // Self-contained month calendar used for Pre-Order date selection.
-// Genuinely disables (greys out + blocks clicks on) any date before minDate,
-// rather than relying on the browser's native <input type="date"> picker,
-// which does not reliably grey out invalid dates across browsers.
 function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect, onClose }) {
   const initial = selectedDate || minDate || todayDate;
   const [iy, im] = initial.split('-').map(Number);
@@ -106,6 +103,122 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   );
 }
 
+// ---- Time picker helpers ----
+const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MINUTES_STEP = 5; 
+const MINUTES_5 = Array.from({ length: 60 / MINUTES_STEP }, (_, i) => i * MINUTES_STEP);
+
+function to24Hour(hour12, meridiem) {
+  const h = hour12 % 12; 
+  return meridiem === 'PM' ? h + 12 : h;
+}
+
+function buildTimeStr(hour24, minute) {
+  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function from24Hour(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const meridiem = h >= 12 ? 'PM' : 'AM';
+  let hour12 = h % 12;
+  if (hour12 === 0) hour12 = 12;
+  const minute = Math.floor(m / MINUTES_STEP) * MINUTES_STEP;
+  return { hour12, minute, meridiem };
+}
+
+function TimePicker({ value, minTime, maxTime, openUpward, onChange, onClose }) {
+  const initial = from24Hour(value && value >= minTime && value <= maxTime ? value : minTime);
+  const [hour12, setHour12] = useState(initial.hour12);
+  const [minute, setMinute] = useState(initial.minute);
+  const [meridiem, setMeridiem] = useState(initial.meridiem);
+
+  const commit = (h12, mm, mer) => {
+    const hour24 = to24Hour(h12, mer);
+    let ts = buildTimeStr(hour24, mm);
+    if (ts < minTime) { const s = from24Hour(minTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = minTime; }
+    else if (ts > maxTime) { const s = from24Hour(maxTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = maxTime; }
+    setHour12(h12); setMinute(mm); setMeridiem(mer);
+    onChange(ts);
+  };
+
+  const isHourDisabled = (h12) => {
+    const hour24 = to24Hour(h12, meridiem);
+    return buildTimeStr(hour24, 59) < minTime || buildTimeStr(hour24, 0) > maxTime;
+  };
+  const isMinuteDisabled = (mm) => {
+    const hour24 = to24Hour(hour12, meridiem);
+    const ts = buildTimeStr(hour24, mm);
+    return ts < minTime || ts > maxTime;
+  };
+  const isMeridiemDisabled = (mer) => {
+    const blockMin = mer === 'AM' ? '00:00' : '12:00';
+    const blockMax = mer === 'AM' ? '11:59' : '23:59';
+    return blockMax < minTime || blockMin > maxTime;
+  };
+
+  const colBase = 'flex-1 max-h-[176px] overflow-y-auto py-1';
+  const itemBase = 'text-[11px] text-center py-1.5 rounded-lg transition-colors cursor-pointer select-none';
+
+  return (
+    <div className={`absolute z-20 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-2 w-[210px] ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+      <div className="flex gap-1 border-b border-[#EAE4E0] pb-2 mb-2">
+        <div className={colBase}>
+          {HOURS_12.map(h => {
+            const disabled = isHourDisabled(h);
+            const selected = h === hour12;
+            return (
+              <div
+                key={h}
+                onClick={() => !disabled && commit(h, minute, meridiem)}
+                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
+              >
+                {String(h).padStart(2, '0')}
+              </div>
+            );
+          })}
+        </div>
+        <div className={colBase}>
+          {MINUTES_5.map(m => {
+            const disabled = isMinuteDisabled(m);
+            const selected = m === minute;
+            return (
+              <div
+                key={m}
+                onClick={() => !disabled && commit(hour12, m, meridiem)}
+                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
+              >
+                {String(m).padStart(2, '0')}
+              </div>
+            );
+          })}
+        </div>
+        <div className={colBase}>
+          {['AM', 'PM'].map(mer => {
+            const disabled = isMeridiemDisabled(mer);
+            const selected = mer === meridiem;
+            return (
+              <div
+                key={mer}
+                onClick={() => !disabled && commit(hour12, minute, mer)}
+                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
+              >
+                {mer}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="w-full text-[11px] font-bold text-white bg-[#4A3B36] rounded-lg py-1.5 hover:bg-[#3B1F0A] transition-colors"
+      >
+        Done
+      </button>
+    </div>
+  );
+}
+
 export default function Checkout({ cart, setCart }) {
   const navigate = useNavigate();
 
@@ -114,9 +227,7 @@ export default function Checkout({ cart, setCart }) {
   const forcedPickupType = hasPickUpToday ? 'now' : (hasPreOrder ? 'later' : 'now');
   
   const today = new Date();
-  // Adjust for local time mapping directly to YYYY-MM-DD
   const todayString = new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-  const currentTimeString = today.toTimeString().slice(0, 5);
 
   const [form, setForm] = useState({
     name: '',
@@ -135,8 +246,14 @@ export default function Checkout({ cart, setCart }) {
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [timePickerOpenUpward, setTimePickerOpenUpward] = useState(false);
+  const timePickerWrapRef = useRef(null);
+  const timePickerTriggerRef = useRef(null);
 
-  // Close the custom calendar popover when clicking outside of it.
+  // New state for custom alerts
+  const [toastMessage, setToastMessage] = useState(null);
+
   useEffect(() => {
     if (!showCalendar) return;
     const handleClickOutside = (e) => {
@@ -148,11 +265,20 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
 
+  useEffect(() => {
+    if (!showTimePicker) return;
+    const handleClickOutside = (e) => {
+      if (timePickerWrapRef.current && !timePickerWrapRef.current.contains(e.target)) {
+        setShowTimePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTimePicker]);
+
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const halfAmount = totalAmount / 2;
 
-  // Recompute against the live system clock at the moment of validation,
-  // rather than relying on a value captured at an earlier render.
   const getLiveNow = () => {
     const now = new Date();
     const dateStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
@@ -160,75 +286,51 @@ export default function Checkout({ cart, setCart }) {
     return { dateStr, timeStr };
   };
 
-  // Adds `days` to a YYYY-MM-DD string and returns a YYYY-MM-DD string,
-  // used to derive the 3-day-minimum Pre-Order window from "today".
   const addDaysToDateString = (dateStr, days) => {
     const d = new Date(dateStr + 'T00:00:00');
     d.setDate(d.getDate() + days);
     return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
   };
 
-  const PRE_ORDER_MIN_LEAD_DAYS = 3;
+  const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
+  const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, PRE_ORDER_MIN_LEAD_DAYS);
 
-  // Shop operating hours — applies to BOTH Pick-up Today and Pre-Order.
   const SHOP_OPEN_TIME = '08:00';
   const SHOP_CLOSE_TIME = '17:00';
 
-  // For "Pick-up Today", the earliest selectable time is whichever is LATER:
-  // the shop's opening time, or the live current time (if it's already past opening).
-  // This avoids ever snapping back to 8:00 AM once 8:00 AM has already passed.
   const getEffectiveMinTimeForToday = () => {
     const { timeStr: liveNow } = getLiveNow();
     return liveNow > SHOP_OPEN_TIME ? liveNow : SHOP_OPEN_TIME;
   };
 
-  // NOTE: date selection is now handled directly by the custom MonthCalendar's
-  // onSelect callback, which only ever passes already-valid, non-disabled dates —
-  // so no separate change-handler/alert is needed here anymore.
-
-  const handleTimeChange = (e) => {
-    const selectedTime = e.target.value;
-
-    if (pickupType === 'now') {
-      // Pick-up Today: time must be within operating hours AND not in the past.
-      const effectiveMin = getEffectiveMinTimeForToday();
-
-      if (selectedTime < effectiveMin) {
-        if (effectiveMin === SHOP_OPEN_TIME) {
-          // Shop hasn't opened yet today — the only case where snapping to 8:00 AM makes sense.
-          alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
-        } else {
-          // Opening time already passed — snapping to 8:00 AM would still be invalid,
-          // so snap to the current live time instead.
-          alert("You cannot select a time in the past for today's orders.");
-        }
-        setForm({...form, pickupTime: effectiveMin});
-      } else if (selectedTime > SHOP_CLOSE_TIME) {
-        alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
-        setForm({...form, pickupTime: SHOP_CLOSE_TIME});
-      } else {
-        setForm({...form, pickupTime: selectedTime});
-      }
-      return;
-    }
-
-    // Pre-order: dates are always in the future, but still must fall within operating hours.
-    if (selectedTime < SHOP_OPEN_TIME) {
-      alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
-      setForm({...form, pickupTime: SHOP_OPEN_TIME});
-    } else if (selectedTime > SHOP_CLOSE_TIME) {
-      alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
-      setForm({...form, pickupTime: SHOP_CLOSE_TIME});
-    } else {
-      setForm({...form, pickupTime: selectedTime});
-    }
+  const handleTimeChange = (selectedTime) => {
+    setForm(f => ({ ...f, pickupTime: selectedTime }));
   };
 
   const handleProceedToOrder = () => {
-    if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
-      return alert('Please complete all required fields (*)');
+    // 1. HIGHEST PRIORITY: Check if trying to pick up today when shop is already closed
+    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
+      return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
     }
+
+    // 2. Check if all required fields are filled out
+    if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
+      return setToastMessage('Please complete all required fields (*)');
+    }
+
+    // 3. Check number formats (Exactly 11 digits)
+    const phoneRegex = /^\d{11}$/;
+    
+    if (!phoneRegex.test(form.phone)) {
+      return setToastMessage('Your Contact Number must be exactly 11 digits.');
+    }
+
+    if (form.altPhone && !phoneRegex.test(form.altPhone)) {
+      return setToastMessage('Your Alternative Number must be exactly 11 digits.');
+    }
+
+    // Passed all validations
     setShowSummaryModal(true);
   };
 
@@ -236,9 +338,8 @@ export default function Checkout({ cart, setCart }) {
     setIsProcessing(true);
     let updatedCart = [...cart];
 
-    // 1. UPLOAD INDIVIDUAL IMAGES (If defined in Menu)
     for (let i = 0; i < updatedCart.length; i++) {
-      if (updatedCart[i].inspiration_image) {
+      if (updatedCart[i].inspiration_image instanceof File) {
         const formData = new FormData();
         formData.append('image', updatedCart[i].inspiration_image);
 
@@ -258,7 +359,6 @@ export default function Checkout({ cart, setCart }) {
       }
     }
 
-    // 2. BUILD PAYLOAD
     const orderPayload = {
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
         customer: {
@@ -267,8 +367,6 @@ export default function Checkout({ cart, setCart }) {
           alternativeNumber: form.altPhone || null,
         },
         pickup: {
-          // For "Pick-up Today", always use the live current date rather than the
-          // possibly-stale value captured in form state at mount time.
           date: pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate,
           time: form.pickupTime,
         },
@@ -281,7 +379,7 @@ export default function Checkout({ cart, setCart }) {
           unitPrice: item.price,
           subtotal: item.price * item.qty,
           orderSlip: item.order_slip_details || {},
-          selectedPriceOptions: item.selected_price_options || null, // INCLUDED FOR VARIABLE PRICING
+          selectedPriceOptions: item.selected_price_options || null, 
           inspirationUrl: item.inspiration_url || null
         })),
         payment: {
@@ -295,7 +393,6 @@ export default function Checkout({ cart, setCart }) {
 
     let savedOrderDetails = null;
 
-    // 3. SAVE TO DATABASE
     try {
       const dbRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/place-order`, {
         method: 'POST',
@@ -306,19 +403,18 @@ export default function Checkout({ cart, setCart }) {
       const dbData = await dbRes.json();
 
       if (!dbData.success) {
-        alert('Database Error: ' + dbData.message);
+        setToastMessage('Database Error: ' + dbData.message);
         setIsProcessing(false);
         return; 
       }
       savedOrderDetails = dbData.order; 
     } catch (err) {
       console.error('Database network error:', err);
-      alert('Network error while saving order to database.');
+      setToastMessage('Network error while saving order to database.');
       setIsProcessing(false);
       return;
     }
 
-    // 4. SAVE TO SESSION STORAGE
     sessionStorage.setItem('tempOrderData', JSON.stringify({ 
       form, 
       pickupType, 
@@ -328,7 +424,6 @@ export default function Checkout({ cart, setCart }) {
       savedOrderNumber: savedOrderDetails.order_number 
     }));
 
-    // 5. PAYMONGO CHECKOUT
     const amountToPay = paymentType === 'half' ? halfAmount : totalAmount;
 
     try {
@@ -349,12 +444,12 @@ export default function Checkout({ cart, setCart }) {
       if (data.success && data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else {
-        alert('Failed to generate payment link. Please try again.');
+        setToastMessage('Failed to generate payment link. Please try again.');
         setIsProcessing(false);
       }
     } catch (error) {
       console.error('Error initiating payment:', error);
-      alert('Network error. Please try again later.');
+      setToastMessage('Network error. Please try again later.');
       setIsProcessing(false);
     }
   };
@@ -391,10 +486,13 @@ export default function Checkout({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (hasPreOrder) return;
-                        // Re-sync date/time to the live clock whenever switching to Pick-up Today.
                         const { dateStr, timeStr } = getLiveNow();
                         setPickupType('now');
-                        setForm({...form, pickupDate: dateStr, pickupTime: timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME});
+                        setForm({
+                          ...form, 
+                          pickupDate: dateStr, 
+                          pickupTime: timeStr > SHOP_CLOSE_TIME ? '' : (timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME)
+                        });
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -403,8 +501,6 @@ export default function Checkout({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (hasPickUpToday) return;
-                        // Clear date/time so the old "now" values (which may violate the
-                        // 3-day pre-order lead time) don't carry over.
                         setPickupType('later');
                         setForm({...form, pickupDate: '', pickupTime: ''});
                       }}
@@ -418,16 +514,43 @@ export default function Checkout({ cart, setCart }) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                           <div>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Full Name <span className="text-red-500">*</span></label>
-                              <input type="text" placeholder="e.g. Juan Dela Cruz" className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => setForm({...form, name: e.target.value})} />
+                              <input 
+                                type="text" 
+                                placeholder="e.g. Juan Dela Cruz" 
+                                value={form.name}
+                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
+                                onChange={e => setForm({...form, name: e.target.value})} 
+                              />
                           </div>
                           <div>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Contact Number <span className="text-red-500">*</span></label>
-                              <input type="text" placeholder="09xxxxxxxxx" className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => setForm({...form, phone: e.target.value})} />
+                              <input 
+                                type="text" 
+                                placeholder="09xxxxxxxxx" 
+                                maxLength="11"
+                                value={form.phone}
+                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
+                                onChange={e => {
+                                  // Regex removes any non-digit character
+                                  const onlyNums = e.target.value.replace(/\D/g, '');
+                                  setForm({...form, phone: onlyNums});
+                                }} 
+                              />
                           </div>
                       </div>
                       <div>
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Alternative Number</label>
-                          <input type="text" placeholder="Optional" className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => setForm({...form, altPhone: e.target.value})} />
+                          <input 
+                            type="text" 
+                            placeholder="Optional (09xxxxxxxxx)" 
+                            maxLength="11"
+                            value={form.altPhone}
+                            className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
+                            onChange={e => {
+                                const onlyNums = e.target.value.replace(/\D/g, '');
+                                setForm({...form, altPhone: onlyNums});
+                            }} 
+                          />
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
@@ -435,14 +558,11 @@ export default function Checkout({ cart, setCart }) {
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Date <span className="text-red-500">*</span></label>
 
                               {pickupType === 'now' ? (
-                                // Pick-up Today: fully locked to the live order-time date, no picker needed.
                                 <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
                                   <Lock size={12} />
                                   {formatDateLong(getLiveNow().dateStr)} (Today)
                                 </div>
                               ) : (
-                                // Pre-Order: custom calendar that truly disables (greys out, unclickable)
-                                // any date before the 3-day minimum lead time.
                                 <>
                                   <button
                                     type="button"
@@ -474,21 +594,53 @@ export default function Checkout({ cart, setCart }) {
                                       onClose={() => setShowCalendar(false)}
                                     />
                                   )}
-                                  <p className="text-[10px] text-[#8A7264] mt-1">Requires at least {PRE_ORDER_MIN_LEAD_DAYS} days advance notice (earliest: {formatDateLong(minPreOrderDate)})</p>
+                                  <p className="text-[10px] text-[#8A7264] mt-1">Requires at least {PRE_ORDER_MIN_LEAD_DAYS} {PRE_ORDER_MIN_LEAD_DAYS === 1 ? 'day' : 'days'} advance notice (earliest: {formatDateLong(minPreOrderDate)})</p>
                                 </>
                               )}
                           </div>
-                          <div>
+                          
+                          <div className="relative" ref={timePickerWrapRef}>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
-                              <input 
-                                type="time" 
-                                min={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
-                                max={SHOP_CLOSE_TIME}
-                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-[#3B1F0A]" 
-                                onChange={handleTimeChange} 
-                                value={form.pickupTime}
-                              />
-                              <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
+                              
+                              {pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME ? (
+                                <div className="w-full border border-red-200 px-3.5 py-2.5 text-xs rounded-xl bg-red-50 text-red-600 flex items-center gap-2">
+                                  <Lock size={12} />
+                                  Shop is already closed for today. Please select Pre-Order.
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    ref={timePickerTriggerRef}
+                                    onClick={() => {
+                                      if (!showTimePicker && timePickerTriggerRef.current) {
+                                        const rect = timePickerTriggerRef.current.getBoundingClientRect();
+                                        const TIME_PICKER_HEIGHT_ESTIMATE = 230;
+                                        const spaceBelow = window.innerHeight - rect.bottom;
+                                        const spaceAbove = rect.top;
+                                        setTimePickerOpenUpward(spaceBelow < TIME_PICKER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
+                                      }
+                                      setShowTimePicker(s => !s);
+                                    }}
+                                    className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
+                                  >
+                                    <span className={form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
+                                      {form.pickupTime ? formatTime(form.pickupTime) : 'Select pickup time'}
+                                    </span>
+                                  </button>
+                                  {showTimePicker && (
+                                    <TimePicker
+                                      value={form.pickupTime}
+                                      minTime={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
+                                      maxTime={SHOP_CLOSE_TIME}
+                                      openUpward={timePickerOpenUpward}
+                                      onChange={handleTimeChange}
+                                      onClose={() => setShowTimePicker(false)}
+                                    />
+                                  )}
+                                  <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
+                                </>
+                              )}
                           </div>
                       </div>
 
@@ -497,6 +649,7 @@ export default function Checkout({ cart, setCart }) {
                           <input
                             type="text"
                             placeholder="Anything else we should know? (e.g. cake message, allergies, design notes)"
+                            value={form.instructions}
                             className="w-full h-[42px] border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-ellipsis overflow-hidden whitespace-nowrap"
                             onChange={e => setForm({...form, instructions: e.target.value})}
                           />
@@ -600,129 +753,196 @@ export default function Checkout({ cart, setCart }) {
         </div>
       </div>
 
-      {/* --- Order Summary Modal --- */}
+      {/* --- REVISED TWO-COLUMN ORDER SUMMARY MODAL --- */}
       {showSummaryModal && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 px-4 py-6 sm:px-5">
-          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-sm w-full max-w-[420px] max-h-[88vh] sm:max-h-[85vh] flex flex-col overflow-hidden">
-
-            <div className="p-4 pb-3 sm:p-5 sm:pb-3.5 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6]">
+          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] max-h-[90vh] flex flex-col overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-4 pb-3 sm:p-5 sm:pb-4 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
               <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
                 <Receipt size={14} />
               </div>
               <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
             </div>
 
-            <div className="px-4 py-3 sm:px-5 sm:py-3.5 flex-1 overflow-y-auto flex flex-col gap-3 sm:gap-3.5 scrollbar-thin">
-
-              <div className="pb-3.5 border-b border-[#F1EBE6] flex flex-col gap-1.5">
-                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
-                  <span className="text-[#8A7264]">Order Type</span>
-                  <span className="text-[#3B1F0A] font-semibold text-right">{pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}</span>
-
-                  <span className="text-[#8A7264]">Name</span>
-                  <span className="text-[#3B1F0A] font-semibold text-right truncate">{form.name || '—'}</span>
-
-                  <span className="text-[#8A7264]">Contact</span>
-                  <span className="text-[#3B1F0A] font-semibold text-right truncate">{form.phone || '—'}</span>
-
-                  {form.altPhone && (
-                    <>
-                      <span className="text-[#8A7264]">Alt Contact</span>
-                      <span className="text-[#3B1F0A] font-semibold text-right truncate">{form.altPhone}</span>
-                    </>
-                  )}
-
-                  <span className="text-[#8A7264]">Date & Time</span>
-                  <span className="text-[#3B1F0A] font-semibold text-right truncate">
-                    {form.pickupDate || '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
-                  </span>
-
-                  {form.instructions && (
-                    <>
-                      <span className="text-[#8A7264]">Special Instructions</span>
-                      <span className="text-[#3B1F0A] font-semibold text-right truncate">{form.instructions}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {cart.map((item, i) => (
-                <div key={i} className="flex justify-between items-start gap-3 pb-3.5 border-b border-[#F1EBE6] last:border-0 last:pb-0">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-xs text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
-                    
-                    {/* DISPLAY SELECTED VARIABLE PRICE OPTIONS */}
-                    {item.selected_price_options && Object.keys(item.selected_price_options).length > 0 && (
-                      <div className="mt-1 flex flex-col gap-0.5">
-                        {Object.entries(item.selected_price_options).map(([label, value]) => (
-                          <p key={label} className="text-[10px] text-[#B7A99F] leading-snug">
-                            <span className="font-semibold text-[#8A7264]">{label}:</span> {value}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
-                      <div className="mt-1 flex flex-col gap-0.5">
-                        {Object.entries(item.order_slip_details).map(([label, value]) => (
-                          <p key={label} className="text-[10px] text-[#B7A99F] leading-snug">
-                            <span className="font-semibold text-[#8A7264]">{label}:</span> {value}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {item.inspiration_image && (
-                       <p className="text-[10px] text-[#B7A99F] mt-0.5 leading-snug">Image Attached</p>
-                    )}
+            {/* Layout Container */}
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+              
+              {/* Left Column: Customer & Pickup Details */}
+              <div className="w-full md:w-[300px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 overflow-y-auto scrollbar-thin">
+                <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
+                <div className="flex flex-col gap-2.5 text-xs">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Order Type</span>
+                    <span className="text-[#3B1F0A] font-semibold">{pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}</span>
                   </div>
-                  <span className="font-bold text-xs text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-3.5 sm:pb-5 shrink-0 border-t border-[#F1EBE6] bg-white">
-              <div className="mb-4">
-                {paymentType === 'half' ? (
-                  <>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                      <span className="text-xs text-[#8A7264]">₱{halfAmount.toLocaleString()}</span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Name</span>
+                    <span className="text-[#3B1F0A] font-semibold">{form.name || '—'}</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Contact</span>
+                    <span className="text-[#3B1F0A] font-semibold">{form.phone || '—'}</span>
+                  </div>
+                  {form.altPhone && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[#B7A99F]">Alt Contact</span>
+                      <span className="text-[#3B1F0A] font-semibold">{form.altPhone}</span>
                     </div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                      <span className="text-xs text-[#8A7264]">₱{halfAmount.toLocaleString()}</span>
+                  )}
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Date & Time</span>
+                    <span className="text-[#3B1F0A] font-semibold">
+                      {form.pickupDate ? formatDateLong(form.pickupDate) : '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
+                    </span>
+                  </div>
+                  {form.instructions && (
+                    <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl">
+                      <span className="text-[10px] text-[#B7A99F] uppercase font-semibold">Special Instructions</span>
+                      <span className="text-[#3B1F0A] mt-0.5">{form.instructions}</span>
                     </div>
-                    <div className="w-full h-px bg-[#F1EBE6] mb-2"></div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                      <span className="text-xs text-[#8A7264]">₱{totalAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="w-full h-px bg-[#F1EBE6] mb-2"></div>
-                  </>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                  <span className="font-serif text-lg text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
+                  )}
                 </div>
               </div>
-              <button
-                onClick={handlePlaceOrder}
-                disabled={isProcessing}
-                className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-full text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
-              >
-                {isProcessing ? 'Processing Payment...' : 'Place Order'}
-              </button>
-              <button
-                onClick={() => setShowSummaryModal(false)}
-                disabled={isProcessing}
-                className="w-full text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] mt-3 text-center transition-colors disabled:opacity-50"
-              >
-                &larr; Back
-              </button>
+
+              {/* Right Column: Items & Payment */}
+              <div className="flex-1 flex flex-col min-w-0 bg-white">
+                
+                {/* Scrollable Items List */}
+                <div className="flex-1 p-4 sm:p-5 overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
+                  <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
+                  
+                  {cart.map((item, i) => {
+                    // 1. Fallback sa default product image
+                    let imgSrc = item.image || item.image_url; 
+
+                    // 2. Override kung may uploaded inspiration image (Pre-order custom cakes)
+                    if (item.inspiration_image instanceof File) {
+                      imgSrc = URL.createObjectURL(item.inspiration_image);
+                    } else if (item.inspiration_image && typeof item.inspiration_image === 'string') {
+                      imgSrc = item.inspiration_image;
+                    }
+
+                    // 3. Safety check: Kung relative path/filename lang ang item.image mula sa database, 
+                    // i-dudugtong natin ang backend URL para lumabas nang tama.
+                    if (imgSrc && !imgSrc.startsWith('http') && !imgSrc.startsWith('blob:') && !imgSrc.startsWith('data:')) {
+                      // Note: I-adjust ang '/uploads/' kung iba ang folder name mo sa backend (e.g. '/images/')
+                      imgSrc = `${import.meta.env.VITE_API_URL}/uploads/${imgSrc.replace(/^\//, '')}`;
+                    }
+
+                    return (
+                      <div key={i} className="flex gap-3.5 pb-3.5 border-b border-[#F1EBE6] last:border-0 last:pb-0">
+                        {/* Preview Image */}
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-[#F5EFEB] rounded-xl border border-[#EAE4E0] overflow-hidden flex items-center justify-center">
+                          {imgSrc ? (
+                            <img src={imgSrc} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[#B7A99F] text-[10px]">No Image</span>
+                          )}
+                        </div>
+
+                        {/* Item Details */}
+                        <div className="min-w-0 flex-1 flex flex-col">
+                          <div className="flex justify-between items-start gap-2 mb-1">
+                            <p className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
+                            <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+                          </div>
+                          
+                          {item.selected_price_options && Object.keys(item.selected_price_options).length > 0 && (
+                            <div className="flex flex-col gap-0.5">
+                              {Object.entries(item.selected_price_options).map(([label, value]) => (
+                                <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                  <span className="font-medium">{label}:</span> {value}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                            <div className="flex flex-col gap-0.5 mt-1">
+                              {Object.entries(item.order_slip_details).map(([label, value]) => (
+                                <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                  <span className="font-medium">{label}:</span> {value}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Fixed Payment Section */}
+                <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
+                  <div className="mb-4">
+                    {paymentType === 'half' ? (
+                      <>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-[#8A7264]">To Pay Now</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{totalAmount.toLocaleString()}</span>
+                        </div>
+                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
+                      <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Action Buttons side by side */}
+                  <div className="flex gap-2.5">
+                    <button
+                      onClick={() => setShowSummaryModal(false)}
+                      disabled={isProcessing}
+                      className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handlePlaceOrder}
+                      disabled={isProcessing}
+                      className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isProcessing ? 'Processing...' : 'Place Order'}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Custom Alert Modal (Toast) --- */}
+      {toastMessage && (
+        <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-xl p-5 sm:p-6 w-full max-w-[320px] flex flex-col items-center text-center">
+            <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
+              <AlertCircle size={24} />
+            </div>
+            <p className="text-sm font-semibold text-[#3B1F0A] mb-6">{toastMessage}</p>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] transition-colors"
+            >
+              Okay
+            </button>
           </div>
         </div>
       )}
