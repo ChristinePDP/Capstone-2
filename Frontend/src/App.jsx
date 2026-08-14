@@ -10,6 +10,7 @@ import QrScanner from './components/onlineOrdering/MobileScanner';
 import EventAdsModal from './components/onlineOrdering/eventAdsModal';
 
 import ProductAndEventPage from './pages/productAndEventPage';
+import PosPage from './pages/posPage';
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -70,6 +71,9 @@ export default function App() {
 
           {/* ── ALL ORDERS (Private) — BAGO ── */}
           <Route path="/orders" element={<ProtectedAdminRoute><AllOrdersPage /></ProtectedAdminRoute>} />
+
+          {/* ── POINT OF SALE (Private) */}
+          <Route path="/pos" element={<ProtectedAdminRoute><PosPage /></ProtectedAdminRoute>} /> {/* <-- IDAGDAG ITO */}
 
           {/* ── ANALYTICS PAGES (Private) ── */}
           <Route path="/analytics" element={<ProtectedAdminRoute><AnalyticsPage /></ProtectedAdminRoute>} />
