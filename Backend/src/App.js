@@ -7,6 +7,7 @@ import inventoryRoutes from './routes/inventory.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 import onlineOrderingRoutes from './routes/onlineOrdering.routes.js';
 import qrScaner from './routes/Qr.routes.js';
+import posRoutes from './routes/pos.routes.js';
 // Updated import path and variable name
 import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
@@ -40,6 +41,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/allOrders', ordersRoutes); 
 app.use('/api/analytics', analyticsRoutes); 
 app.use('/api/online-ordering', onlineOrderingRoutes);
+app.use('/api/pos', posRoutes);
 app.use('/api/Qr', qrScaner);
 
 // Updated route usage

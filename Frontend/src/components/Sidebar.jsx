@@ -2,7 +2,7 @@ import { useState,  } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LineChart, Monitor, ClipboardCheck,
-  ShoppingCart, List, LogOut, X
+  ShoppingCart, List, X, Settings
 } from 'lucide-react';
 import brandLogo from '../assets/427bffe9-d983-4566-9ec9-de6c2b1bdaa2-removebg-preview.png';
 import Header from './Header';
@@ -30,7 +30,7 @@ const NAV = [
 ];
 
 // ─── Sidebar (internal nav panel) ─────────────────────────────
-function Sidebar({ onLogoutClick, open, onClose }) {
+function Sidebar({ open, onClose }) {
   return (
     <>
       {open && (
@@ -105,13 +105,22 @@ function Sidebar({ onLogoutClick, open, onClose }) {
           ))}
         </nav>
 
-        {/* Footer - Logout */}
-        <div className="mt-auto px-4 pb-6 pt-2">
-          <div className="border-t border-white/10 pt-4">
-            <button onClick={onLogoutClick} className="flex items-center justify-center gap-2 w-full text-white/90 hover:text-white transition-colors font-bold text-[15px]">
-              Logout
-              <LogOut size={18} strokeWidth={2.5} />
-            </button>
+        {/* Footer - Settings */}
+        <div className="mt-auto px-3 pb-6 pt-2 shrink-0">
+          <div className="border-t border-white/10 pt-3">
+            <NavLink
+              to="/settings"
+              onClick={onClose}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 ` +
+                (isActive
+                  ? 'bg-white/20 text-white shadow-sm'
+                  : 'text-white/70 hover:bg-white/10 hover:text-white')
+              }
+            >
+              <Settings size={16} strokeWidth={2.2} />
+              Settings
+            </NavLink>
           </div>
         </div>
       </aside>
@@ -138,12 +147,11 @@ export function Layout({ children, onLogout }) {
   return (
     <div className="flex min-h-screen bg-brand-50" style={{ '--sidebar-width': '220px' }}>
       <Sidebar
-        onLogoutClick={() => setLogoutOpen(true)}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
       <div className="flex-1 flex flex-col min-h-screen md:ml-[var(--sidebar-width,220px)]">
-        <Header onMenuClick={() => setSidebarOpen(true)} />
+        <Header onMenuClick={() => setSidebarOpen(true)} onLogoutClick={() => setLogoutOpen(true)} />
         <main className="flex-1 p-3 md:p-5 overflow-auto">{children}</main>
       </div>
 
