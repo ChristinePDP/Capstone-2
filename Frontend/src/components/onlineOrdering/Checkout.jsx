@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
@@ -103,122 +103,6 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   );
 }
 
-// ---- Time picker helpers ----
-const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const MINUTES_STEP = 5; 
-const MINUTES_5 = Array.from({ length: 60 / MINUTES_STEP }, (_, i) => i * MINUTES_STEP);
-
-function to24Hour(hour12, meridiem) {
-  const h = hour12 % 12; 
-  return meridiem === 'PM' ? h + 12 : h;
-}
-
-function buildTimeStr(hour24, minute) {
-  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
-
-function from24Hour(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const meridiem = h >= 12 ? 'PM' : 'AM';
-  let hour12 = h % 12;
-  if (hour12 === 0) hour12 = 12;
-  const minute = Math.floor(m / MINUTES_STEP) * MINUTES_STEP;
-  return { hour12, minute, meridiem };
-}
-
-function TimePicker({ value, minTime, maxTime, openUpward, onChange, onClose }) {
-  const initial = from24Hour(value && value >= minTime && value <= maxTime ? value : minTime);
-  const [hour12, setHour12] = useState(initial.hour12);
-  const [minute, setMinute] = useState(initial.minute);
-  const [meridiem, setMeridiem] = useState(initial.meridiem);
-
-  const commit = (h12, mm, mer) => {
-    const hour24 = to24Hour(h12, mer);
-    let ts = buildTimeStr(hour24, mm);
-    if (ts < minTime) { const s = from24Hour(minTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = minTime; }
-    else if (ts > maxTime) { const s = from24Hour(maxTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = maxTime; }
-    setHour12(h12); setMinute(mm); setMeridiem(mer);
-    onChange(ts);
-  };
-
-  const isHourDisabled = (h12) => {
-    const hour24 = to24Hour(h12, meridiem);
-    return buildTimeStr(hour24, 59) < minTime || buildTimeStr(hour24, 0) > maxTime;
-  };
-  const isMinuteDisabled = (mm) => {
-    const hour24 = to24Hour(hour12, meridiem);
-    const ts = buildTimeStr(hour24, mm);
-    return ts < minTime || ts > maxTime;
-  };
-  const isMeridiemDisabled = (mer) => {
-    const blockMin = mer === 'AM' ? '00:00' : '12:00';
-    const blockMax = mer === 'AM' ? '11:59' : '23:59';
-    return blockMax < minTime || blockMin > maxTime;
-  };
-
-  const colBase = 'flex-1 max-h-[176px] overflow-y-auto py-1';
-  const itemBase = 'text-[11px] text-center py-1.5 rounded-lg transition-colors cursor-pointer select-none';
-
-  return (
-    <div className={`absolute z-20 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-2 w-[210px] ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-      <div className="flex gap-1 border-b border-[#EAE4E0] pb-2 mb-2">
-        <div className={colBase}>
-          {HOURS_12.map(h => {
-            const disabled = isHourDisabled(h);
-            const selected = h === hour12;
-            return (
-              <div
-                key={h}
-                onClick={() => !disabled && commit(h, minute, meridiem)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {String(h).padStart(2, '0')}
-              </div>
-            );
-          })}
-        </div>
-        <div className={colBase}>
-          {MINUTES_5.map(m => {
-            const disabled = isMinuteDisabled(m);
-            const selected = m === minute;
-            return (
-              <div
-                key={m}
-                onClick={() => !disabled && commit(hour12, m, meridiem)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {String(m).padStart(2, '0')}
-              </div>
-            );
-          })}
-        </div>
-        <div className={colBase}>
-          {['AM', 'PM'].map(mer => {
-            const disabled = isMeridiemDisabled(mer);
-            const selected = mer === meridiem;
-            return (
-              <div
-                key={mer}
-                onClick={() => !disabled && commit(hour12, minute, mer)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {mer}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onClose}
-        className="w-full text-[11px] font-bold text-white bg-[#4A3B36] rounded-lg py-1.5 hover:bg-[#3B1F0A] transition-colors"
-      >
-        Done
-      </button>
-    </div>
-  );
-}
-
 export default function Checkout({ cart, setCart }) {
   const navigate = useNavigate();
 
@@ -246,14 +130,8 @@ export default function Checkout({ cart, setCart }) {
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [timePickerOpenUpward, setTimePickerOpenUpward] = useState(false);
-  const timePickerWrapRef = useRef(null);
-  const timePickerTriggerRef = useRef(null);
 
-  // New state for custom alerts
-  const [toastMessage, setToastMessage] = useState(null);
-
+  // Close the custom calendar popover when clicking outside of it.
   useEffect(() => {
     if (!showCalendar) return;
     const handleClickOutside = (e) => {
@@ -299,13 +177,54 @@ export default function Checkout({ cart, setCart }) {
   const SHOP_OPEN_TIME = '08:00';
   const SHOP_CLOSE_TIME = '17:00';
 
+  // For "Pick-up Today", the earliest selectable time is whichever is LATER:
+  // the shop's opening time, or the live current time (if it's already past opening).
+  // This avoids ever snapping back to 8:00 AM once 8:00 AM has already passed.
   const getEffectiveMinTimeForToday = () => {
     const { timeStr: liveNow } = getLiveNow();
     return liveNow > SHOP_OPEN_TIME ? liveNow : SHOP_OPEN_TIME;
   };
 
-  const handleTimeChange = (selectedTime) => {
-    setForm(f => ({ ...f, pickupTime: selectedTime }));
+  // NOTE: date selection is now handled directly by the custom MonthCalendar's
+  // onSelect callback, which only ever passes already-valid, non-disabled dates —
+  // so no separate change-handler/alert is needed here anymore.
+
+  const handleTimeChange = (e) => {
+    const selectedTime = e.target.value;
+
+    if (pickupType === 'now') {
+      // Pick-up Today: time must be within operating hours AND not in the past.
+      const effectiveMin = getEffectiveMinTimeForToday();
+
+      if (selectedTime < effectiveMin) {
+        if (effectiveMin === SHOP_OPEN_TIME) {
+          // Shop hasn't opened yet today — the only case where snapping to 8:00 AM makes sense.
+          alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
+        } else {
+          // Opening time already passed — snapping to 8:00 AM would still be invalid,
+          // so snap to the current live time instead.
+          alert("You cannot select a time in the past for today's orders.");
+        }
+        setForm({...form, pickupTime: effectiveMin});
+      } else if (selectedTime > SHOP_CLOSE_TIME) {
+        alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
+        setForm({...form, pickupTime: SHOP_CLOSE_TIME});
+      } else {
+        setForm({...form, pickupTime: selectedTime});
+      }
+      return;
+    }
+
+    // Pre-order: dates are always in the future, but still must fall within operating hours.
+    if (selectedTime < SHOP_OPEN_TIME) {
+      alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
+      setForm({...form, pickupTime: SHOP_OPEN_TIME});
+    } else if (selectedTime > SHOP_CLOSE_TIME) {
+      alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
+      setForm({...form, pickupTime: SHOP_CLOSE_TIME});
+    } else {
+      setForm({...form, pickupTime: selectedTime});
+    }
   };
 
   const handleProceedToOrder = () => {
@@ -359,6 +278,7 @@ export default function Checkout({ cart, setCart }) {
       }
     }
 
+    // 2. BUILD PAYLOAD
     const orderPayload = {
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
         customer: {
@@ -368,7 +288,10 @@ export default function Checkout({ cart, setCart }) {
         },
         pickup: {
           date: pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate,
-          time: form.pickupTime,
+          time: selectedSlot?.start || '',
+          timeEnd: selectedSlot?.end || '',
+          timeSlot: form.pickupTime,
+          timeLabel: selectedSlot?.label || '',
         },
         specialInstructions: form.instructions || null,
         items: updatedCart.map(item => ({
@@ -486,13 +409,10 @@ export default function Checkout({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (hasPreOrder) return;
+                        // Re-sync date/time to the live clock whenever switching to Pick-up Today.
                         const { dateStr, timeStr } = getLiveNow();
                         setPickupType('now');
-                        setForm({
-                          ...form, 
-                          pickupDate: dateStr, 
-                          pickupTime: timeStr > SHOP_CLOSE_TIME ? '' : (timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME)
-                        });
+                        setForm({...form, pickupDate: dateStr, pickupTime: timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME});
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -598,49 +518,17 @@ export default function Checkout({ cart, setCart }) {
                                 </>
                               )}
                           </div>
-                          
-                          <div className="relative" ref={timePickerWrapRef}>
+                          <div>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
-                              
-                              {pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME ? (
-                                <div className="w-full border border-red-200 px-3.5 py-2.5 text-xs rounded-xl bg-red-50 text-red-600 flex items-center gap-2">
-                                  <Lock size={12} />
-                                  Shop is already closed for today. Please select Pre-Order.
-                                </div>
-                              ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    ref={timePickerTriggerRef}
-                                    onClick={() => {
-                                      if (!showTimePicker && timePickerTriggerRef.current) {
-                                        const rect = timePickerTriggerRef.current.getBoundingClientRect();
-                                        const TIME_PICKER_HEIGHT_ESTIMATE = 230;
-                                        const spaceBelow = window.innerHeight - rect.bottom;
-                                        const spaceAbove = rect.top;
-                                        setTimePickerOpenUpward(spaceBelow < TIME_PICKER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
-                                      }
-                                      setShowTimePicker(s => !s);
-                                    }}
-                                    className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
-                                  >
-                                    <span className={form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
-                                      {form.pickupTime ? formatTime(form.pickupTime) : 'Select pickup time'}
-                                    </span>
-                                  </button>
-                                  {showTimePicker && (
-                                    <TimePicker
-                                      value={form.pickupTime}
-                                      minTime={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
-                                      maxTime={SHOP_CLOSE_TIME}
-                                      openUpward={timePickerOpenUpward}
-                                      onChange={handleTimeChange}
-                                      onClose={() => setShowTimePicker(false)}
-                                    />
-                                  )}
-                                  <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
-                                </>
-                              )}
+                              <input 
+                                type="time" 
+                                min={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
+                                max={SHOP_CLOSE_TIME}
+                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-[#3B1F0A]" 
+                                onChange={handleTimeChange} 
+                                value={form.pickupTime}
+                              />
+                              <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
                           </div>
                       </div>
 
@@ -791,12 +679,12 @@ export default function Checkout({ cart, setCart }) {
                       <span className="text-[#3B1F0A] font-semibold">{form.altPhone}</span>
                     </div>
                   )}
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[#B7A99F]">Date & Time</span>
-                    <span className="text-[#3B1F0A] font-semibold">
-                      {form.pickupDate ? formatDateLong(form.pickupDate) : '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
-                    </span>
-                  </div>
+
+                  <span className="text-[#8A7264]">Date & Time</span>
+                  <span className="text-[#3B1F0A] font-semibold text-right truncate">
+                    {form.pickupDate || '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
+                  </span>
+
                   {form.instructions && (
                     <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl">
                       <span className="text-[10px] text-[#B7A99F] uppercase font-semibold">Special Instructions</span>

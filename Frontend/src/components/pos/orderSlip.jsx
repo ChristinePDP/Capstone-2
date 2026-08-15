@@ -5,6 +5,9 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
+  
+  // State para sa pag-track ng errors
+  const [errors, setErrors] = useState({});
 
   if (!product) return null;
 
@@ -35,29 +38,52 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
       ...prev,
       [label]: value
     }));
+    // Aalisin ang error kapag nag-input na si user
+    setErrors(prev => ({
+      ...prev,
+      [label]: false
+    }));
   };
 
   const handleAdd = () => {
-    if (isVariable) {
-      if (!allGroupsSelected) {
-        alert(`Please select all options: ${product.price_groups.map(g => g.name).join(', ')}`);
-        return;
-      }
-      if (missingCombo) {
-        alert("This specific combination is currently unavailable.");
-        return;
-      }
+    const newErrors = {};
+
+    // 1. Validation para sa Product Options (Variations)
+    if (isVariable && !allGroupsSelected) {
+      product.price_groups.forEach(g => {
+        if (!selectedPriceOptions[g.name]) {
+          newErrors[g.name] = true;
+        }
+      });
     }
 
+    if (isVariable && missingCombo) {
+      // Kung missing combo, disabled na rin ang Add Button sa UI
+      return; 
+    }
+
+    // 2. Validation para sa Customization Details (Order Slip)
     if (hasFields) {
-      const missingFields = product.order_slip_fields.filter(field => !slipAnswers[field.label] || slipAnswers[field.label].trim() === '');
-      if (missingFields.length > 0) {
-        alert(`Mangyaring sagutan ang: ${missingFields.map(f => f.label).join(', ')}`);
-        return;
-      }
+      product.order_slip_fields.forEach(field => {
+        // Tinitignan kung optional ba ang field
+        const isOptional = field.optional === true || field.isOptional === true || field.required === false;
+        
+        if (!isOptional) {
+          const answer = slipAnswers[field.label];
+          if (!answer || answer.trim() === '') {
+            newErrors[field.label] = true;
+          }
+        }
+      });
     }
 
-    // Ipapasa pabalik sa posPage ang kumpletong data
+    // 3. Kung may error, i-set sa state at pigilang mag-add to cart
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    // Kapag pasado, ipapasa pabalik sa posPage ang kumpletong data
     onConfirm({ 
       ...product, 
       qty: 1, 
@@ -100,17 +126,23 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.price_groups.map((group, index) => (
                   <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{group.name} *</label>
+                    <label className={`text-xs font-semibold mb-1.5 ${errors[group.name] ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                      {group.name} *
+                    </label>
                     <select
-                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
+                      className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[group.name] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
                       value={selectedPriceOptions[group.name] || ''}
-                      onChange={e => setSelectedPriceOptions(prev => ({ ...prev, [group.name]: e.target.value }))}
+                      onChange={e => {
+                        setSelectedPriceOptions(prev => ({ ...prev, [group.name]: e.target.value }));
+                        setErrors(prev => ({ ...prev, [group.name]: false }));
+                      }}
                     >
                       <option value="" disabled>Select {group.name}...</option>
                       {group.options.map((opt, i) => (
                         <option key={i} value={opt}>{opt}</option>
                       ))}
                     </select>
+                    {errors[group.name] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                   </div>
                 ))}
               </div>
@@ -123,31 +155,57 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
               <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Customization Details</p>
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.order_slip_fields.map((field, index) => {
+                  const isOptional = field.optional === true || field.isOptional === true || field.required === false;
+                  const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
+
                   if (field.type === 'Select') {
                     return (
                       <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                        <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <select className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} defaultValue="">
+                        <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                          {labelText}
+                        </label>
+                        <select 
+                          className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                          onChange={e => handleAnswerChange(field.label, e.target.value)} 
+                          defaultValue=""
+                        >
                           <option value="" disabled>Select {field.label}...</option>
                           {field.options?.map((opt, i) => (
                             <option key={i} value={opt}>{opt}</option>
                           ))}
                         </select>
+                        {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                       </div>
                     );
                   }
                   if (field.type === 'Textarea') {
                     return (
                       <div key={index} className="flex flex-col w-full basis-full">
-                        <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <textarea placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors" rows={3} onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                        <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                          {labelText}
+                        </label>
+                        <textarea 
+                          placeholder={`Enter ${field.label}...`} 
+                          className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none resize-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                          rows={3} 
+                          onChange={e => handleAnswerChange(field.label, e.target.value)} 
+                        />
+                        {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                       </div>
                     );
                   }
                   return (
                     <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                      <input type={field.type === 'Number' ? 'number' : 'text'} placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                        {labelText}
+                      </label>
+                      <input 
+                        type={field.type === 'Number' ? 'number' : 'text'} 
+                        placeholder={`Enter ${field.label}...`} 
+                        className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                        onChange={e => handleAnswerChange(field.label, e.target.value)} 
+                      />
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                     </div>
                   );
                 })}

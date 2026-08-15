@@ -106,7 +106,17 @@ export const createDatabaseOrder = async (payload) => {
     amount_paid: payload.payment.amountDueNow,
     balance: payload.payment.balanceAtPickup,
     pickup_date: payload.pickup.date,
+    // `payload.pickup.time` is now guaranteed to be a clean "HH:MM" start time
+    // (resolved on the frontend from the selected slot), so it inserts cleanly
+    // into the `time` column instead of being mis-parsed as a range/offset.
     pickup_time: payload.pickup.time,
+    pickup_time_end: payload.pickup.timeEnd || null,
+
+    // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment
+    // the line below to preserve the full slot range (e.g. "08:00-10:00") instead
+    // of just the start time. Leave commented out until the column exists, or the
+    // insert will fail.
+    // pickup_time_slot: payload.pickup.timeSlot || null,
   };
 
   let newOrder;
