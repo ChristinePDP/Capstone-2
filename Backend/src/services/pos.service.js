@@ -81,7 +81,7 @@ export const createPosOrder = async (payload) => {
     // (resolved on the frontend from the selected slot), so it inserts cleanly
     // into the `time` column instead of being mis-parsed as a range/offset.
     pickup_time: payload.pickup?.time || null,
-pickup_time_end: payload.pickup?.timeEnd || null,
+    pickup_time_end: payload.pickup?.timeEnd || null,
 
     // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment
     // the line below to preserve the full slot range (e.g. "08:00-10:00") instead
