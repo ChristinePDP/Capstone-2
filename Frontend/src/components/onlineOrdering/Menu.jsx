@@ -269,7 +269,7 @@ export default function Menu({ cart, setCart }) {
     productListRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const CATEGORY_ORDER = ['Cake', 'Pastry', 'Package', 'Celebration Material'];
+  const CATEGORY_ORDER = ['Package', 'Cake', 'Pastry', 'Celebration Material'];
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -309,9 +309,13 @@ export default function Menu({ cart, setCart }) {
 
       const currentQtyInCart = prev.filter(i => i.id === item.id).reduce((s, i) => s + i.qty, 0);
 
-      if (item.order_type === 'Pick-up Today') {
-        if (currentQtyInCart + item.qty > item.available_stock) {
-          alert(`Sorry, hanggang ${item.available_stock} slots na lang ang available para sa ${item.name}.`);
+      // FIX: same gap as the sold-out badge — 'Both' items are buyable right
+      // now too, so cart quantity must respect their stock limit as well, not
+      // just strict 'Pick-up Today' items.
+      if (item.order_type === 'Pick-up Today' || item.order_type === 'Both') {
+        const limit = item.available_stock ?? 0;
+        if (currentQtyInCart + item.qty > limit) {
+          alert(`Sorry, hanggang ${limit} slots na lang ang available para sa ${item.name}.`);
           return prev;
         }
       }
@@ -330,10 +334,11 @@ export default function Menu({ cart, setCart }) {
     const item = newCart[index];
     const newQty = item.qty + delta;
 
-    if (item.order_type === 'Pick-up Today' && delta > 0) {
+    if ((item.order_type === 'Pick-up Today' || item.order_type === 'Both') && delta > 0) {
       const currentQtyInCart = prev.filter(i => i.id === item.id).reduce((s, i) => s + i.qty, 0);
-      if (currentQtyInCart + delta > item.available_stock) {
-        alert(`Limit reached: ${item.available_stock} slots lang ang available.`);
+      const limit = item.available_stock ?? 0;
+      if (currentQtyInCart + delta > limit) {
+        alert(`Limit reached: ${limit} slots lang ang available.`);
         return prev;
       }
     }
@@ -349,6 +354,95 @@ export default function Menu({ cart, setCart }) {
   useEffect(() => {
     if (cartCount === 0) setIsMobileCartOpen(false);
   }, [cartCount]);
+
+  // Kagaya ng renderProductGrid() sa posMenu.jsx: kapag "All" ang tab, hinahati
+  // ang mga products sa per-category sections (may header + item count), sa
+  // pagkakasunod-sunod ng CATEGORY_ORDER — hindi lang basta flat na list.
+  // Kapag may specific category naman na naka-select, iisang section lang ang
+  // lalabas pero ganun pa rin ang layout, kapareho ng ginagawa sa POS.
+  const renderProductGrid = () => {
+    const categoriesToRender = activeTab === 'All' ? CATEGORY_ORDER : [activeTab];
+
+    return categoriesToRender.map(cat => {
+      const catProducts = products.filter(p => p.category === cat);
+      if (catProducts.length === 0) return null;
+
+      return (
+        <div key={cat} className="mb-8">
+          <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+            <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
+            <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
+            {catProducts.map(p => {
+
+              // FIX (same as posMenu.jsx): products with order_type 'Both' are still
+              // buyable right now, so they must be stock-checked too — not just strict
+              // 'Pick-up Today' items. Previously 'Both' products never got flagged sold
+              // out even at 0 stock.
+              const isStockTracked = p.order_type === 'Pick-up Today' || p.order_type === 'Both';
+
+              // 'Both' items can optionally run off a daily_limit (e.g. pastries baked
+              // to order, not tied to a physical inventory count) instead of
+              // stock_quantity. If daily_limit is set, that's the basis; otherwise fall
+              // back to stock_quantity like a normal Pick-up Today item. A product with
+              // neither value set correctly resolves to 0 → sold out.
+              const hasDailyLimit = p.order_type === 'Both' && p.daily_limit != null && p.daily_limit > 0;
+              const stockBasis = hasDailyLimit ? p.daily_limit : p.stock_quantity;
+              const currentStock = p.available_stock ?? stockBasis ?? 0;
+              const isSoldOut = isStockTracked && currentStock <= 0;
+
+              const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
+              const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
+
+              return (
+                <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
+                  <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
+                    <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105 group-hover:blur-[3px] group-hover:brightness-[0.55]" />
+
+                    {isStockTracked && (
+                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">
+                          {isSoldOut ? 'Sold Out' : `${currentStock} Available`}
+                        </span>
+                      </div>
+                    )}
+
+                    <button type="button" onClick={() => setPreviewImage(p)} aria-label={`See full image of ${p.name}`} className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer z-0">
+                      <span className="flex items-center gap-1.5 text-white text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide bg-[#1F1108]/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/30"><Expand size={12} /> See this image</span>
+                    </button>
+                  </div>
+                  <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
+                    <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
+                    <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] mb-1.5 lg:mb-1.5 leading-snug flex-1 line-clamp-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.25rem]">{p.name}</h3>
+                    <p className="text-xs sm:text-sm lg:text-xs font-bold text-[#5A453C] mb-2 lg:mb-2">
+                       {isVariable ? 'Starting at ' : ''}₱{Number(minPrice).toLocaleString()}
+                    </p>
+
+                    <button
+                      onClick={() => {
+                        if (isSoldOut) return;
+                        (isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload) ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
+                      }}
+                      disabled={isSoldOut}
+                      className={`w-full py-2 sm:py-2.5 lg:py-2 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
+                        isSoldOut 
+                          ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed' 
+                          : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
+                      }`}
+                    >
+                      {isSoldOut ? 'Out of Stock' : (isVariable ? 'Select Options' : 'Add to Cart')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    });
+  };
 
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
@@ -377,58 +471,7 @@ export default function Menu({ cart, setCart }) {
             {isLoading ? (
                <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-[#8A7264]" size={32} /></div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
-                {products.filter(p => activeTab === 'All' || p.category === activeTab).map(p => {
-                  
-                  const isBuyNowItem = p.order_type === 'Pick-up Today';
-                  const isSoldOut = isBuyNowItem && p.available_stock <= 0;
-                  
-                  const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
-                  const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
-
-                  return (
-                    <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
-                      <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
-                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105 group-hover:blur-[3px] group-hover:brightness-[0.55]" />
-                        
-                        {isBuyNowItem && (
-                          <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
-                            <span className="text-[10px] font-bold uppercase tracking-wider">
-                              {isSoldOut ? 'Sold Out' : `${p.available_stock} Available`}
-                            </span>
-                          </div>
-                        )}
-
-                        <button type="button" onClick={() => setPreviewImage(p)} aria-label={`See full image of ${p.name}`} className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer z-0">
-                          <span className="flex items-center gap-1.5 text-white text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide bg-[#1F1108]/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/30"><Expand size={12} /> See this image</span>
-                        </button>
-                      </div>
-                      <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
-                        <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                        <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] mb-1.5 lg:mb-1.5 leading-snug flex-1 line-clamp-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.25rem]">{p.name}</h3>
-                        <p className="text-xs sm:text-sm lg:text-xs font-bold text-[#5A453C] mb-2 lg:mb-2">
-                           {isVariable ? 'Starting at ' : ''}₱{Number(minPrice).toLocaleString()}
-                        </p>
-                        
-                        <button
-                          onClick={() => {
-                            if (isSoldOut) return;
-                            (isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload) ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
-                          }}
-                          disabled={isSoldOut}
-                          className={`w-full py-2 sm:py-2.5 lg:py-2 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
-                            isSoldOut 
-                              ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed' 
-                              : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
-                          }`}
-                        >
-                          {isSoldOut ? 'Out of Stock' : (isVariable ? 'Select Options' : 'Add to Cart')}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              renderProductGrid()
             )}
           </div>
 

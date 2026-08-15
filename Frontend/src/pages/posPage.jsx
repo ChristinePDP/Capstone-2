@@ -4,13 +4,31 @@ import PosCart from '../components/pos/posCart';
 import OrderSlip from '../components/pos/orderSlip';
 
 export default function PosPage() {
-  const [cart, setCart] = useState([]);
+  // 1. Initialized mula sa Local Storage
+  const [cart, setCart] = useState(() => {
+    const savedCart = localStorage.getItem('pos_cart');
+    return savedCart ? JSON.parse(savedCart) : [];
+  });
+
+  const [orderType, setOrderType] = useState(() => {
+    return localStorage.getItem('pos_orderType') || 'Buy Now';
+  }); 
+  
   const [products, setProducts] = useState([]); 
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [orderType, setOrderType] = useState('Buy Now'); 
   const [slipModalItem, setSlipModalItem] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // 2. Syncing Cart at OrderType sa Local Storage tuwing may pagbabago
+  useEffect(() => {
+    localStorage.setItem('pos_cart', JSON.stringify(cart));
+  }, [cart]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_orderType', orderType);
+  }, [orderType]);
+
 
   // --- FETCH PRODUCTS FROM BACKEND ---
   useEffect(() => {
@@ -30,7 +48,7 @@ export default function PosPage() {
         const result = await response.json();
         
         if (result.success) {
-          // BAGO: Normalization ng data gaya ng nasa Menu.jsx ng Online Ordering
+          // Normalization ng data gaya ng nasa Menu.jsx ng Online Ordering
           const normalized = result.data.map(p => ({
             ...p,
             order_slip_fields: p.order_slip_fields || [],
@@ -59,7 +77,7 @@ export default function PosPage() {
 
   // --- UPDATED ADD TO CART LOGIC ---
   const handleAddToCart = (item) => {
-    // BAGO: Tamang check base sa database fields imbes na sa lumang 'has_slip'
+    // Tamang check base sa database fields imbes na sa lumang 'has_slip'
     const isCustomizable = (item.order_slip_fields && item.order_slip_fields.length > 0) || item.allow_file_upload || (item.pricing_mode === 'variable' && item.price_matrix?.length > 0);
     
     // Kung kiki-click pa lang sa Menu (wala pang qty), i-open ang modal
@@ -115,7 +133,7 @@ export default function PosPage() {
   const handleClearCart = () => setCart([]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-80px)] overflow-hidden text-[#3B1F0A] bg-stone-50 p-4">
+    <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-80px)] overflow-hidden text-[#3B1F0A] bg-transparent p-4">
       <div className="flex-1 flex flex-col min-w-0 h-full">
          {loading ? (
            <div className="flex-1 flex items-center justify-center font-semibold text-[#8A7264]">Loading products...</div>

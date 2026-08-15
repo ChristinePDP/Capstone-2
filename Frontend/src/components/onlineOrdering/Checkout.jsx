@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
@@ -103,120 +103,19 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   );
 }
 
-// ---- Time picker helpers ----
-const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const MINUTES_STEP = 5; 
-const MINUTES_5 = Array.from({ length: 60 / MINUTES_STEP }, (_, i) => i * MINUTES_STEP);
+// ---- Time selector helpers ----
+// Kapareho ito ng dropdown na ginagamit sa posCart.jsx (fixed pickup windows
+// instead of a free hour/minute picker), para consistent ang UX sa POS at
+// sa online ordering.
+const TIME_SLOTS = [
+  { value: '08:00-10:00', label: '8:00 AM - 10:00 AM', start: '08:00', end: '10:00' },
+  { value: '10:00-12:00', label: '10:00 AM - 12:00 PM', start: '10:00', end: '12:00' },
+  { value: '12:00-15:00', label: '12:00 PM - 3:00 PM', start: '12:00', end: '15:00' },
+  { value: '15:00-17:00', label: '3:00 PM - 5:00 PM', start: '15:00', end: '17:00' },
+];
 
-function to24Hour(hour12, meridiem) {
-  const h = hour12 % 12; 
-  return meridiem === 'PM' ? h + 12 : h;
-}
-
-function buildTimeStr(hour24, minute) {
-  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
-
-function from24Hour(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const meridiem = h >= 12 ? 'PM' : 'AM';
-  let hour12 = h % 12;
-  if (hour12 === 0) hour12 = 12;
-  const minute = Math.floor(m / MINUTES_STEP) * MINUTES_STEP;
-  return { hour12, minute, meridiem };
-}
-
-function TimePicker({ value, minTime, maxTime, openUpward, onChange, onClose }) {
-  const initial = from24Hour(value && value >= minTime && value <= maxTime ? value : minTime);
-  const [hour12, setHour12] = useState(initial.hour12);
-  const [minute, setMinute] = useState(initial.minute);
-  const [meridiem, setMeridiem] = useState(initial.meridiem);
-
-  const commit = (h12, mm, mer) => {
-    const hour24 = to24Hour(h12, mer);
-    let ts = buildTimeStr(hour24, mm);
-    if (ts < minTime) { const s = from24Hour(minTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = minTime; }
-    else if (ts > maxTime) { const s = from24Hour(maxTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = maxTime; }
-    setHour12(h12); setMinute(mm); setMeridiem(mer);
-    onChange(ts);
-  };
-
-  const isHourDisabled = (h12) => {
-    const hour24 = to24Hour(h12, meridiem);
-    return buildTimeStr(hour24, 59) < minTime || buildTimeStr(hour24, 0) > maxTime;
-  };
-  const isMinuteDisabled = (mm) => {
-    const hour24 = to24Hour(hour12, meridiem);
-    const ts = buildTimeStr(hour24, mm);
-    return ts < minTime || ts > maxTime;
-  };
-  const isMeridiemDisabled = (mer) => {
-    const blockMin = mer === 'AM' ? '00:00' : '12:00';
-    const blockMax = mer === 'AM' ? '11:59' : '23:59';
-    return blockMax < minTime || blockMin > maxTime;
-  };
-
-  const colBase = 'flex-1 max-h-[176px] overflow-y-auto py-1';
-  const itemBase = 'text-[11px] text-center py-1.5 rounded-lg transition-colors cursor-pointer select-none';
-
-  return (
-    <div className={`absolute z-20 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-2 w-[210px] ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-      <div className="flex gap-1 border-b border-[#EAE4E0] pb-2 mb-2">
-        <div className={colBase}>
-          {HOURS_12.map(h => {
-            const disabled = isHourDisabled(h);
-            const selected = h === hour12;
-            return (
-              <div
-                key={h}
-                onClick={() => !disabled && commit(h, minute, meridiem)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {String(h).padStart(2, '0')}
-              </div>
-            );
-          })}
-        </div>
-        <div className={colBase}>
-          {MINUTES_5.map(m => {
-            const disabled = isMinuteDisabled(m);
-            const selected = m === minute;
-            return (
-              <div
-                key={m}
-                onClick={() => !disabled && commit(hour12, m, meridiem)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {String(m).padStart(2, '0')}
-              </div>
-            );
-          })}
-        </div>
-        <div className={colBase}>
-          {['AM', 'PM'].map(mer => {
-            const disabled = isMeridiemDisabled(mer);
-            const selected = mer === meridiem;
-            return (
-              <div
-                key={mer}
-                onClick={() => !disabled && commit(hour12, minute, mer)}
-                className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : selected ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}
-              >
-                {mer}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onClose}
-        className="w-full text-[11px] font-bold text-white bg-[#4A3B36] rounded-lg py-1.5 hover:bg-[#3B1F0A] transition-colors"
-      >
-        Done
-      </button>
-    </div>
-  );
+function getSlotLabel(value) {
+  return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
 export default function Checkout({ cart, setCart }) {
@@ -246,10 +145,6 @@ export default function Checkout({ cart, setCart }) {
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [timePickerOpenUpward, setTimePickerOpenUpward] = useState(false);
-  const timePickerWrapRef = useRef(null);
-  const timePickerTriggerRef = useRef(null);
 
   // New state for custom alerts
   const [toastMessage, setToastMessage] = useState(null);
@@ -264,17 +159,6 @@ export default function Checkout({ cart, setCart }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
-
-  useEffect(() => {
-    if (!showTimePicker) return;
-    const handleClickOutside = (e) => {
-      if (timePickerWrapRef.current && !timePickerWrapRef.current.contains(e.target)) {
-        setShowTimePicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTimePicker]);
 
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const halfAmount = totalAmount / 2;
@@ -299,9 +183,14 @@ export default function Checkout({ cart, setCart }) {
   const SHOP_OPEN_TIME = '08:00';
   const SHOP_CLOSE_TIME = '17:00';
 
-  const getEffectiveMinTimeForToday = () => {
-    const { timeStr: liveNow } = getLiveNow();
-    return liveNow > SHOP_OPEN_TIME ? liveNow : SHOP_OPEN_TIME;
+  // Pick-up Today: i-disable ang mga slot na tapos na ang window base sa current
+  // time ng pag-order (hal. 12pm mag-order → naka-disable na ang 8-10AM at
+  // 10-12PM). Pre-Order: laging future date, kaya lahat ng slots available —
+  // kapareho ito ng rule sa posCart.jsx.
+  const isSlotDisabled = (slot) => {
+    if (pickupType !== 'now') return false;
+    const { timeStr } = getLiveNow();
+    return slot.end <= timeStr;
   };
 
   const handleTimeChange = (selectedTime) => {
@@ -359,6 +248,13 @@ export default function Checkout({ cart, setCart }) {
       }
     }
 
+    // FIX (same as posCart.jsx): TIME_SLOTS values are ranges like "08:00-10:00".
+    // Sending that whole string into a Postgres `time` column makes Postgres read
+    // "-10:00" as a UTC offset and silently drop it, so only "08:00:00" survives.
+    // Resolve the slot to its real start time before sending, and keep the full
+    // slot value/label alongside it so nothing is lost.
+    const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
+
     const orderPayload = {
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
         customer: {
@@ -368,7 +264,10 @@ export default function Checkout({ cart, setCart }) {
         },
         pickup: {
           date: pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate,
-          time: form.pickupTime,
+          time: selectedSlot?.start || '',
+          timeEnd: selectedSlot?.end || '',
+          timeSlot: form.pickupTime,
+          timeLabel: selectedSlot?.label || '',
         },
         specialInstructions: form.instructions || null,
         items: updatedCart.map(item => ({
@@ -486,13 +385,9 @@ export default function Checkout({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (hasPreOrder) return;
-                        const { dateStr, timeStr } = getLiveNow();
+                        const { dateStr } = getLiveNow();
                         setPickupType('now');
-                        setForm({
-                          ...form, 
-                          pickupDate: dateStr, 
-                          pickupTime: timeStr > SHOP_CLOSE_TIME ? '' : (timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME)
-                        });
+                        setForm(f => ({ ...f, pickupDate: dateStr, pickupTime: '' }));
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -599,9 +494,9 @@ export default function Checkout({ cart, setCart }) {
                               )}
                           </div>
                           
-                          <div className="relative" ref={timePickerWrapRef}>
+                          <div className="relative">
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
-                              
+
                               {pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME ? (
                                 <div className="w-full border border-red-200 px-3.5 py-2.5 text-xs rounded-xl bg-red-50 text-red-600 flex items-center gap-2">
                                   <Lock size={12} />
@@ -609,35 +504,21 @@ export default function Checkout({ cart, setCart }) {
                                 </div>
                               ) : (
                                 <>
-                                  <button
-                                    type="button"
-                                    ref={timePickerTriggerRef}
-                                    onClick={() => {
-                                      if (!showTimePicker && timePickerTriggerRef.current) {
-                                        const rect = timePickerTriggerRef.current.getBoundingClientRect();
-                                        const TIME_PICKER_HEIGHT_ESTIMATE = 230;
-                                        const spaceBelow = window.innerHeight - rect.bottom;
-                                        const spaceAbove = rect.top;
-                                        setTimePickerOpenUpward(spaceBelow < TIME_PICKER_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
-                                      }
-                                      setShowTimePicker(s => !s);
-                                    }}
-                                    className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
-                                  >
-                                    <span className={form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
-                                      {form.pickupTime ? formatTime(form.pickupTime) : 'Select pickup time'}
-                                    </span>
-                                  </button>
-                                  {showTimePicker && (
-                                    <TimePicker
+                                  <div className="relative">
+                                    <select
                                       value={form.pickupTime}
-                                      minTime={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
-                                      maxTime={SHOP_CLOSE_TIME}
-                                      openUpward={timePickerOpenUpward}
-                                      onChange={handleTimeChange}
-                                      onClose={() => setShowTimePicker(false)}
-                                    />
-                                  )}
+                                      onChange={e => handleTimeChange(e.target.value)}
+                                      className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white appearance-none pr-8 ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                    >
+                                      <option value="" disabled>Select pickup time</option>
+                                      {TIME_SLOTS.map(slot => (
+                                        <option key={slot.value} value={slot.value} disabled={isSlotDisabled(slot)}>
+                                          {slot.label}{isSlotDisabled(slot) ? ' (Past)' : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown size={14} className="text-[#8A7264] shrink-0 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                  </div>
                                   <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
                                 </>
                               )}
@@ -794,7 +675,7 @@ export default function Checkout({ cart, setCart }) {
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[#B7A99F]">Date & Time</span>
                     <span className="text-[#3B1F0A] font-semibold">
-                      {form.pickupDate ? formatDateLong(form.pickupDate) : '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
+                      {form.pickupDate ? formatDateLong(form.pickupDate) : '—'} {form.pickupTime && `• ${getSlotLabel(form.pickupTime)}`}
                     </span>
                   </div>
                   {form.instructions && (

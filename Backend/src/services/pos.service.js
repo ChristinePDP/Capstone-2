@@ -3,6 +3,15 @@ import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 
+// BAGO: ginagamit para gumawa ng token na naka-encode sa QR ng e-receipt.
+// Ito ang isu-scan ng owner sa pickup counter para i-verify/complete ang order.
+// PALITAN ang RECEIPT_TOKEN_SECRET sa .env mo ng sarili mong secret string.
+const RECEIPT_SECRET = process.env.RECEIPT_TOKEN_SECRET || 'change_this_secret_in_env';
+
+function makeReceiptToken(orderId) {
+  return Buffer.from(`${orderId}${RECEIPT_SECRET}`).toString('base64');
+}
+
 export const getPosProducts = async (filters = {}) => {
   try {
     const result = await ProductModel.findAll(filters);
@@ -16,7 +25,6 @@ export const getPosProducts = async (filters = {}) => {
       reservedMap[item.product_id] = (reservedMap[item.product_id] || 0) + item.quantity;
     });
 
-    // BAGO: Parehas na parehas na ito sa onlineOrdering.services.js
     return products.map(p => ({
       ...p,
       available_stock: Math.max(0, (p.stock_quantity || 0) - (reservedMap[p.id] || 0))
@@ -28,7 +36,6 @@ export const getPosProducts = async (filters = {}) => {
 
 export const createPosOrder = async (payload) => {
   // 1. Handle Customer Data
-  // Fallback to "Walk-in Customer" if left blank in the POS UI
   const customerName = payload.customer?.name || 'Walk-in Customer';
   const customerPhone = payload.customer?.phone || '00000000000';
   
@@ -47,19 +54,40 @@ export const createPosOrder = async (payload) => {
   const isBuyNow = payload.orderType === 'Buy Now';
   const orderStatus = isBuyNow ? 'Completed' : 'Confirmed';
 
+  let dbPaymentType = 'full';
+  if (payload.payment?.type === '50% Deposit') {
+    dbPaymentType = 'deposit'; 
+  } else if (payload.payment?.type === 'Full Payment') {
+    dbPaymentType = 'full';
+  }
+
   const orderToInsert = {
-    order_number: payload.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
     customer_id: customerData.id,
     order_type: payload.orderType,
-    source: 'walk-in', // Tagged strictly for POS walk-ins
+    source: 'walk-in', 
     status: orderStatus,
-    subtotal: payload.payment?.subtotal,
-    grand_total: payload.payment?.grandTotal,
-    payment_type: payload.payment?.type || 'Cash',
-    amount_paid: payload.payment?.amountDueNow,
+    subtotal: payload.payment?.subtotal || 0,
+    
+    // BAGO: Idinagdag ang additional_charge at discount (JSONB format)
+    additional_charge: payload.payment?.additionalCharge || 0,
+    discount: payload.payment?.discount || {}, // Ito ay tatanggapin na bilang object dahil ginawa nating JSONB sa database
+    
+    grand_total: payload.payment?.grandTotal || 0,
+    payment_type: dbPaymentType, 
+    amount_paid: payload.payment?.amountDueNow || 0,
     balance: payload.payment?.balance || 0,
     pickup_date: payload.pickup?.date || null,
+    // `payload.pickup.time` is now guaranteed to be a clean "HH:MM" start time
+    // (resolved on the frontend from the selected slot), so it inserts cleanly
+    // into the `time` column instead of being mis-parsed as a range/offset.
     pickup_time: payload.pickup?.time || null,
+pickup_time_end: payload.pickup?.timeEnd || null,
+
+    // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment
+    // the line below to preserve the full slot range (e.g. "08:00-10:00") instead
+    // of just the start time. Leave commented out until the column exists, or the
+    // insert will fail.
+    // pickup_time_slot: payload.pickup?.timeSlot || null,
   };
 
   let newOrder;
@@ -87,7 +115,6 @@ export const createPosOrder = async (payload) => {
   }
 
   // 4. Stock Deduction Logic
-  // Automatically deduct inventory for "Buy Now" POS transactions
   if (isBuyNow) {
     for (const item of itemsToInsert) {
       if (!item.product_id) continue;
@@ -103,5 +130,25 @@ export const createPosOrder = async (payload) => {
     }
   }
 
-  return newOrder;
+  // BAGO: idinagdag ang receiptToken sa response. Ginagamit ito ng frontend
+  // (PosCart.jsx -> PosEReceipt) para lagyan ng laman ang confirm QR sa e-receipt.
+  return {
+    ...newOrder,
+    receiptToken: makeReceiptToken(newOrder.id),
+  };
+};
+
+// BAGO: para sa hinaharap na "confirm at pickup" scanner — hindi pa ginagamit
+// ngayon dahil litrato na lang muna ang approach, pero handa na ito kapag
+// gusto mo nang mag-set up ng scanner sa counter.
+export const confirmPosOrderPickup = async (orderId, token) => {
+  if (token !== makeReceiptToken(orderId)) {
+    throw new Error('Invalid confirmation code');
+  }
+  const order = await OrdersModel.findById(orderId);
+  if (!order) throw new Error('Order not found');
+  if (order.status === 'Completed') throw new Error('Order already marked as completed');
+  // FIX: walang generic `update()` sa OrdersModel — `updateStatus(id, status)`
+  // lang ang meron, kaya ito ang tamang gamitin dito.
+  return await OrdersModel.updateStatus(orderId, 'Completed');
 };

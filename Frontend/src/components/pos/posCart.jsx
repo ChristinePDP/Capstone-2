@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, User, 
-  Lock, Calendar as CalendarIcon, AlertCircle, ChevronLeft, ChevronRight, Tag 
+  Calendar as CalendarIcon, AlertCircle, ChevronLeft, ChevronRight, Tag, Receipt, Lock
 } from 'lucide-react';
+import PosEReceipt from './posEreceipt';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -19,7 +21,21 @@ function toDateStr(year, month, day) {
   return `${year}-${mm}-${dd}`;
 }
 
-function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect, onClose }) {
+// Inilabas natin ang mga helpers para magamit sa global scope
+const getLiveNow = () => {
+  const now = new Date();
+  const dateStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+  const timeStr = now.toTimeString().slice(0, 5);
+  return { dateStr, timeStr };
+};
+
+const addDaysToDateString = (dateStr, days) => {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+};
+
+function MonthCalendar({ selectedDate, minDate, todayDate, style, onSelect, onClose }) {
   const initial = selectedDate || minDate || todayDate;
   const [iy, im] = initial.split('-').map(Number);
   const [viewYear, setViewYear] = useState(iy);
@@ -54,7 +70,7 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   };
 
   return (
-    <div className={`absolute z-50 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-3 w-[280px] left-0 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+    <div style={style} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-3 w-[280px]">
       <div className="flex items-center justify-between mb-2">
         <button type="button" onClick={goPrev} disabled={!canGoPrev} className={`p-1 rounded-lg hover:bg-[#F5EFEB] ${!canGoPrev ? 'opacity-30 cursor-not-allowed' : ''}`}>
           <ChevronLeft size={16} />
@@ -94,98 +110,31 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   );
 }
 
-const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const MINUTES_STEP = 5; 
-const MINUTES_5 = Array.from({ length: 60 / MINUTES_STEP }, (_, i) => i * MINUTES_STEP);
+const TIME_SLOTS = [
+  { value: '08:00-10:00', label: '8:00 AM - 10:00 AM', start: '08:00', end: '10:00' },
+  { value: '10:00-12:00', label: '10:00 AM - 12:00 PM', start: '10:00', end: '12:00' },
+  { value: '12:00-15:00', label: '12:00 PM - 3:00 PM', start: '12:00', end: '15:00' },
+  { value: '15:00-17:00', label: '3:00 PM - 5:00 PM', start: '15:00', end: '17:00' },
+];
 
-function to24Hour(hour12, meridiem) {
-  const h = hour12 % 12; 
-  return meridiem === 'PM' ? h + 12 : h;
-}
-function buildTimeStr(hour24, minute) {
-  return `${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
-function from24Hour(timeStr) {
-  const [h, m] = timeStr.split(':').map(Number);
-  const meridiem = h >= 12 ? 'PM' : 'AM';
-  let hour12 = h % 12;
-  if (hour12 === 0) hour12 = 12;
-  return { hour12, minute: Math.floor(m / MINUTES_STEP) * MINUTES_STEP, meridiem };
+function getSlotLabel(value) {
+  return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
-function TimePicker({ value, minTime, maxTime, openUpward, onChange, onClose }) {
-  const initial = from24Hour(value && value >= minTime && value <= maxTime ? value : minTime);
-  const [hour12, setHour12] = useState(initial.hour12);
-  const [minute, setMinute] = useState(initial.minute);
-  const [meridiem, setMeridiem] = useState(initial.meridiem);
-
-  const commit = (h12, mm, mer) => {
-    const hour24 = to24Hour(h12, mer);
-    let ts = buildTimeStr(hour24, mm);
-    if (ts < minTime) { const s = from24Hour(minTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = minTime; }
-    else if (ts > maxTime) { const s = from24Hour(maxTime); h12 = s.hour12; mm = s.minute; mer = s.meridiem; ts = maxTime; }
-    setHour12(h12); setMinute(mm); setMeridiem(mer);
-    onChange(ts);
-  };
-
-  const isHourDisabled = (h12) => {
-    const hour24 = to24Hour(h12, meridiem);
-    return buildTimeStr(hour24, 59) < minTime || buildTimeStr(hour24, 0) > maxTime;
-  };
-  const isMinuteDisabled = (mm) => {
-    const ts = buildTimeStr(to24Hour(hour12, meridiem), mm);
-    return ts < minTime || ts > maxTime;
-  };
-  const isMeridiemDisabled = (mer) => {
-    const blockMin = mer === 'AM' ? '00:00' : '12:00';
-    const blockMax = mer === 'AM' ? '11:59' : '23:59';
-    return blockMax < minTime || blockMin > maxTime;
-  };
-
-  const colBase = 'flex-1 max-h-[176px] overflow-y-auto py-1 scrollbar-thin';
-  const itemBase = 'text-[11px] text-center py-1.5 rounded-lg transition-colors cursor-pointer select-none';
-
-  return (
-    <div className={`absolute z-50 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-2 w-[210px] right-0 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-      <div className="flex gap-1 border-b border-[#EAE4E0] pb-2 mb-2">
-        <div className={colBase}>
-          {HOURS_12.map(h => {
-            const disabled = isHourDisabled(h);
-            return <div key={h} onClick={() => !disabled && commit(h, minute, meridiem)} className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : h === hour12 ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}>{String(h).padStart(2, '0')}</div>;
-          })}
-        </div>
-        <div className={colBase}>
-          {MINUTES_5.map(m => {
-            const disabled = isMinuteDisabled(m);
-            return <div key={m} onClick={() => !disabled && commit(hour12, m, meridiem)} className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : m === minute ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}>{String(m).padStart(2, '0')}</div>;
-          })}
-        </div>
-        <div className={colBase}>
-          {['AM', 'PM'].map(mer => {
-            const disabled = isMeridiemDisabled(mer);
-            return <div key={mer} onClick={() => !disabled && commit(hour12, minute, mer)} className={`${itemBase} ${disabled ? 'text-[#D8CFC9] cursor-not-allowed' : mer === meridiem ? 'bg-[#4A3B36] text-white' : 'text-[#3B1F0A] hover:bg-[#F5EFEB]'}`}>{mer}</div>;
-          })}
-        </div>
-      </div>
-      <button type="button" onClick={onClose} className="w-full text-[11px] font-semibold text-white bg-[#4A3B36] rounded-lg py-1.5 hover:bg-[#3B1F0A] transition-colors">Done</button>
-    </div>
-  );
-}
-
-
-// --- MAIN POS CART COMPONENT ---
 export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart }) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false); 
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [ereceiptData, setEreceiptData] = useState(null); 
 
-  const [additionalCharge, setAdditionalCharge] = useState('');
-  const [discountName, setDiscountName] = useState('');
-  const [discountPercentage, setDiscountPercentage] = useState('');
-  const [paymentMode, setPaymentMode] = useState('Full Payment'); 
+  // In-apply ang Local Storage sa Form details
+  const [additionalCharge, setAdditionalCharge] = useState(() => localStorage.getItem('pos_additionalCharge') || '');
+  const [discountName, setDiscountName] = useState(() => localStorage.getItem('pos_discountName') || '');
+  const [discountPercentage, setDiscountPercentage] = useState(() => localStorage.getItem('pos_discountPercentage') || '');
+  const [paymentMode, setPaymentMode] = useState(() => localStorage.getItem('pos_paymentMode') || 'Full Payment'); 
 
-  // --- CART COMPOSITION LOGIC ---
   const hasPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const hasBuyNow = cart.some(item => item.order_type === 'Pick-up Today');
   
@@ -195,7 +144,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const prevCartLength = useRef(cart.length);
 
   useEffect(() => {
-    // I-a-auto switch natin ang order type base sa laman ng cart o kung pa-empty ito
     if (cart.length > prevCartLength.current || cart.length === 0) {
       if (cart.length === 0) {
         setOrderType('Buy Now');
@@ -210,83 +158,94 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     prevCartLength.current = cart.length;
   }, [cart.length, hasPreOrder, hasBuyNow, isPreOrderOnly, isBuyNowOnly, setOrderType]);
 
-  const getLiveNow = () => {
-    const now = new Date();
-    const dateStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-    const timeStr = now.toTimeString().slice(0, 5);
-    return { dateStr, timeStr };
-  };
+  const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
+  const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, hasStrictPreOrder ? 3 : 1);
 
-  const [form, setForm] = useState({
-    name: '',
-    phone: '',
-    altPhone: '',
-    pickupDate: orderType === 'Buy Now' ? getLiveNow().dateStr : '',
-    pickupTime: '',
+  // Form Initialized from Local Storage
+  const [form, setForm] = useState(() => {
+    const savedForm = localStorage.getItem('pos_form');
+    if (savedForm) return JSON.parse(savedForm);
+    return {
+      name: '',
+      phone: '',
+      altPhone: '',
+      pickupDate: orderType === 'Buy Now' ? getLiveNow().dateStr : '',
+      pickupTime: '',
+    };
   });
 
+  // Syncing Form changes to Local Storage
+  useEffect(() => { localStorage.setItem('pos_form', JSON.stringify(form)); }, [form]);
+  useEffect(() => { localStorage.setItem('pos_additionalCharge', additionalCharge); }, [additionalCharge]);
+  useEffect(() => { localStorage.setItem('pos_discountName', discountName); }, [discountName]);
+  useEffect(() => { localStorage.setItem('pos_discountPercentage', discountPercentage); }, [discountPercentage]);
+  useEffect(() => { localStorage.setItem('pos_paymentMode', paymentMode); }, [paymentMode]);
+
   const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
+  const [calendarPos, setCalendarPos] = useState(null);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
+  const calendarPortalRef = useRef(null);
 
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [timePickerOpenUpward, setTimePickerOpenUpward] = useState(false);
-  const timePickerWrapRef = useRef(null);
-  const timePickerTriggerRef = useRef(null);
-
-  const SHOP_OPEN_TIME = '08:00';
-  const SHOP_CLOSE_TIME = '17:00';
+  const openCalendar = () => {
+    if (calendarTriggerRef.current) {
+      const rect = calendarTriggerRef.current.getBoundingClientRect();
+      const CALENDAR_WIDTH = 280;
+      const CALENDAR_HEIGHT_ESTIMATE = 330;
+      const openUpward = window.innerHeight - rect.bottom < CALENDAR_HEIGHT_ESTIMATE && rect.top > CALENDAR_HEIGHT_ESTIMATE;
+      const left = Math.min(rect.left, window.innerWidth - CALENDAR_WIDTH - 12);
+      setCalendarPos({
+        position: 'fixed',
+        left: Math.max(left, 12),
+        ...(openUpward ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 })
+      });
+    }
+    setShowCalendar(true);
+  };
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (showCalendar && calendarWrapRef.current && !calendarWrapRef.current.contains(e.target)) setShowCalendar(false);
-      if (showTimePicker && timePickerWrapRef.current && !timePickerWrapRef.current.contains(e.target)) setShowTimePicker(false);
+      if (!showCalendar) return;
+      const clickedTrigger = calendarWrapRef.current && calendarWrapRef.current.contains(e.target);
+      const clickedPortal = calendarPortalRef.current && calendarPortalRef.current.contains(e.target);
+      if (!clickedTrigger && !clickedPortal) setShowCalendar(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showCalendar, showTimePicker]);
+  }, [showCalendar]);
+
+  useEffect(() => {
+    if (!showCalendar) return;
+    const handleScroll = () => setShowCalendar(false);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [showCalendar]);
 
   useEffect(() => {
     if (orderType === 'Buy Now') {
-      const { dateStr, timeStr } = getLiveNow();
+      const { dateStr } = getLiveNow();
       setForm(f => ({
         ...f,
         pickupDate: dateStr,
-        pickupTime: timeStr > SHOP_CLOSE_TIME ? '' : (timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME)
+        pickupTime: ''
       }));
     } else {
       setForm(f => ({ ...f, pickupDate: '', pickupTime: '' }));
     }
   }, [orderType]);
 
-  const addDaysToDateString = (dateStr, days) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setDate(d.getDate() + days);
-    return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-  };
-
-  const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, 1);
-  const getEffectiveMinTimeForToday = () => {
+  const isSlotDisabled = (slot) => {
+    if (orderType !== 'Buy Now') return false;
     const { timeStr } = getLiveNow();
-    return timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME;
+    return slot.end <= timeStr;
   };
 
-  const formatTime = (time24) => {
-    if (!time24) return '';
-    let [hours, minutes] = time24.split(':');
-    hours = parseInt(hours, 10);
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${hours}:${minutes} ${ampm}`;
-  };
-
-  const handleCompleteOrder = async () => {
+  const handleProceedToOrder = () => {
     if (cart.length === 0) return;
-
-    if (orderType === 'Buy Now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
-      return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
-    }
 
     if (orderType === 'Pre-Order') {
       if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
@@ -306,6 +265,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       return setToastMessage('Your Alternative Number must be exactly 11 digits.');
     }
 
+    setShowSummaryModal(true);
+  };
+
+  const handlePlaceOrder = async () => {
     setIsProcessing(true);
 
     const formattedItems = cart.map(item => ({
@@ -324,6 +287,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const grandTotalCalc = subtotalCalc - discountAmountCalc + chargeAmountCalc;
     const amountDueCalc = paymentMode === '50% Deposit' ? grandTotalCalc / 2 : grandTotalCalc;
 
+    const discountPayload = percentageNumberVal > 0 ? {
+      name: discountName || 'Discount',
+      percentage: percentageNumberVal,
+      amount: discountAmountCalc
+    } : {};
+
+    const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
+
     const payload = {
       orderType: orderType,
       customer: {
@@ -336,12 +307,17 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         grandTotal: grandTotalCalc,
         type: paymentMode,
         amountDueNow: amountDueCalc,
-        balance: grandTotalCalc - amountDueCalc
+        balance: grandTotalCalc - amountDueCalc,
+        discount: discountPayload,
+        additionalCharge: chargeAmountCalc
       },
-      pickup: orderType === 'Pre-Order' ? {
+      pickup: {
         date: form.pickupDate,
-        time: form.pickupTime
-      } : null,
+        time: selectedSlot?.start || '',
+        timeEnd: selectedSlot?.end || '',
+        timeSlot: form.pickupTime,
+        timeLabel: selectedSlot?.label || ''
+      },
       items: formattedItems
     };
 
@@ -363,8 +339,24 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         throw new Error(result.message || 'Failed to process order');
       }
 
-      alert(`Order successful! Order Ref: ${result.data.order_number}`);
-      
+      setShowSummaryModal(false);
+
+      if (orderType === 'Pre-Order') {
+        setEreceiptData({
+          orderId: result.data.id,
+          orderNumber: result.data.order_number,
+          cart: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
+          totalAmount: result.data.grand_total ?? grandTotalCalc,
+          paymentType: result.data.payment_type === 'deposit' ? 'half' : 'full',
+          pickupDate: form.pickupDate ? formatDateLong(form.pickupDate) : '',
+          pickupTime: getSlotLabel(form.pickupTime),
+          confirmToken: result.data.receiptToken,
+        });
+      } else {
+        alert(`Order successful! Order Ref: ${result.data.order_number}`);
+      }
+
+      // Linisin ang Parent Cart State at Local component states
       onClearCart();
       setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '' });
       setAdditionalCharge('');
@@ -372,6 +364,15 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       setDiscountPercentage('');
       setPaymentMode('Full Payment');
       
+      // BUBURAHIN NA NATIN ANG LOCAL STORAGE ONCE SUCCESSFUL
+      localStorage.removeItem('pos_cart');
+      localStorage.removeItem('pos_orderType');
+      localStorage.removeItem('pos_form');
+      localStorage.removeItem('pos_additionalCharge');
+      localStorage.removeItem('pos_discountName');
+      localStorage.removeItem('pos_discountPercentage');
+      localStorage.removeItem('pos_paymentMode');
+
     } catch (error) {
       console.error('Checkout error:', error);
       setToastMessage(error.message || 'An error occurred while processing your order.');
@@ -409,7 +410,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   return (
     <div className="w-full lg:w-[400px] lg:min-w-[400px] lg:max-w-[400px] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm flex flex-col shrink-0 h-full overflow-hidden relative">
       
-      {/* Order Type Toggle - NOW WITH DYNAMIC DISABLE LOGIC */}
       <div className="p-4 border-b border-[#F1EBE6] shrink-0">
         <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
           <button
@@ -438,7 +438,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-      {!isBuyNow && (
       <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
         <button 
           onClick={handleToggleDetails}
@@ -448,7 +447,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             <User size={14} className="text-[#8A7264]" />
             <span className="text-xs font-semibold text-[#8A7264]">
               Customer Details
-              <span className="text-red-500 font-normal ml-1">· Required</span>
+              {isBuyNow ? (
+                <span className="text-[#B7A99F] font-normal ml-1">· Optional</span>
+              ) : (
+                <span className="text-red-500 font-normal ml-1">· Required</span>
+              )}
             </span>
           </div>
           {isDetailsOpen ? <ChevronUp size={16} className="text-[#8A7264]" /> : <ChevronDown size={16} className="text-[#8A7264]" />}
@@ -460,19 +463,19 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
               <div>
                 <input 
                   type="text" 
-                  placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
-                  maxLength="11"
-                  value={form.phone}
-                  onChange={e => setForm({...form, phone: e.target.value.replace(/\D/g, '')})}
+                  placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
+                  value={form.name}
+                  onChange={e => setForm({...form, name: e.target.value})}
                   className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white" 
                 />
               </div>
               <div>
                 <input 
                   type="text" 
-                  placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
-                  value={form.name}
-                  onChange={e => setForm({...form, name: e.target.value})}
+                  placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
+                  maxLength="11"
+                  value={form.phone}
+                  onChange={e => setForm({...form, phone: e.target.value.replace(/\D/g, '')})}
                   className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white" 
                 />
               </div>
@@ -491,22 +494,19 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
             <div className="grid grid-cols-2 gap-3">
               <div className="relative" ref={calendarWrapRef}>
-                {isBuyNow ? (
-                  <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
-                    <Lock size={12} /> Today
+                {orderType === 'Buy Now' ? (
+                  <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Lock size={12} className="shrink-0" />
+                      <span className="truncate">{formatDateLong(getLiveNow().dateStr)} (Today)</span>
+                    </div>
                   </div>
                 ) : (
                   <>
                     <button
                       type="button"
                       ref={calendarTriggerRef}
-                      onClick={() => {
-                        if (!showCalendar && calendarTriggerRef.current) {
-                          const rect = calendarTriggerRef.current.getBoundingClientRect();
-                          setCalendarOpenUpward(window.innerHeight - rect.bottom < 340);
-                        }
-                        setShowCalendar(s => !s);
-                      }}
+                      onClick={() => (showCalendar ? setShowCalendar(false) : openCalendar())}
                       className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
                     >
                       <span className={form.pickupDate ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
@@ -514,61 +514,44 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                       </span>
                       <CalendarIcon size={14} className="text-[#8A7264] shrink-0 ml-1" />
                     </button>
-                    {showCalendar && (
-                      <MonthCalendar
-                        selectedDate={form.pickupDate}
-                        minDate={minPreOrderDate}
-                        todayDate={getLiveNow().dateStr}
-                        openUpward={calendarOpenUpward}
-                        onSelect={(dateStr) => setForm(f => ({...f, pickupDate: dateStr}))}
-                        onClose={() => setShowCalendar(false)}
-                      />
+                    {showCalendar && calendarPos && createPortal(
+                      <div ref={calendarPortalRef}>
+                        <MonthCalendar
+                          selectedDate={form.pickupDate}
+                          minDate={minPreOrderDate}
+                          todayDate={getLiveNow().dateStr}
+                          style={calendarPos}
+                          onSelect={(dateStr) => setForm(f => ({...f, pickupDate: dateStr}))}
+                          onClose={() => setShowCalendar(false)}
+                        />
+                      </div>,
+                      document.body
                     )}
                   </>
                 )}
               </div>
               
-              <div className="relative" ref={timePickerWrapRef}>
-                {isBuyNow && getLiveNow().timeStr > SHOP_CLOSE_TIME ? (
-                  <div className="w-full border border-red-200 px-3.5 py-2.5 text-xs rounded-xl bg-red-50 text-red-600 flex items-center gap-2">
-                    <Lock size={12} /> Closed
-                  </div>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      ref={timePickerTriggerRef}
-                      onClick={() => {
-                        if (!showTimePicker && timePickerTriggerRef.current) {
-                          const rect = timePickerTriggerRef.current.getBoundingClientRect();
-                          setTimePickerOpenUpward(window.innerHeight - rect.bottom < 230);
-                        }
-                        setShowTimePicker(s => !s);
-                      }}
-                      className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
-                    >
-                      <span className={form.pickupTime ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
-                        {form.pickupTime ? formatTime(form.pickupTime) : 'Pick-up Time *'}
-                      </span>
-                    </button>
-                    {showTimePicker && (
-                      <TimePicker
-                        value={form.pickupTime}
-                        minTime={isBuyNow ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
-                        maxTime={SHOP_CLOSE_TIME}
-                        openUpward={timePickerOpenUpward}
-                        onChange={(val) => setForm(f => ({...f, pickupTime: val}))}
-                        onClose={() => setShowTimePicker(false)}
-                      />
-                    )}
-                  </>
-                )}
+              <div className="relative">
+                <div className="relative">
+                  <select
+                    value={form.pickupTime}
+                    onChange={(e) => setForm(f => ({ ...f, pickupTime: e.target.value }))}
+                    className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white appearance-none pr-8 ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                  >
+                    <option value="" disabled>Pick-up Time *</option>
+                    {TIME_SLOTS.map(slot => (
+                      <option key={slot.value} value={slot.value} disabled={isSlotDisabled(slot)}>
+                        {slot.label}{isSlotDisabled(slot) ? ' (Past)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="text-[#8A7264] shrink-0 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
               </div>
             </div>
           </div>
         )}
       </div>
-      )}
 
       <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
         <button 
@@ -646,7 +629,23 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</p>
                 {item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
-                
+
+                {item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
+                  <p key={`opt-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
+                    <span className="font-medium">{key}:</span> {val}
+                  </p>
+                ))}
+
+                {item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
+                  <p key={`slip-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
+                    <span className="font-medium">{key}:</span> {val}
+                  </p>
+                ))}
+
+                {item.inspiration_image && (
+                  <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Image Attached</p>
+                )}
+
                 <div className="flex items-center gap-2 mt-2">
                   <button onClick={() => onUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
                   <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
@@ -714,13 +713,173 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         </div>
 
         <button 
-          onClick={handleCompleteOrder}
+          onClick={handleProceedToOrder}
           disabled={cart.length === 0 || isProcessing}
           className="w-full bg-[#3B1F0A] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
         >
-          {isProcessing ? 'Processing...' : 'Complete Order'}
+          Review Order
         </button>
       </div>
+
+      {showSummaryModal && (
+        <div className="fixed inset-0 z-[1900] flex items-center justify-center bg-black/50 px-4 py-6">
+          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] max-h-[90vh] flex flex-col overflow-hidden">
+
+            <div className="p-4 pb-3 sm:p-5 sm:pb-4 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
+              <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
+                <Receipt size={14} />
+              </div>
+              <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
+            </div>
+
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+
+              <div className="w-full md:w-[260px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 overflow-y-auto scrollbar-thin">
+                <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
+                <div className="flex flex-col gap-2.5 text-xs">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Order Type</span>
+                    <span className="text-[#3B1F0A] font-semibold">{orderType}</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Name</span>
+                    <span className="text-[#3B1F0A] font-semibold">{form.name || '—'}</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Contact</span>
+                    <span className="text-[#3B1F0A] font-semibold">{form.phone || '—'}</span>
+                  </div>
+                  {form.altPhone && (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[#B7A99F]">Alt Contact</span>
+                      <span className="text-[#3B1F0A] font-semibold">{form.altPhone}</span>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Date &amp; Time</span>
+                    <span className="text-[#3B1F0A] font-semibold">
+                      {form.pickupDate ? formatDateLong(form.pickupDate) : '—'}
+                      {form.pickupTime && <><br />{getSlotLabel(form.pickupTime)}</>}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col min-w-0 bg-white">
+
+                <div className="flex-1 p-4 sm:p-5 overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
+                  <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
+
+                  {cart.map((item, i) => (
+                    <div key={i} className="flex gap-3.5 pb-3.5 border-b border-[#F1EBE6] last:border-0 last:pb-0">
+                      <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-[#F5EFEB] rounded-xl border border-[#EAE4E0] overflow-hidden flex items-center justify-center">
+                        {item.image_url ? (
+                          <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[#B7A99F] text-[10px]">No Image</span>
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1 flex flex-col">
+                        <div className="flex justify-between items-start gap-2 mb-1">
+                          <p className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
+                          <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+                        </div>
+
+                        {item.selected_price_options && Object.entries(item.selected_price_options).map(([label, value]) => (
+                          <p key={`sum-opt-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                            <span className="font-medium">{label}:</span> {value}
+                          </p>
+                        ))}
+
+                        {item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
+                          <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                            <span className="font-medium">{label}:</span> {value}
+                          </p>
+                        ))}
+
+                        {item.details && (
+                          <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
+                        )}
+
+                        {item.inspiration_image && (
+                          <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] mt-0.5">Image Attached</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
+                  <div className="mb-4">
+                    {discountAmount > 0 && (
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-[#8A7264]">Subtotal</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {discountAmount > 0 && (
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
+                        <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
+                      </div>
+                    )}
+                    {chargeAmount > 0 && (
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-red-500">Additional Charge</span>
+                        <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    {paymentMode === '50% Deposit' ? (
+                      <>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
+                        </div>
+                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-[#8A7264]">To Pay Now</span>
+                          <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+                        </div>
+                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
+                      <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2.5">
+                    <button
+                      onClick={() => setShowSummaryModal(false)}
+                      disabled={isProcessing}
+                      className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handlePlaceOrder}
+                      disabled={isProcessing}
+                      className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isProcessing ? 'Processing...' : 'Place Order'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toastMessage && (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 px-4">
@@ -737,6 +896,13 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             </button>
           </div>
         </div>
+      )}
+
+      {ereceiptData && (
+        <PosEReceipt
+          {...ereceiptData}
+          onClose={() => setEreceiptData(null)}
+        />
       )}
     </div>
   );
