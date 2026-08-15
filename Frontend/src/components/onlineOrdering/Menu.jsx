@@ -247,30 +247,6 @@ export default function Menu({ cart, setCart }) {
   const [isLoading, setIsLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const productListRef = useRef(null);
-<<<<<<< HEAD
-=======
-
-  const BACK_TO_TOP_THRESHOLD = 400;
-
-  // Tracks scroll position from both possible scroll sources: the window
-  // (mobile, where the whole page scrolls) and the internal product list
-  // container (desktop, where only that panel scrolls).
-  const checkScrollPosition = () => {
-    const windowScrollY = window.scrollY || document.documentElement.scrollTop;
-    const listScrollY = productListRef.current ? productListRef.current.scrollTop : 0;
-    setShowBackToTop(windowScrollY > BACK_TO_TOP_THRESHOLD || listScrollY > BACK_TO_TOP_THRESHOLD);
-  };
-
-  useEffect(() => {
-    window.addEventListener('scroll', checkScrollPosition, { passive: true });
-    return () => window.removeEventListener('scroll', checkScrollPosition);
-  }, []);
-
-  const handleBackToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    productListRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-  };
->>>>>>> main
 
   const BACK_TO_TOP_THRESHOLD = 400;
 
