@@ -2,7 +2,7 @@ import { supabase } from '../config/supabase.js';
 import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
-import { AnalyticsCacheModel } from '../model/analyticsCache.model.js'; 
+import { AiCacheModel } from '../model/AiCache.model.js'; 
 
 // ============================================================
 // PRODUCT CRUD SERVICES
@@ -251,7 +251,7 @@ export const generateHomepageAds = async () => {
     const CACHE_KEY = 'homepage_ad_recommendations';
     const TTL_MS = 24 * 60 * 60 * 1000; 
 
-    await AnalyticsCacheModel.upsert(CACHE_KEY, homepageAds, TTL_MS);
+    await AiCacheModel.upsert(CACHE_KEY, homepageAds, TTL_MS);
     console.log(`[SERVICE] Homepage Ads (Best Sellers) successfully generated and cached.`);
 
     return homepageAds;
@@ -295,7 +295,7 @@ export const generateEventAds = async () => {
     const liveEvents = events.filter(e => isEventLiveToday(e, today));
 
     if (liveEvents.length === 0) {
-      await AnalyticsCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
+      await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
       console.log('[SERVICE] Walang live event ngayon. Event Ads cache cleared.');
       return EVENT_ADS_INACTIVE_PAYLOAD;
     }
@@ -314,7 +314,7 @@ export const generateEventAds = async () => {
     );
 
     if (matchingProducts.length === 0) {
-      await AnalyticsCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
+      await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
       console.log('[SERVICE] May live event pero walang naka-tag na products. Event Ads cache cleared.');
       return EVENT_ADS_INACTIVE_PAYLOAD;
     }
@@ -378,7 +378,7 @@ Rules:
       products: finalProducts
     };
 
-    await AnalyticsCacheModel.upsert(EVENT_ADS_CACHE_KEY, eventAdsPayload, EVENT_ADS_TTL_MS);
+    await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, eventAdsPayload, EVENT_ADS_TTL_MS);
     console.log(`[SERVICE] Event Ads Modal successfully generated and cached for: ${primaryEvent.event_name}`);
 
     return eventAdsPayload;

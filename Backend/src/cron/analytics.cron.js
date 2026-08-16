@@ -3,7 +3,8 @@ import {
   ActionableRecommendationService,
   ProductForecastService,
   SalesForecastService,
-} from '../services/analytics.service.js';
+  PerformanceSummaryService,
+} from '../services/aiAnalytics.service.js';
 
 // IMPORT NATIN YUNG BAGONG FUNCTIONS PARA SA ADS
 // - generateHomepageAds: laging tumatakbo, best sellers lang basehan
@@ -20,6 +21,7 @@ const setupAnalyticsCron = (
     actionableRecommendationService: ActionableRecommendationService,
     productForecastService: ProductForecastService,
     salesForecastService: SalesForecastService,
+    performanceSummaryService: PerformanceSummaryService,
   }
 ) => {
   // TEMPORARY TESTING: Naka-set sa '* * * * *' para tumakbo EVERY MINUTE.
@@ -35,6 +37,9 @@ const setupAnalyticsCron = (
         await services.productForecastService.getProductTrendsByTimeframe(t, true);
         await services.salesForecastService.getSalesTrendsByTimeframe(t, true);
       }
+
+      // 1b. Refresh Performance Summary (last 7 days vs prior 7 days)
+      await services.performanceSummaryService.getPerformanceSummary(true);
       
       // 2. Best Sellers homepage ads — laging na-re-refresh, walang
       // occasion-dependency ito.

@@ -13,7 +13,7 @@ import {
   generateEventAds
 } from '../services/productAndEvent.service.js';
 
-import { AnalyticsCacheModel } from '../model/analyticsCache.model.js';
+import { AiCacheModel } from '../model/AiCache.model.js';
 
 // ============================================================
 // PRODUCT CRUD
@@ -251,7 +251,7 @@ export const removeEvent = async (req, res) => {
 
 export const getHomepageAds = async (req, res) => {
   try {
-    const cachedData = await AnalyticsCacheModel.getByKey('homepage_ad_recommendations');
+    const cachedData = await AiCacheModel.getByKey('homepage_ad_recommendations');
     
     if (!cachedData) {
       return res.status(404).json({ success: false, message: 'Ads not yet generated' });
@@ -265,7 +265,7 @@ export const getHomepageAds = async (req, res) => {
 
 export const getEventAds = async (req, res) => {
   try {
-    const cachedData = await AnalyticsCacheModel.getByKey('event_ads_homepage');
+    const cachedData = await AiCacheModel.getByKey('event_ads_homepage');
 
     if (!cachedData || !cachedData.payload || cachedData.payload.active === false) {
       return res.status(200).json({ success: true, data: { active: false } });

@@ -7,6 +7,7 @@ import ForecastTimeframe from '../components/analytics/forecastTimeframe';
 import SalesForecast from '../components/analytics/salesForecast';
 import ProductForecasting from '../components/analytics/productForecast';
 import ActionableRecommendation from '../components/analytics/actionableRecommendation';
+import Summary from '../components/analytics/summary';
 
 export default function AnalyticsPage() {
   const [perfTimeframe, setPerfTimeframe] = useState('Today');
@@ -33,8 +34,8 @@ export default function AnalyticsPage() {
           `${baseUrl}/analytics/top-products/${encodeURIComponent(perfTimeframe)}`,
           `${baseUrl}/analytics/sales-forecast/${encodeURIComponent(forecastTimeframe)}`,
           `${baseUrl}/analytics/product-forecast/${encodeURIComponent(forecastTimeframe)}`,
-          // INAYOS: Idinagdag ang timeframe sa URL para hindi mag-404
-          `${baseUrl}/analytics/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`
+          `${baseUrl}/analytics/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`,
+          `${baseUrl}/analytics/summary` // Dinagdag na ang Summary endpoint dito
         ];
 
         const responses = await Promise.all(
@@ -48,7 +49,7 @@ export default function AnalyticsPage() {
           )
         );
 
-        const [kpiRes, stackedRes, topRes, salesRes, prodRes, actionRes] = responses;
+        const [kpiRes, stackedRes, topRes, salesRes, prodRes, actionRes, summaryRes] = responses;
 
         const rawKpi = kpiRes.ok ? (kpiRes.data?.data || kpiRes.data) : null;
         
@@ -73,7 +74,8 @@ export default function AnalyticsPage() {
           salesInsufficient: !!salesPayload?.insufficientData,
           salesMessage: salesPayload?.message || '',
           productForecast: prodRes.ok ? (prodRes.data?.data || prodRes.data) : { growth: [], risk: [] },
-          recommendations: actionRes.ok ? (actionRes.data?.data?.recommendations || actionRes.data?.data || actionRes.data) : []
+          recommendations: actionRes.ok ? (actionRes.data?.data?.recommendations || actionRes.data?.data || actionRes.data) : {},
+          summary: summaryRes?.ok ? (summaryRes.data?.data || summaryRes.data) : null // Kinukuha na ang summary data
         });
 
       } catch (err) {
@@ -100,12 +102,15 @@ export default function AnalyticsPage() {
           <TopProductsList period={perfTimeframe} data={analyticsData?.topProducts} />
         </div>
 
+        {/* Pinapasa na ang fetched data at loading status */}
+        <Summary data={analyticsData?.summary} isLoading={isLoading} />
+
         <div className="mt-4 pt-6 border-t border-[#e7ded4] flex flex-col gap-5 w-full">
           <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
-            <h2 className="text-base sm:text-xl font-bold text-[#3d2410]">AI Insights</h2>
+            <h2 className="text-base sm:text-xl font-bold text-[#3d2410]">Forecast & Recommendations</h2>
             <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
           </div>
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 w-full items-stretch">
             <SalesForecast 
               view={forecastTimeframe} 
