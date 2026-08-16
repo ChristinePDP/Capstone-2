@@ -73,6 +73,27 @@ const InventoryLogModel = {
       if (error) throw error;
       return data;
     },
+
+    getNearExpiring: async (daysAhead = 14) => {
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const future = new Date(today);
+    future.setDate(future.getDate() + daysAhead);
+    const futureStr = future.toISOString().slice(0, 10);
+
+    const { data, error } = await supabase
+      .from('inventory_logs')
+      .select('id, item_type, item_name, transaction_type, quantity, cost, action, created_at, expiration_date')
+      .eq('transaction_type', 'IN')
+      .is('voided_at', null)
+      .not('expiration_date', 'is', null)
+      .gte('expiration_date', todayStr)
+      .lte('expiration_date', futureStr)
+      .order('expiration_date', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  },
 };
 
 export { InventoryLogModel };

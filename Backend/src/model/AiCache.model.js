@@ -1,8 +1,8 @@
 import { supabase } from '../config/supabase.js';
 
-const TABLE = 'analytics_cache';
+const TABLE = 'ai_cache';
 
-const AnalyticsCacheModel = {
+const AiCacheModel = {
   getByKey: async (cacheKey) => {
     const { data, error } = await supabase
       .from(TABLE)
@@ -25,4 +25,4 @@ const AnalyticsCacheModel = {
   },
 };
 
-export { AnalyticsCacheModel };
+export { AiCacheModel };
