@@ -4,6 +4,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
+import { notifyNewOrder } from './notification.service.js';
 
 export const fetchMenuProducts = async (filters = {}) => {
   let products = []; 
@@ -144,6 +145,10 @@ export const createDatabaseOrder = async (payload) => {
   } catch (itemsError) {
     throw new Error(`Items Error: ${itemsError.message}`);
   }
+
+  // Admin-side notification — fire-and-forget so a notification failure
+  // never blocks or fails the actual order creation.
+  notifyNewOrder(newOrder, payload);
 
   return newOrder;
 };

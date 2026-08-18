@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Lock } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
@@ -103,6 +103,17 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
   );
 }
 
+const TIME_SLOTS = [
+  { value: '08:00-10:00', label: '8:00 AM - 10:00 AM', start: '08:00', end: '10:00' },
+  { value: '10:00-12:00', label: '10:00 AM - 12:00 PM', start: '10:00', end: '12:00' },
+  { value: '12:00-15:00', label: '12:00 PM - 3:00 PM', start: '12:00', end: '15:00' },
+  { value: '15:00-17:00', label: '3:00 PM - 5:00 PM', start: '15:00', end: '17:00' },
+];
+
+function getSlotLabel(value) {
+  return TIME_SLOTS.find(s => s.value === value)?.label || '';
+}
+
 export default function Checkout({ cart, setCart }) {
   const navigate = useNavigate();
 
@@ -126,6 +137,7 @@ export default function Checkout({ cart, setCart }) {
   const [paymentType, setPaymentType] = useState('half');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
@@ -143,17 +155,6 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
 
-  useEffect(() => {
-    if (!showTimePicker) return;
-    const handleClickOutside = (e) => {
-      if (timePickerWrapRef.current && !timePickerWrapRef.current.contains(e.target)) {
-        setShowTimePicker(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTimePicker]);
-
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const halfAmount = totalAmount / 2;
 
@@ -163,6 +164,18 @@ export default function Checkout({ cart, setCart }) {
     const timeStr = now.toTimeString().slice(0, 5);
     return { dateStr, timeStr };
   };
+
+  // Defensive sync: whenever pickupType is 'now', force form.pickupDate to today.
+  // Needed because the initial useState only pre-fills pickupDate when
+  // hasPickUpToday is true, but items with order_type 'Both' don't set that
+  // flag — leaving pickupDate stuck at '' even though the UI shows a locked
+  // "(Today)" date. That mismatch was silently failing the required-field check.
+  useEffect(() => {
+    if (pickupType === 'now') {
+      const { dateStr } = getLiveNow();
+      setForm(f => (f.pickupDate === dateStr ? f : { ...f, pickupDate: dateStr }));
+    }
+  }, [pickupType]);
 
   const addDaysToDateString = (dateStr, days) => {
     const d = new Date(dateStr + 'T00:00:00');
@@ -174,57 +187,17 @@ export default function Checkout({ cart, setCart }) {
   const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, PRE_ORDER_MIN_LEAD_DAYS);
 
-  const SHOP_OPEN_TIME = '08:00';
   const SHOP_CLOSE_TIME = '17:00';
-
-  // For "Pick-up Today", the earliest selectable time is whichever is LATER:
-  // the shop's opening time, or the live current time (if it's already past opening).
-  // This avoids ever snapping back to 8:00 AM once 8:00 AM has already passed.
-  const getEffectiveMinTimeForToday = () => {
-    const { timeStr: liveNow } = getLiveNow();
-    return liveNow > SHOP_OPEN_TIME ? liveNow : SHOP_OPEN_TIME;
-  };
 
   // NOTE: date selection is now handled directly by the custom MonthCalendar's
   // onSelect callback, which only ever passes already-valid, non-disabled dates —
   // so no separate change-handler/alert is needed here anymore.
 
-  const handleTimeChange = (e) => {
-    const selectedTime = e.target.value;
-
-    if (pickupType === 'now') {
-      // Pick-up Today: time must be within operating hours AND not in the past.
-      const effectiveMin = getEffectiveMinTimeForToday();
-
-      if (selectedTime < effectiveMin) {
-        if (effectiveMin === SHOP_OPEN_TIME) {
-          // Shop hasn't opened yet today — the only case where snapping to 8:00 AM makes sense.
-          alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
-        } else {
-          // Opening time already passed — snapping to 8:00 AM would still be invalid,
-          // so snap to the current live time instead.
-          alert("You cannot select a time in the past for today's orders.");
-        }
-        setForm({...form, pickupTime: effectiveMin});
-      } else if (selectedTime > SHOP_CLOSE_TIME) {
-        alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
-        setForm({...form, pickupTime: SHOP_CLOSE_TIME});
-      } else {
-        setForm({...form, pickupTime: selectedTime});
-      }
-      return;
-    }
-
-    // Pre-order: dates are always in the future, but still must fall within operating hours.
-    if (selectedTime < SHOP_OPEN_TIME) {
-      alert(`We open at ${formatTime(SHOP_OPEN_TIME)}. Pickup time has been set to opening time.`);
-      setForm({...form, pickupTime: SHOP_OPEN_TIME});
-    } else if (selectedTime > SHOP_CLOSE_TIME) {
-      alert(`We close at ${formatTime(SHOP_CLOSE_TIME)}. Pickup time has been set to closing time.`);
-      setForm({...form, pickupTime: SHOP_CLOSE_TIME});
-    } else {
-      setForm({...form, pickupTime: selectedTime});
-    }
+  // A slot is disabled only for "Pick-up Today" orders once its end time has already passed.
+  const isSlotDisabled = (slot) => {
+    if (pickupType !== 'now') return false;
+    const { timeStr } = getLiveNow();
+    return slot.end <= timeStr;
   };
 
   const handleProceedToOrder = () => {
@@ -234,7 +207,11 @@ export default function Checkout({ cart, setCart }) {
     }
 
     // 2. Check if all required fields are filled out
-    if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
+    // NOTE: pickupDate is only user-selectable (and thus only required) for
+    // Pre-Order ('later'). For 'now' orders the date is always "today" and is
+    // derived live from getLiveNow() in the payload, so it isn't required here.
+    const needsPickupDate = pickupType === 'later';
+    if (!form.name || !form.phone || (needsPickupDate && !form.pickupDate) || !form.pickupTime) {
       return setToastMessage('Please complete all required fields (*)');
     }
 
@@ -279,6 +256,7 @@ export default function Checkout({ cart, setCart }) {
     }
 
     // 2. BUILD PAYLOAD
+    const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
     const orderPayload = {
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
         customer: {
@@ -377,15 +355,6 @@ export default function Checkout({ cart, setCart }) {
     }
   };
 
-  const formatTime = (time24) => {
-    if (!time24) return '';
-    let [hours, minutes] = time24.split(':');
-    hours = parseInt(hours, 10);
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${hours}:${minutes} ${ampm}`;
-  };
-
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
       <Header page="checkout" />
@@ -409,10 +378,10 @@ export default function Checkout({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (hasPreOrder) return;
-                        // Re-sync date/time to the live clock whenever switching to Pick-up Today.
-                        const { dateStr, timeStr } = getLiveNow();
+                        // Re-sync date to the live clock whenever switching to Pick-up Today.
+                        const { dateStr } = getLiveNow();
                         setPickupType('now');
-                        setForm({...form, pickupDate: dateStr, pickupTime: timeStr > SHOP_OPEN_TIME ? timeStr : SHOP_OPEN_TIME});
+                        setForm({...form, pickupDate: dateStr, pickupTime: ''});
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -520,15 +489,21 @@ export default function Checkout({ cart, setCart }) {
                           </div>
                           <div>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
-                              <input 
-                                type="time" 
-                                min={pickupType === 'now' ? getEffectiveMinTimeForToday() : SHOP_OPEN_TIME}
-                                max={SHOP_CLOSE_TIME}
-                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-[#3B1F0A]" 
-                                onChange={handleTimeChange} 
-                                value={form.pickupTime}
-                              />
-                              <p className="text-[10px] text-[#8A7264] mt-1">Open {formatTime(SHOP_OPEN_TIME)} - {formatTime(SHOP_CLOSE_TIME)}</p>
+                              <div className="relative">
+                                <select
+                                  value={form.pickupTime}
+                                  onChange={(e) => setForm(f => ({ ...f, pickupTime: e.target.value }))}
+                                  className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white appearance-none pr-8 ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                >
+                                  <option value="" disabled>Pick-up Time *</option>
+                                  {TIME_SLOTS.map(slot => (
+                                    <option key={slot.value} value={slot.value} disabled={isSlotDisabled(slot)}>
+                                      {slot.label}{isSlotDisabled(slot) ? ' (Past)' : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                                <ChevronDown size={14} className="text-[#8A7264] shrink-0 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                              </div>
                           </div>
                       </div>
 
@@ -682,7 +657,7 @@ export default function Checkout({ cart, setCart }) {
 
                   <span className="text-[#8A7264]">Date & Time</span>
                   <span className="text-[#3B1F0A] font-semibold text-right truncate">
-                    {form.pickupDate || '—'} {form.pickupTime && `• ${formatTime(form.pickupTime)}`}
+                    {form.pickupDate || '—'} {form.pickupTime && `• ${getSlotLabel(form.pickupTime)}`}
                   </span>
 
                   {form.instructions && (
