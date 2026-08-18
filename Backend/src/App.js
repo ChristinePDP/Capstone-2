@@ -9,6 +9,7 @@ import aiAnalyticsRoutes from './routes/aiAnalytics.routes.js';
 import onlineOrderingRoutes from './routes/onlineOrdering.routes.js';
 import qrScaner from './routes/Qr.routes.js';
 import posRoutes from './routes/pos.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 // Updated import path and variable name
 import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
@@ -45,6 +46,7 @@ app.use('/api/analytics', aiAnalyticsRoutes);
 app.use('/api/online-ordering', onlineOrderingRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/Qr', qrScaner);
+app.use('/api/notifications', notificationRoutes);
 
 // Updated route usage
 app.use('/api/online-ordering/products', productAndEventRoutes);
