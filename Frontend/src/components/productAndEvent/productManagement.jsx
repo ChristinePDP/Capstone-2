@@ -1,20 +1,34 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2 } from 'lucide-react';
 import ProductModal from './Productmodal';
+import { apiClient } from '../../services/apiClient';
 
 // ─────────────────────────────────────────────────────────────
 // Backend base URL
 // ─────────────────────────────────────────────────────────────
+// Ang `/online-ordering/products` ay naka-mount sa ROOT ng API (HINDI sa
+// ilalim ng `/inventory`), kaya absolute URL ito para ma-bypass ang
+// `/inventory` baseURL ng `apiClient` — parehong pattern gaya ng
+// ORDERS_API_URL sa AppContext.jsx. Ginagamit ang `apiClient` (axios) dito
+// sa halip na raw `fetch()` para automatic na naipapadala ang HttpOnly
+// auth cookie (via `withCredentials`) at makinabang sa 401 auto-logout
+// interceptor nito.
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 
 const CATEGORIES = ['All', 'Cake', 'Pastry', 'Package', 'Celebration Material'];
 
-const parseResponse = async (res) => {
-  const result = await res.json().catch(() => ({}));
-  if (!res.ok || result.success === false) {
-    throw new Error(result.message || result.error || 'Something went wrong. Please try again.');
+// Kinukuha ang error message mula sa axios error object — parehong helper
+// gaya ng getErrMsg() sa AppContext.jsx.
+const getErrMsg = (err, fallback) =>
+  err.response?.data?.message || err.response?.data?.error || err.message || fallback;
+
+// Sinusuri kung `success: false` ang laman ng response body kahit 2xx status
+// (ilang endpoints ng backend natin ay ganito gumawa).
+const unwrapData = (result, fallback) => {
+  if (result?.success === false) {
+    throw new Error(result.message || result.error || fallback);
   }
-  return result.data;
+  return result?.data;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -122,7 +136,7 @@ function ProductCard({ product, onEdit, onDelete }) {
   const isVariablePricing = product.pricing_mode === 'variable';
 
   return (
-    <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full">
+    <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0">
       <div className="relative h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center">
         {imageUrl ? (
           <img src={imageUrl} alt={product.name} className="w-full h-full object-cover" />
@@ -202,12 +216,12 @@ export default function ProductManagementPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(API_BASE);
-      const data = await parseResponse(res);
+      const res = await apiClient.get(API_BASE);
+      const data = unwrapData(res.data, 'Something went wrong. Please try again.');
       setProducts(data || []);
     } catch (err) {
       console.error('Fetch Products Error:', err);
-      setError(err.message);
+      setError(getErrMsg(err, 'Something went wrong. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -236,13 +250,13 @@ export default function ProductManagementPage() {
 
   const confirmDelete = async () => {
     try {
-      const res = await fetch(`${API_BASE}/${deleteTarget.id}`, { method: 'DELETE' });
-      await parseResponse(res);
+      const res = await apiClient.delete(`${API_BASE}/${deleteTarget.id}`);
+      unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== deleteTarget.id));
       showToast(`${deleteTarget.name} deleted.`, 'warning');
     } catch (err) {
       console.error('Delete Product Error:', err);
-      showToast(err.message || 'Failed to delete product.', 'warning');
+      showToast(getErrMsg(err, 'Failed to delete product.'), 'warning');
     } finally {
       setDeleteTarget(null);
     }
@@ -250,19 +264,19 @@ export default function ProductManagementPage() {
 
   const handleModalDelete = async (id) => {
     try {
-      const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
-      await parseResponse(res);
+      const res = await apiClient.delete(`${API_BASE}/${id}`);
+      unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== id));
       showToast('Product deleted.', 'warning');
       handleCloseModal();
     } catch (err) {
       console.error('Delete Product Error:', err);
-      showToast(err.message || 'Failed to delete product.', 'warning');
+      showToast(getErrMsg(err, 'Failed to delete product.'), 'warning');
     }
   };
 
   return (
-    <div>
+    <div className="overflow-x-hidden w-full max-w-full">
       <style>{`html { overflow-y: scroll; }`}</style>
 
       {toast && (
@@ -282,7 +296,7 @@ export default function ProductManagementPage() {
       </div>
 
       <div className="flex items-center gap-4 mb-6 flex-wrap">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-64" />
+        <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full sm:w-64" />
         <FilterPills options={CATEGORIES} value={category} onChange={setCategory} />
       </div>
 
@@ -303,7 +317,7 @@ export default function ProductManagementPage() {
             <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
           {!filtered.length && (
-            <div className="col-span-4 text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">
+            <div className="col-span-2 md:col-span-4 text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">
               No products found.
             </div>
           )}

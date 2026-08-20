@@ -48,8 +48,8 @@ export default function PerformanceTimeframe({ value, onChange }) {
   };
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative" ref={containerRef}>
+    <div className="flex items-center gap-4 max-w-full">
+      <div className="relative w-full sm:w-auto" ref={containerRef}>
         {/* Trigger Button */}
         <button
           data-testid="performance-dropdown-trigger"
@@ -59,7 +59,7 @@ export default function PerformanceTimeframe({ value, onChange }) {
             setOpen((o) => !o);
             setShowCustom(false);
           }}
-          className="flex items-center justify-between gap-2 min-w-[160px] px-4 py-2 text-[13px] font-bold border border-brand-300 rounded-lg shadow-sm bg-white text-brand-600 hover:bg-brand-50 hover:text-brand-800 transition-colors whitespace-nowrap"
+          className="flex items-center justify-between gap-2 w-full sm:w-auto sm:min-w-[160px] px-4 py-2 text-[13px] font-bold border border-brand-300 rounded-lg shadow-sm bg-white text-brand-600 hover:bg-brand-50 hover:text-brand-800 transition-colors whitespace-nowrap"
         >
           <span className="truncate">{displayLabel}</span>
           <ChevronDown

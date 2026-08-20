@@ -44,7 +44,7 @@ const OrderItemsModel = {
     return data;
   },
 
-  async getPendingItems() {
+ async getPendingItems() {
     const { data, error } = await getSupabase()
       .from(TABLE)
       .select(`
@@ -52,8 +52,9 @@ const OrderItemsModel = {
         quantity,
         orders!inner ( status, order_type )
       `)
-      .in('orders.status', ['Confirmed', 'Ready'])
-      .eq('orders.order_type', 'Buy Now');
+      .in('orders.status', ['Confirmed', 'Ready']);
+      // TINANGGAL NATIN YUNG .eq('orders.order_type', 'Buy Now') 
+      // para mabasa na rin niya ang mga Pre-Orders
 
     if (error) throw error;
     return data;

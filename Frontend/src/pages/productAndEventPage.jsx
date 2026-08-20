@@ -20,28 +20,34 @@ export default function ProductAndEventPage() {
     <div className="space-y-6">
 
       {/* Tabs Navigation — same pill style, font, at colors gaya ng Inventory page.
-          Wala nang page-level na <h1> dito dahil nasa Header na yung title. */}
-      <div className="flex gap-1 bg-brand-100 rounded-xl p-1 w-fit border border-brand-200">
-        <button
-          onClick={() => goToTab('products')}
-          className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-            activeTab === 'products'
-              ? 'bg-white text-brand-900 shadow-sm'
-              : 'text-brand-500 hover:text-brand-800'
-          }`}
-        >
-          Product Management
-        </button>
-        <button
-          onClick={() => goToTab('events')}
-          className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-            activeTab === 'events'
-              ? 'bg-white text-brand-900 shadow-sm'
-              : 'text-brand-500 hover:text-brand-800'
-          }`}
-        >
-          Event Manager
-        </button>
+          Wala nang page-level na <h1> dito dahil nasa Header na yung title.
+          Naka-wrap sa sarili niyang scroll strip (max-w-full overflow-x-auto)
+          para kahit hindi kumasya ang dalawang label sa pinakamaliit na phone,
+          doon lang mag-sscroll ang tabs mismo — hindi na ito nagtutulak ng
+          buong page palabas ng screen. */}
+      <div className="max-w-full overflow-x-auto">
+        <div className="flex gap-1 bg-brand-100 rounded-xl p-1 w-max border border-brand-200">
+          <button
+            onClick={() => goToTab('products')}
+            className={`px-4 sm:px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              activeTab === 'products'
+                ? 'bg-white text-brand-900 shadow-sm'
+                : 'text-brand-500 hover:text-brand-800'
+            }`}
+          >
+            Product Management
+          </button>
+          <button
+            onClick={() => goToTab('events')}
+            className={`px-4 sm:px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              activeTab === 'events'
+                ? 'bg-white text-brand-900 shadow-sm'
+                : 'text-brand-500 hover:text-brand-800'
+            }`}
+          >
+            Event Manager
+          </button>
+        </div>
       </div>
 
       {/* Dynamic Tab Rendering (Tinatawag yung mga hiwalay mong components) */}

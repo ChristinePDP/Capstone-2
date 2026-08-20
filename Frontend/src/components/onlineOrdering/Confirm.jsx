@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import Header from '../onlineOrdering/Header';
@@ -10,16 +10,75 @@ const DUMMY_CART = [
   { name: 'Special Ensaymada', qty: 2, price: 70 },
 ];
 
+// Gaano katagal mag-poll bago sabihin sa customer na tumagal ang confirmation.
+const POLL_INTERVAL_MS = 2000;
+const MAX_POLL_ATTEMPTS = 20; // ~40s total
+
 export default function Confirm({ orderId }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const mobileReceiptRef = useRef(null);
 
   const storedData = JSON.parse(sessionStorage.getItem('tempOrderData') || '{}');
   const state = location.state || storedData || {};
 
-  // GAGAMITIN NA NATIN ANG TOTOONG ID GALING SA DATABASE
-  const id = state.savedOrderNumber || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+  // Kung galing ito sa PayMongo redirect, may pending_id sa URL (galing sa
+  // success_url na binuo ng backend) o naka-store sa sessionStorage bilang
+  // backup. Wala itong ibig sabihin kung POS/admin flow ang gumamit ng
+  // Confirm nang direkta (walang PayMongo involved).
+  const pendingOrderId = searchParams.get('pending_id') || sessionStorage.getItem('pendingOrderId');
+
+  const [paymentStatus, setPaymentStatus] = useState(pendingOrderId ? 'checking' : 'unknown');
+  const [resolvedOrder, setResolvedOrder] = useState(null);
+
+  // Mag-poll sa backend hanggang makumpirma ng PayMongo webhook ang bayad at
+  // magawa na ang TOTOONG order sa database. Hindi natin ito nilalagay sa
+  // DB agad dito sa frontend — ang webhook lang ang gumagawa niyan.
+  useEffect(() => {
+    if (!pendingOrderId) return;
+    let cancelled = false;
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/pending-order/${pendingOrderId}`);
+        const data = await res.json();
+        if (cancelled) return;
+
+        if (data.success && data.status === 'paid') {
+          setResolvedOrder(data.order);
+          setPaymentStatus('paid');
+          sessionStorage.removeItem('pendingOrderId');
+          return;
+        }
+
+        if (data.success && (data.status === 'expired' || data.status === 'cancelled')) {
+          setPaymentStatus('failed');
+          return;
+        }
+
+        attempts += 1;
+        if (attempts < MAX_POLL_ATTEMPTS) {
+          setTimeout(poll, POLL_INTERVAL_MS);
+        } else {
+          setPaymentStatus('timeout');
+        }
+      } catch (err) {
+        console.error('Failed to check payment status', err);
+        if (!cancelled) setPaymentStatus('error');
+      }
+    };
+
+    poll();
+    return () => { cancelled = true; };
+  }, [pendingOrderId]);
+
+  // Ang tunay na order number ay galing lamang sa DB pagkatapos ma-confirm ng
+  // webhook. Bumabalik lang tayo sa `orderId` prop / dummy id sa 'unknown'
+  // case, hal. kung may ibang flow (POS/admin) na direktang nag-render ng
+  // Confirm nang walang PayMongo checkout.
+  const id = resolvedOrder?.order_number || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
   const cart = state.cart && state.cart.length ? state.cart : DUMMY_CART;
   
   const totalAmount =
@@ -75,6 +134,49 @@ export default function Confirm({ orderId }) {
       console.error('Failed to save receipt', err);
     }
   };
+
+  // Habang naghihintay pa ng webhook confirmation mula sa PayMongo, o kung
+  // may problema sa pag-verify, huwag munang ipakita ang buong receipt card.
+  if (paymentStatus === 'checking') {
+    return (
+      <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
+        <Header page="confirm" />
+        <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px]">
+          <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
+          <h2 className="text-lg font-serif text-[#3B1F0A] mb-1">Confirming your payment…</h2>
+          <p className="text-xs text-[#8A7264] max-w-[320px] text-center">
+            Kinukumpirma pa namin sa PayMongo ang bayad mo. Huwag mo munang isarado ang tab na ito.
+          </p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (paymentStatus === 'timeout' || paymentStatus === 'error' || paymentStatus === 'failed') {
+    return (
+      <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
+        <Header page="confirm" />
+        <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px] text-center">
+          <h2 className="text-lg font-serif text-[#3B1F0A] mb-2">
+            {paymentStatus === 'failed' ? 'Payment not completed' : 'Still confirming your payment'}
+          </h2>
+          <p className="text-xs text-[#8A7264] max-w-[340px] mb-5">
+            {paymentStatus === 'failed'
+              ? 'Mukhang na-cancel o hindi natuloy ang bayad mo. Wala kaming na-save na order — pwede kang bumalik at subukan ulit.'
+              : 'Nabayaran mo na, pero medyo tumagal ang confirmation. Subukan mong i-refresh pagkalipas ng ilang segundo, o makipag-ugnayan sa amin kung magpapatuloy.'}
+          </p>
+          <button
+            onClick={() => navigate('/onlineOrdering/home')}
+            className="text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] transition-colors"
+          >
+            &larr; Back to Home
+          </button>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">

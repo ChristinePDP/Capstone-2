@@ -292,37 +292,17 @@ export default function Checkout({ cart, setCart }) {
         createdAt: new Date().toISOString(),
       };
 
-    let savedOrderDetails = null;
-
-    try {
-      const dbRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/place-order`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderPayload)
-      });
-      
-      const dbData = await dbRes.json();
-
-      if (!dbData.success) {
-        setToastMessage('Database Error: ' + dbData.message);
-        setIsProcessing(false);
-        return; 
-      }
-      savedOrderDetails = dbData.order; 
-    } catch (err) {
-      console.error('Database network error:', err);
-      setToastMessage('Network error while saving order to database.');
-      setIsProcessing(false);
-      return;
-    }
-
-    sessionStorage.setItem('tempOrderData', JSON.stringify({ 
-      form, 
-      pickupType, 
-      paymentType, 
+    // IMPORTANT: wala nang direct save sa `orders` table dito. Ang order ay
+    // sina-save lang sa database ng backend sa loob ng PayMongo webhook
+    // (`/paymongo-webhook`), pagkatapos lang ma-confirm na nabayaran talaga.
+    // Ang tempOrderData dito ay para lang sa local receipt preview ni
+    // Confirm.jsx habang naghihintay ng webhook confirmation.
+    sessionStorage.setItem('tempOrderData', JSON.stringify({
+      form,
+      pickupType,
+      paymentType,
       orderPayload,
-      cart: updatedCart, 
-      savedOrderNumber: savedOrderDetails.order_number 
+      cart: updatedCart,
     }));
 
     const amountToPay = paymentType === 'half' ? halfAmount : totalAmount;
@@ -336,16 +316,20 @@ export default function Checkout({ cart, setCart }) {
           description: `Aileen Cake Max - ${pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}`,
           customerName: form.name,
           customerPhone: form.phone,
-          frontendUrl: window.location.origin 
+          frontendUrl: window.location.origin,
+          orderPayload, // buong order payload — ito ang ida-stage server-side
         })
       });
 
       const data = await response.json();
-
-      if (data.success && data.checkoutUrl) {
+if (data.success && data.checkoutUrl) {
+        // I-remember kung anong pending order ang hinihintay natin,
+        // gagamitin ito ni Confirm.jsx para mag-poll ng status.
+        sessionStorage.setItem('pendingOrderId', data.pendingOrderId);
         window.location.href = data.checkoutUrl;
       } else {
-        setToastMessage('Failed to generate payment link. Please try again.');
+        // Basahin ang error message galing backend (data.message), kung wala, tsaka gamitin ang fallback
+        setToastMessage(data.message || 'Failed to generate payment link. Please try again.');
         setIsProcessing(false);
       }
     } catch (error) {
