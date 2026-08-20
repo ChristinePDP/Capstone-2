@@ -272,6 +272,18 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       const catProducts = products.filter(p => p.category === cat);
       if (catProducts.length === 0) return null;
 
+      // --- BAGONG CODE PARA SA SORTING ---
+      // Ihihiwalay natin at ilalagay sa dulo ang mga sold out
+      const sortedCatProducts = [...catProducts].sort((a, b) => {
+        const isSoldOutA = (a.order_type === 'Pick-up Today' || a.order_type === 'Both') && (a.available_stock ?? a.stock_quantity ?? 0) <= 0;
+        const isSoldOutB = (b.order_type === 'Pick-up Today' || b.order_type === 'Both') && (b.available_stock ?? b.stock_quantity ?? 0) <= 0;
+        
+        if (isSoldOutA && !isSoldOutB) return 1;  // Ilagay si A sa huli
+        if (!isSoldOutA && isSoldOutB) return -1; // Ilagay si B sa huli
+        return 0; // Walang babaguhin sa pwesto kung parehas available o parehas sold out
+      });
+      // -----------------------------------
+
       return (
         <div key={cat} className="mb-8">
           <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
@@ -280,7 +292,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           </div>
           
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
-            {catProducts.map(p => {
+            {sortedCatProducts.map(p => {
               const isStockTracked = p.order_type === 'Pick-up Today' || p.order_type === 'Both';
               const currentStock = p.available_stock ?? p.stock_quantity ?? 0;
               const isSoldOut = isStockTracked && currentStock <= 0;

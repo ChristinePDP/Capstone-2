@@ -397,8 +397,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
       {/* Binago ang outermost wrapper: Dinagdagan ng Off-canvas behaviors para sa mobile */}
       <div className={`
-        fixed inset-y-0 right-0 z-[1010] w-[85%] sm:w-[400px] bg-white shadow-2xl flex flex-col shrink-0 h-full overflow-hidden 
-        transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 right-0 z-[1010] w-[85%] max-w-[400px] sm:w-[400px] bg-white shadow-2xl flex flex-col shrink-0 h-full overflow-hidden 
+        transform transition-transform duration-300 ease-in-out will-change-transform
         ${isCartOpen ? 'translate-x-0' : 'translate-x-full'}
         lg:static lg:translate-x-0 lg:w-[400px] lg:min-w-[400px] lg:max-w-[400px] lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:z-auto lg:h-full
       `}>

@@ -15,6 +15,7 @@ import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
+import { handlePaymongoWebhook } from './controller/onlineOrdering.controller.js';
 
 const app = express(); 
 
@@ -22,6 +23,18 @@ app.use(cors({
   origin: true, 
   credentials: true 
 }));
+
+// --- PAYMONGO WEBHOOK: DAPAT NASA ITAAS ITO, BAGO ANG express.json() ---
+// Kailangan ng RAW (Buffer) na request body ng webhook signature check.
+// Kapag na-parse na ng express.json() ang body bago ito marating, mapapalitan
+// na ito ng plain JS object at palaging mag-fa-fail ang signature
+// verification. Kaya dapat DITO na, bago pa man tawagin ang app.use(express.json()),
+// nakalagay ang route na ito — hindi sa loob ng onlineOrdering.routes.js.
+app.post(
+  '/api/online-ordering/paymongo-webhook',
+  express.raw({ type: 'application/json' }),
+  handlePaymongoWebhook
+);
 
 app.use(express.json()); 
 app.use(cookieParser());

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Bell, X, ShoppingBag, CheckCheck, Trash2, ChevronRight } from 'lucide-react';
 
@@ -99,7 +100,8 @@ export default function Notification() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const panelRef = useRef(null);
+  const buttonWrapRef = useRef(null);
+  const panelPortalRef = useRef(null);
   const navigate = useNavigate();
 
   const unreadCount = items.filter(n => !n.is_read).length;
@@ -125,7 +127,9 @@ export default function Notification() {
 
   useEffect(() => {
     const handler = (e) => {
-      if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false);
+      const clickedButton = buttonWrapRef.current && buttonWrapRef.current.contains(e.target);
+      const clickedPanel = panelPortalRef.current && panelPortalRef.current.contains(e.target);
+      if (!clickedButton && !clickedPanel) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -173,7 +177,7 @@ export default function Notification() {
   };
 
   return (
-    <div className="relative" ref={panelRef}>
+    <div className="relative" ref={buttonWrapRef}>
       <button
         onClick={() => setOpen(v => !v)}
         className="relative w-9 h-9 md:w-10 md:h-10 rounded-xl border border-brand-200 flex items-center justify-center text-brand-500 hover:bg-brand-50 hover:text-brand-700 transition-colors"
@@ -187,12 +191,23 @@ export default function Notification() {
         )}
       </button>
 
-      {open && (
-        <div
-          className="absolute right-0 top-11 w-[calc(100vw-2rem)] max-w-[360px] bg-white border border-brand-200 rounded-2xl shadow-xl overflow-hidden z-50 origin-top-right animate-modalIn"
-        >
+      {open && createPortal(
+        <>
+          {/* Backdrop — mobile lang, dito talaga natin sisiguraduhing laging
+              nasa ibabaw kahit anong nakabukas na modal/drawer sa page,
+              dahil naka-portal na ito diretso sa <body>, hindi na nakakulong
+              sa stacking context ng <header>. */}
+          <div
+            className="fixed inset-0 z-[1950] bg-black/30 sm:hidden"
+            onClick={() => setOpen(false)}
+          />
+
+          <div
+            ref={panelPortalRef}
+            className="fixed left-3 right-3 sm:left-auto sm:right-4 top-16 w-auto sm:w-[380px] max-w-none sm:max-w-[380px] max-h-[80vh] sm:max-h-[32rem] flex flex-col bg-white border border-brand-200 rounded-2xl shadow-xl overflow-hidden z-[1960] origin-top sm:origin-top-right animate-modalIn"
+          >
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3.5 border-b border-brand-100">
+          <div className="flex items-center justify-between px-4 py-3.5 border-b border-brand-100 shrink-0">
             <div className="flex items-center gap-2">
               <p className="text-[15px] font-bold text-brand-800">Notifications</p>
               {unreadCount > 0 && (
@@ -224,7 +239,7 @@ export default function Notification() {
           </div>
 
           {/* List */}
-          <div className="max-h-96 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {loading ? (
               // Skeleton rows — mas maganda ang perceived speed kaysa sa
               // plain "Loading..." text, at binibigyan ng preview kung
@@ -267,13 +282,15 @@ export default function Notification() {
           {!loading && items.length > 0 && (
             <button
               onClick={() => { setOpen(false); navigate('/orders'); }}
-              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-[12px] font-semibold text-brand-600 hover:text-brand-800 hover:bg-brand-50 border-t border-brand-100 transition-colors"
+              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-[12px] font-semibold text-brand-600 hover:text-brand-800 hover:bg-brand-50 border-t border-brand-100 transition-colors shrink-0"
             >
               View All Orders
               <ChevronRight size={13} />
             </button>
           )}
         </div>
+        </>,
+        document.body
       )}
     </div>
   );

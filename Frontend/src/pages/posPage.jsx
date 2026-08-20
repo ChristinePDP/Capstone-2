@@ -3,6 +3,7 @@ import { ShoppingCart } from 'lucide-react';
 import PosMenu from '../components/pos/posMenu';
 import PosCart from '../components/pos/posCart';
 import OrderSlip from '../components/pos/orderSlip';
+import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
 
 export default function PosPage() {
   // 1. Initialized mula sa Local Storage
@@ -35,21 +36,21 @@ export default function PosPage() {
 
 
   // --- FETCH PRODUCTS FROM BACKEND ---
+  // Ang `/pos` endpoints ay naka-mount sa ROOT ng API (HINDI sa ilalim ng
+  // `/inventory`), kaya absolute URL ang ginagamit dito para ma-bypass ang
+  // `/inventory` baseURL ng `apiClient` — parehong pattern gaya ng
+  // ORDERS_API_URL sa AppContext.jsx. Cookie-based na ang auth (withCredentials
+  // sa apiClient.js), kaya hindi na kailangan ng manual Authorization header.
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('token'); 
-        
-        const response = await fetch('http://localhost:3000/api/pos/products', {
-          credentials: 'include',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
 
-        if (!response.ok) throw new Error('Failed to fetch products');
-        const result = await response.json();
+        const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+        const POS_API_URL = `${API_BASE}/pos/products`;
+
+        const response = await apiClient.get(POS_API_URL);
+        const result = response.data; 
         
         if (result.success) {
           const normalized = result.data.map(p => ({
@@ -133,7 +134,7 @@ export default function PosPage() {
   const handleClearCart = () => setCart([]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] lg:overflow-hidden text-[#3B1F0A] bg-transparent p-3 sm:p-4">
+    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] overflow-x-hidden lg:overflow-hidden w-full max-w-full text-[#3B1F0A] bg-transparent p-3 sm:p-4">
       {/* Binigyan ng pb-24 (padding-bottom) para hindi matakpan ng FAB ang ilalim sa mobile view */}
       <div className="flex-1 flex flex-col min-w-0 h-auto lg:h-full pb-24 lg:pb-0">
          {loading ? (

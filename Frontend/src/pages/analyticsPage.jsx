@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiClient } from '../services/apiClient';
 import PerformanceTimeframe from '../components/analytics/performanceTimeframe';
 import FourKpi from '../components/analytics/fourKPI';
 import StackedBar from '../components/analytics/stackedBar';
@@ -8,6 +9,14 @@ import SalesForecast from '../components/analytics/salesForecast';
 import ProductForecasting from '../components/analytics/productForecast';
 import ActionableRecommendation from '../components/analytics/actionableRecommendation';
 import Summary from '../components/analytics/summary';
+
+// Ang Analytics endpoints ay naka-mount sa ROOT ng API bilang `/api/analytics`
+// (HINDI sa ilalim ng `/inventory`), kaya kailangan ng buong absolute URL dito
+// para ma-bypass ang `/inventory` baseURL ng `apiClient` — parehong pattern
+// gaya ng ORDERS_API_URL sa AppContext.jsx. Ginagamit pa rin ang parehong
+// `apiClient` axios instance (may withCredentials cookie auth at 401
+// auto-logout interceptor), kaya consistent na ito sa buong app.
+const ANALYTICS_API_URL = `${import.meta.env.VITE_API_URL}/analytics`;
 
 export default function AnalyticsPage() {
   const [perfTimeframe, setPerfTimeframe] = useState('Today');
@@ -20,36 +29,27 @@ export default function AnalyticsPage() {
     const fetchAnalytics = async () => {
       setIsLoading(true);
       try {
-        const token = localStorage.getItem('token'); 
-        const headers = { 
-            'Content-Type': 'application/json',
-            ...(token && { 'Authorization': `Bearer ${token}` }) 
+        // Helper na kapareho ng safeFetch() sa AppContext.jsx — hindi
+        // nagfa-fail ang Promise.all kapag may isang endpoint na nag-error.
+        const safeFetch = async (url) => {
+          try {
+            const res = await apiClient.get(url);
+            return { ok: true, data: res.data };
+          } catch (err) {
+            console.error(`Error fetching ${url}:`, err);
+            return { ok: false, data: null };
+          }
         };
 
-        const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
-        const endpoints = [
-          `${baseUrl}/analytics/four-kpi/${encodeURIComponent(perfTimeframe)}`,
-          `${baseUrl}/analytics/stacked-bar/${encodeURIComponent(perfTimeframe)}`,
-          `${baseUrl}/analytics/top-products/${encodeURIComponent(perfTimeframe)}`,
-          `${baseUrl}/analytics/sales-forecast/${encodeURIComponent(forecastTimeframe)}`,
-          `${baseUrl}/analytics/product-forecast/${encodeURIComponent(forecastTimeframe)}`,
-          `${baseUrl}/analytics/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`,
-          `${baseUrl}/analytics/summary` // Dinagdag na ang Summary endpoint dito
-        ];
-
-        const responses = await Promise.all(
-          endpoints.map(url => 
-            fetch(url, { headers })
-              .then(async (res) => {
-                const json = await res.json().catch(() => ({}));
-                return { ok: res.ok, data: json };
-              })
-              .catch(() => ({ ok: false, data: null }))
-          )
-        );
-
-        const [kpiRes, stackedRes, topRes, salesRes, prodRes, actionRes, summaryRes] = responses;
+        const [kpiRes, stackedRes, topRes, salesRes, prodRes, actionRes, summaryRes] = await Promise.all([
+          safeFetch(`${ANALYTICS_API_URL}/four-kpi/${encodeURIComponent(perfTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/stacked-bar/${encodeURIComponent(perfTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/top-products/${encodeURIComponent(perfTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`),
+          safeFetch(`${ANALYTICS_API_URL}/summary`), // Dinagdag na ang Summary endpoint dito
+        ]);
 
         const rawKpi = kpiRes.ok ? (kpiRes.data?.data || kpiRes.data) : null;
         
@@ -88,10 +88,10 @@ export default function AnalyticsPage() {
   }, [perfTimeframe, forecastTimeframe]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden w-full max-w-full">
       <div className="flex flex-col gap-5 w-full">
-        <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
-          <h2 className="text-base sm:text-xl font-bold text-[#3d2410]">Business Performance</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full">
+          <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">Business Performance</h2>
           <PerformanceTimeframe value={perfTimeframe} onChange={setPerfTimeframe} />
         </div>
 
@@ -106,8 +106,8 @@ export default function AnalyticsPage() {
         <Summary data={analyticsData?.summary} isLoading={isLoading} />
 
         <div className="mt-4 pt-6 border-t border-[#e7ded4] flex flex-col gap-5 w-full">
-          <div className="flex items-center justify-between gap-2 sm:gap-4 w-full">
-            <h2 className="text-base sm:text-xl font-bold text-[#3d2410]">Forecast & Recommendations</h2>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full">
+            <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">Forecast & Recommendations</h2>
             <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
           </div>
 

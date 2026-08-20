@@ -4,6 +4,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
+import { PendingOrdersModel } from '../model/pendingOrders.model.js';
 import { notifyNewOrder } from './notification.service.js';
 
 export const fetchMenuProducts = async (filters = {}) => {
@@ -12,13 +13,11 @@ export const fetchMenuProducts = async (filters = {}) => {
   try {
     const result = await ProductModel.findAll(filters);
     
-    // BULLETPROOF CHECK: 
     if (result && Array.isArray(result.data)) {
       products = result.data;
     } else if (Array.isArray(result)) {
       products = result;
     } else {
-      console.warn("[WARN] Ang nakuha sa ProductModel ay hindi array:", result);
       products = []; 
     }
   } catch (productError) {
@@ -29,7 +28,6 @@ export const fetchMenuProducts = async (filters = {}) => {
   try {
     const itemsResult = await OrderItemsModel.getPendingItems();
     
-    // Parehas na safeguard para sa pending items
     if (itemsResult && Array.isArray(itemsResult.data)) {
       pendingItems = itemsResult.data;
     } else if (Array.isArray(itemsResult)) {
@@ -38,11 +36,29 @@ export const fetchMenuProducts = async (filters = {}) => {
   } catch (itemsError) {
     throw new Error(`Fetch Reservations Error: ${itemsError?.message || itemsError}`);
   }
-
+  
   const reservedMap = {};
+  
+  // 1. Ibawas ang mga nasa 'order_items' table na (Confirmed/Ready - both Pre-Order & Buy Now)
   pendingItems.forEach(item => {
     reservedMap[item.product_id] = (reservedMap[item.product_id] || 0) + item.quantity;
   });
+
+  // 2. Kunin lang ang mga RECENT na nasa PayMongo checkout page (last 30 mins)
+  try {
+    const pendingPaymongo = await PendingOrdersModel.getActivePending();
+
+    if (pendingPaymongo) {
+      pendingPaymongo.forEach(row => {
+        const items = row.payload?.items || [];
+        items.forEach(item => {
+          reservedMap[item.productId] = (reservedMap[item.productId] || 0) + item.quantity;
+        });
+      });
+    }
+  } catch (pendingErr) {
+    console.error("Error fetching pending PayMongo orders:", pendingErr);
+  }
 
   const productsWithStock = products.map(p => {
     const baseStock = p.stock_quantity || 0; 
@@ -83,7 +99,39 @@ export const uploadImageToBucket = async (file, bucketName = 'inspiration-images
   return urlData.publicUrl;
 };
 
-export const createDatabaseOrder = async (payload) => {
+// --- PENDING ORDERS LOGIC ---
+
+export const createPendingOrder = async ({ payload, amountDueNow }) => {
+  try {
+    return await PendingOrdersModel.create(payload, amountDueNow);
+  } catch (error) {
+    throw new Error(`Pending Order Error: ${error.message}`);
+  }
+};
+
+export const attachCheckoutSessionToPendingOrder = async (pendingOrderId, checkoutSessionId) => {
+  try {
+    await PendingOrdersModel.updateSession(pendingOrderId, checkoutSessionId);
+  } catch (error) {
+    console.error('Failed to attach checkout session to pending order:', error.message);
+  }
+};
+
+export const getPendingOrder = async (pendingOrderId) => {
+  return await PendingOrdersModel.findById(pendingOrderId);
+};
+
+export const markPendingOrderPaid = async (pendingOrderId, paymentId, resultOrder) => {
+  try {
+    await PendingOrdersModel.markAsPaid(pendingOrderId, paymentId, resultOrder);
+  } catch (error) {
+    console.error('Failed to mark pending order as paid:', error.message);
+  }
+};
+
+// --- ACTUAL ORDER CREATION LOGIC ---
+
+export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => {
   let customerData;
   try {
     customerData = await CustomersModel.create({
@@ -107,17 +155,9 @@ export const createDatabaseOrder = async (payload) => {
     amount_paid: payload.payment.amountDueNow,
     balance: payload.payment.balanceAtPickup,
     pickup_date: payload.pickup.date,
-    // `payload.pickup.time` is now guaranteed to be a clean "HH:MM" start time
-    // (resolved on the frontend from the selected slot), so it inserts cleanly
-    // into the `time` column instead of being mis-parsed as a range/offset.
     pickup_time: payload.pickup.time,
     pickup_time_end: payload.pickup.timeEnd || null,
-
-    // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment
-    // the line below to preserve the full slot range (e.g. "08:00-10:00") instead
-    // of just the start time. Leave commented out until the column exists, or the
-    // insert will fail.
-    // pickup_time_slot: payload.pickup.timeSlot || null,
+    paymongo_payment_id: paymongoPaymentId,
   };
 
   let newOrder;
@@ -146,8 +186,6 @@ export const createDatabaseOrder = async (payload) => {
     throw new Error(`Items Error: ${itemsError.message}`);
   }
 
-  // Admin-side notification — fire-and-forget so a notification failure
-  // never blocks or fails the actual order creation.
   notifyNewOrder(newOrder, payload);
 
   return newOrder;
@@ -167,40 +205,38 @@ export const completeOrderAndDeductStock = async (orderId) => {
   console.log('[SERVICE] 2. Successfully updated order status to:', updatedOrder.status);
   console.log('[SERVICE] 3. Order Type is:', updatedOrder.order_type);
 
-  if (updatedOrder.order_type === 'Buy Now') {
-    console.log('[SERVICE] 4. Order is "Buy Now". Fetching order items...');
-    
-    let items;
-    try {
-      items = await OrderItemsModel.findByOrderId(orderId);
-    } catch (itemsError) {
-      console.error('[SERVICE] Error fetching order items:', itemsError);
-      throw new Error(`Failed to fetch items: ${itemsError.message}`);
-    }
+  console.log('[SERVICE] 4. Fetching order items to deduct stock permanently...');
+  
+  let items;
+  try {
+    items = await OrderItemsModel.findByOrderId(orderId);
+  } catch (itemsError) {
+    console.error('[SERVICE] Error fetching order items:', itemsError);
+    throw new Error(`Failed to fetch items: ${itemsError.message}`);
+  }
 
-    console.log(`[SERVICE] 5. Found ${items?.length || 0} items to deduct:`, items);
+  console.log(`[SERVICE] 5. Found ${items?.length || 0} items to deduct:`, items);
 
-    if (items && items.length > 0) {
-      for (const item of items) {
-        if (!item.product_id) continue;
+  if (items && items.length > 0) {
+    for (const item of items) {
+      if (!item.product_id) continue;
 
-        console.log(`[SERVICE] 6. Processing Product ID: ${item.product_id} | Qty to deduct: ${item.quantity}`);
+      console.log(`[SERVICE] 6. Processing Product ID: ${item.product_id} | Qty to deduct: ${item.quantity}`);
 
-        try {
-          const product = await ProductModel.findById(item.product_id);
+      try {
+        const product = await ProductModel.findById(item.product_id);
+        
+        if (product) {
+          console.log(`[SERVICE] 7. Current stock for ${item.product_id} is: ${product.stock_quantity}`);
           
-          if (product) {
-            console.log(`[SERVICE] 7. Current stock for ${item.product_id} is: ${product.stock_quantity}`);
-            
-            const newStock = Math.max(0, product.stock_quantity - item.quantity);
-            console.log(`[SERVICE] 8. New stock will be: ${newStock}`);
-            
-            await ProductModel.update(item.product_id, { stock_quantity: newStock });
-            console.log(`[SERVICE] 9. SUCCESS! Updated stock for Product ID: ${item.product_id}`);
-          }
-        } catch (err) {
-           console.error(`[SERVICE] 9. Error fetching/updating stock for ${item.product_id}:`, err);
+          const newStock = Math.max(0, product.stock_quantity - item.quantity);
+          console.log(`[SERVICE] 8. New stock will be: ${newStock}`);
+          
+          await ProductModel.update(item.product_id, { stock_quantity: newStock });
+          console.log(`[SERVICE] 9. SUCCESS! Updated stock for Product ID: ${item.product_id}`);
         }
+      } catch (err) {
+         console.error(`[SERVICE] 9. Error fetching/updating stock for ${item.product_id}:`, err);
       }
     }
   }
@@ -210,8 +246,7 @@ export const completeOrderAndDeductStock = async (orderId) => {
 
 export const createProduct = async (payload) => {
   try {
-    const data = await ProductModel.create(payload);
-    return data;
+    return await ProductModel.create(payload);
   } catch (error) {
     throw new Error(`Database insert error: ${error.message}`);
   }
@@ -219,9 +254,18 @@ export const createProduct = async (payload) => {
 
 export const updateProduct = async (id, payload) => {
   try {
-    const data = await ProductModel.update(id, payload);
-    return data;
+    return await ProductModel.update(id, payload);
   } catch (error) {
     throw new Error(`Database update error: ${error.message}`);
+  }
+};
+
+export const cleanupExpiredPendingOrders = async () => {
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  try {
+    await PendingOrdersModel.deleteExpired(twoHoursAgo);
+    console.log(`[SERVICE] Successfully cleaned up pending orders older than ${twoHoursAgo}`);
+  } catch (error) {
+    console.error('[SERVICE] Error cleaning up expired pending orders:', error.message);
   }
 };

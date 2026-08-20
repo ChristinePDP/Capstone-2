@@ -145,14 +145,14 @@ export function Layout({ children, onLogout }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-brand-50" style={{ '--sidebar-width': '220px' }}>
+    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-brand-50" style={{ '--sidebar-width': '220px' }}>
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <div className="flex-1 flex flex-col min-h-screen md:ml-[var(--sidebar-width,220px)]">
+      <div className="flex-1 flex flex-col min-h-screen min-w-0 md:ml-[var(--sidebar-width,220px)]">
         <Header onMenuClick={() => setSidebarOpen(true)} onLogoutClick={() => setLogoutOpen(true)} />
-        <main className="flex-1 p-3 md:p-5 overflow-auto">{children}</main>
+        <main className="flex-1 min-w-0 p-3 md:p-5 overflow-x-hidden overflow-y-auto">{children}</main>
       </div>
 
       {/* ── Logout Confirmation Modal ── */}

@@ -89,7 +89,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
       {/* 1. Product Image + Product Name/Category/Order Type/Choose File */}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Product Image</p>
-        <div className="flex flex-row gap-4 items-start">
+        <div className="flex flex-col sm:flex-row gap-4 items-start">
           <div className="relative shrink-0">
             <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm">
               {hasImage ? (
@@ -118,7 +118,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
 
           <div className="flex-1 min-w-0 flex flex-col gap-3">
             <Input label="Product Name" required value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="w-full min-w-0">
                 <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Image File</label>
                 <Button variant="secondary" size="md" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
