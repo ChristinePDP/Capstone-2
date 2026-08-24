@@ -1,4 +1,5 @@
 // backend/src/services/onlineOrdering.services.js
+import { randomUUID } from 'crypto';
 import { supabase } from '../config/supabase.js'; 
 import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
@@ -6,6 +7,27 @@ import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 import { PendingOrdersModel } from '../model/pendingOrders.model.js';
 import { notifyNewOrder } from './notification.service.js';
+import { getBundleById } from './productAndEvent.service.js';
+
+// --- STOCK / DAILY LIMIT BASIS ---
+//
+// Ang isang product ay maaaring i-track base sa `daily_limit` (para sa
+// Pre-order — ilang "slots" ang pwedeng i-order kada araw) o base sa
+// `stock_quantity` (para sa Pick-up Today — kung ilan talaga ang
+// naka-ready/produced na stock). Rule (parehong ginagamit sa availability
+// computation at sa pag-deduct pagka-Completed na ang order):
+//   - Kung may laman (di null at > 0) ang `daily_limit`, ITO ang babasahin,
+//     kahit may laman din ang `stock_quantity` (daily_limit wins kapag
+//     pareho silang may laman).
+//   - Kung wala/0 ang `daily_limit`, babalik sa `stock_quantity`.
+// Ginagamit ito kapwa ng Pre-order, Pick-up Today, at "Both" na products —
+// hindi lang basta yung may `stock_quantity`.
+export const getStockLimitField = (product) => {
+  const hasDailyLimit = product?.daily_limit !== null
+    && product?.daily_limit !== undefined
+    && Number(product.daily_limit) > 0;
+  return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
+};
 
 export const fetchMenuProducts = async (filters = {}) => {
   let products = []; 
@@ -61,12 +83,14 @@ export const fetchMenuProducts = async (filters = {}) => {
   }
 
   const productsWithStock = products.map(p => {
-    const baseStock = p.stock_quantity || 0; 
+    const limitField = getStockLimitField(p);
+    const baseStock = Number(p[limitField]) || 0;
     const reserved = reservedMap[p.id] || 0;
     const available = Math.max(0, baseStock - reserved);
 
     return {
       ...p,
+      stock_basis_field: limitField, // 'daily_limit' o 'stock_quantity' — para malaman ng frontend/consumer kung saan galing ang bilang
       available_stock: available
     };
   });
@@ -131,7 +155,117 @@ export const markPendingOrderPaid = async (pendingOrderId, paymentId, resultOrde
 
 // --- ACTUAL ORDER CREATION LOGIC ---
 
+const allocateBundlePrice = (products, discountedTotal) => {
+  // EVEN SPLIT — hinahati ang discounted bundle price nang PANTAY-PANTAY sa
+  // lahat ng products sa loob ng bundle, hindi proportional sa kani-kanilang
+  // orihinal na presyo. Ang huling product sa listahan ang kumukuha ng
+  // "remainder" sa halip na sarili niyang equal share, para eksaktong
+  // tumugma ang kabuuang sum sa totoong binayaran ng customer — walang
+  // centavo na "nawawala" o "sumosobra" dahil sa rounding.
+  const equalShare = Math.round((discountedTotal / products.length) * 100) / 100;
+
+  let runningTotal = 0;
+  return products.map((p, idx) => {
+    if (idx === products.length - 1) {
+      const remainder = Math.round((discountedTotal - runningTotal) * 100) / 100;
+      return { ...p, allocated_price: remainder };
+    }
+    runningTotal += equalShare;
+    return { ...p, allocated_price: equalShare };
+  });
+};
+
+// Kinukuha ang bundle mismo mula sa DB (hindi umaasa sa presyo na ipinasa ng
+// client) para hindi ma-manipulate ng customer ang presyo sa pamamagitan lang
+// ng pag-edit ng request payload. Hina-validate din dito kung available pa
+// ba talaga ang bundle (active at nasa loob ng date range nito) bago tanggapin
+// ang order — laban sa "stale cart" na may nag-expire nang promo.
+const resolveBundleLineItem = async (item) => {
+  const bundle = await getBundleById(item.bundleId);
+
+  if (!bundle) {
+    throw new Error(`Bundle not found: ${item.bundleId}`);
+  }
+  if (bundle.is_active === false) {
+    throw new Error(`"${bundle.bundle_name}" is no longer available.`);
+  }
+  if (bundle.is_within_date_range === false) {
+    throw new Error(`"${bundle.bundle_name}" is not available right now (outside its promo date range).`);
+  }
+  if (!Array.isArray(bundle.products) || bundle.products.length < 2) {
+    throw new Error(`"${bundle.bundle_name}" no longer has enough valid products.`);
+  }
+
+  const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+  const allocatedProducts = allocateBundlePrice(bundle.products, Number(bundle.bundle_price || 0));
+
+  // Isang `bundle_group_id` bawat "unit" ng bundle sa cart, para malaman ng
+  // frontend/receipt kung aling mga component rows ang dapat i-grupo nang
+  // magkasama sa display — kahit hiwalay silang totoong rows sa DB.
+  const bundleGroupId = randomUUID();
+
+  return allocatedProducts.map(p => ({
+    product_id: p.id,
+    product_name: p.name,
+    quantity,
+    unit_price: p.allocated_price,
+    total_price: Math.round(p.allocated_price * quantity * 100) / 100,
+    order_slip_details: item.orderSlip || {},
+    selected_price_options: null,
+    customer_reference_url: null,
+    bundle_id: bundle.id,
+    bundle_group_id: bundleGroupId,
+    bundle_name: bundle.bundle_name,
+    original_unit_price: Number(p.price || 0),
+    special_instructions: item.specialInstructions || '',
+  }));
+};
+
+// Regular na (non-bundle) na item — parehong lohika gaya ng dati, walang
+// binago sa presyo (galing pa rin ito sa client payload).
+const resolveProductLineItem = (item) => ({
+  product_id: item.productId,
+  product_name: item.name,
+  quantity: item.quantity,
+  unit_price: item.unitPrice,
+  total_price: item.subtotal,
+  order_slip_details: item.orderSlip,
+  selected_price_options: item.selectedPriceOptions || null,
+  customer_reference_url: item.inspirationUrl || null,
+  bundle_id: null,
+  bundle_group_id: null,
+  bundle_name: null,
+  original_unit_price: null,
+  special_instructions: item.specialInstructions || '',
+});
+
+// Ino-resolve ang LAHAT ng items bago pa man gumawa ng customer/order row sa
+// DB — kaya kung may invalid na bundle (na-delete, na-deactivate, o
+// nag-expire na ang date range), mahuhuli ito BAGO ma-orphan ang isang
+// customer/order record na walang laman.
+export const resolveOrderItems = async (items = []) => {
+  const resolved = [];
+  for (const item of items) {
+    if (item.type === 'bundle' || item.bundleId) {
+      const bundleRows = await resolveBundleLineItem(item);
+      resolved.push(...bundleRows);
+    } else {
+      resolved.push(resolveProductLineItem(item));
+    }
+  }
+  return resolved;
+};
+
 export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => {
+  // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
+  //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
+  let resolvedItems;
+  try {
+    resolvedItems = await resolveOrderItems(payload.items);
+  } catch (itemsError) {
+    throw new Error(`Items Error: ${itemsError.message}`);
+  }
+
   let customerData;
   try {
     customerData = await CustomersModel.create({
@@ -167,16 +301,9 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     throw new Error(`Order Error: ${orderError.message}`);
   }
 
-  const itemsToInsert = payload.items.map(item => ({
+  const itemsToInsert = resolvedItems.map(item => ({
+    ...item,
     order_id: newOrder.id,
-    product_id: item.productId,
-    product_name: item.name,
-    quantity: item.quantity,
-    unit_price: item.unitPrice,
-    total_price: item.subtotal,
-    order_slip_details: item.orderSlip,
-    selected_price_options: item.selectedPriceOptions || null, 
-    customer_reference_url: item.inspirationUrl || null,
     special_instructions: payload.specialInstructions || ''
   }));
 
@@ -227,13 +354,18 @@ export const completeOrderAndDeductStock = async (orderId) => {
         const product = await ProductModel.findById(item.product_id);
         
         if (product) {
-          console.log(`[SERVICE] 7. Current stock for ${item.product_id} is: ${product.stock_quantity}`);
-          
-          const newStock = Math.max(0, product.stock_quantity - item.quantity);
-          console.log(`[SERVICE] 8. New stock will be: ${newStock}`);
-          
-          await ProductModel.update(item.product_id, { stock_quantity: newStock });
-          console.log(`[SERVICE] 9. SUCCESS! Updated stock for Product ID: ${item.product_id}`);
+          // Same priority rule gaya ng availability computation: kung may
+          // laman ang daily_limit, dun babawas (Pre-order "slots"); kung
+          // wala, sa stock_quantity babawas (Pick-up Today na produced stock).
+          const limitField = getStockLimitField(product);
+          const currentValue = Number(product[limitField]) || 0;
+          console.log(`[SERVICE] 7. Current ${limitField} for ${item.product_id} is: ${currentValue}`);
+
+          const newValue = Math.max(0, currentValue - item.quantity);
+          console.log(`[SERVICE] 8. New ${limitField} will be: ${newValue}`);
+
+          await ProductModel.update(item.product_id, { [limitField]: newValue });
+          console.log(`[SERVICE] 9. SUCCESS! Updated ${limitField} for Product ID: ${item.product_id}`);
         }
       } catch (err) {
          console.error(`[SERVICE] 9. Error fetching/updating stock for ${item.product_id}:`, err);

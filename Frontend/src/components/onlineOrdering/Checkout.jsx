@@ -119,7 +119,12 @@ export default function Checkout({ cart, setCart }) {
 
   const hasPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const hasPickUpToday = cart.some(item => item.order_type === 'Pick-up Today');
-  const forcedPickupType = hasPickUpToday ? 'now' : (hasPreOrder ? 'later' : 'now');
+  // Pre-order ALWAYS wins, kahit may kasamang item na 'Pick-up Today' o 'Both'
+  // sa cart. Kailangan ito dahil literal na hindi maaaring pick-upin ngayon
+  // din ang isang Pre-order item (may required lead time) — kaya kapag may
+  // isang Pre-order item, ang buong order ay dapat Pre-order na rin, hindi
+  // basta ma-o-override ng ibang item na 'Pick-up Today'/'Both'.
+  const forcedPickupType = hasPreOrder ? 'later' : (hasPickUpToday ? 'now' : 'now');
   
   const today = new Date();
   const todayString = new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
@@ -128,7 +133,7 @@ export default function Checkout({ cart, setCart }) {
     name: '',
     phone: '',
     altPhone: '',
-    pickupDate: hasPickUpToday ? todayString : '',
+    pickupDate: forcedPickupType === 'now' ? todayString : '',
     pickupTime: '',
     instructions: '',
   });
@@ -281,7 +286,14 @@ export default function Checkout({ cart, setCart }) {
           subtotal: item.price * item.qty,
           orderSlip: item.order_slip_details || {},
           selectedPriceOptions: item.selected_price_options || null, 
-          inspirationUrl: item.inspiration_url || null
+          inspirationUrl: item.inspiration_url || null,
+          // Kailangan ito para malaman ng backend (onlineOrdering.services.js
+          // resolveOrderItems) na dapat i-explode ang item na ito sa
+          // individual component products ng bundle, sa halip na ituring
+          // itong isang regular na product (na magre-resulta sa invalid
+          // product_id / walang laman na order_items).
+          type: item.type || null,
+          bundleId: item.bundleId || null,
         })),
         payment: {
           type: paymentType === 'half' ? 'deposit' : 'full',
@@ -373,11 +385,11 @@ if (data.success && data.checkoutUrl) {
                     </button>
                     <button
                       onClick={() => {
-                        if (hasPickUpToday) return;
+                        if (hasPickUpToday && !hasPreOrder) return;
                         setPickupType('later');
                         setForm({...form, pickupDate: '', pickupTime: ''});
                       }}
-                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'later' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPickUpToday ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'later' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPickUpToday && !hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       Pre-Order
                     </button>
@@ -706,14 +718,27 @@ if (data.success && data.checkoutUrl) {
                             </div>
                           )}
                           
-                          {item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                          {item.type === 'bundle' && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
                             <div className="flex flex-col gap-0.5 mt-1">
-                              {Object.entries(item.order_slip_details).map(([label, value]) => (
-                                <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                  <span className="font-medium">{label}:</span> {value}
-                                </p>
-                              ))}
+                              {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
+                                const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
+                                return Object.entries(answers || {}).map(([label, value]) => (
+                                  <p key={`slip-${prodId}-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                    <span className="font-medium">{pName} - {label}:</span> {value}
+                                  </p>
+                                ));
+                              })}
                             </div>
+                          ) : (
+                            item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                              <div className="flex flex-col gap-0.5 mt-1">
+                                {Object.entries(item.order_slip_details).map(([label, value]) => (
+                                  <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                    <span className="font-medium">{label}:</span> {value}
+                                  </p>
+                                ))}
+                              </div>
+                            )
                           )}
                         </div>
                       </div>

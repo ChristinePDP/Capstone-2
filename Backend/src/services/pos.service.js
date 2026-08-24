@@ -2,6 +2,14 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
+// Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
+// Ordering (resolveBundleLineItem + resolveProductLineItem, na parehong
+// naka-wrap sa resolveOrderItems). Ito ang gumagawa ng maayos na product_id
+// rows (kasama ang unit price allocation) mula sa isang bundle cart item, at
+// nagpapasa rin ng order_slip_details / selected_price_options / customer_reference_url
+// papunta sa bawat resolved row — dating wala nito ang POS, kaya nawawala
+// ang order slip answers pagdating sa DB.
+import { resolveOrderItems } from './onlineOrdering.services.js';
 
 // BAGO: ginagamit para gumawa ng token na naka-encode sa QR ng e-receipt.
 // Ito ang isu-scan ng owner sa pickup counter para i-verify/complete ang order.
@@ -11,6 +19,17 @@ const RECEIPT_SECRET = process.env.RECEIPT_TOKEN_SECRET || 'change_this_secret_i
 function makeReceiptToken(orderId) {
   return Buffer.from(`${orderId}${RECEIPT_SECRET}`).toString('base64');
 }
+
+// Same priority rule gaya ng ginagamit sa onlineOrdering.services.js at
+// orders.service.js: kung may laman (di null, > 0) ang `daily_limit`, ITO
+// ang babasahin/babawasan (Pre-order "slots"); kung wala, sa
+// `stock_quantity` (Pick-up Today na produced stock).
+const getStockLimitField = (product) => {
+  const hasDailyLimit = product?.daily_limit !== null
+    && product?.daily_limit !== undefined
+    && Number(product.daily_limit) > 0;
+  return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
+};
 
 export const getPosProducts = async (filters = {}) => {
   try {
@@ -25,16 +44,33 @@ export const getPosProducts = async (filters = {}) => {
       reservedMap[item.product_id] = (reservedMap[item.product_id] || 0) + item.quantity;
     });
 
-    return products.map(p => ({
-      ...p,
-      available_stock: Math.max(0, (p.stock_quantity || 0) - (reservedMap[p.id] || 0))
-    }));
+    return products.map(p => {
+      const limitField = getStockLimitField(p);
+      const baseStock = Number(p[limitField]) || 0;
+      return {
+        ...p,
+        stock_basis_field: limitField,
+        available_stock: Math.max(0, baseStock - (reservedMap[p.id] || 0))
+      };
+    });
   } catch (error) {
     throw new Error(`Fetch POS Products Error: ${error.message}`);
   }
 };
 
 export const createPosOrder = async (payload) => {
+  // 0. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
+  //    ng mga bundle sa kani-kanilang component products, at ang pag-map ng
+  //    order_slip_details / selected_price_options / customer_reference_url)
+  //    BAGO gumawa ng kahit anong row sa DB — parehong pattern gaya ng
+  //    ginagamit ng Online Ordering sa createDatabaseOrder.
+  let resolvedItems;
+  try {
+    resolvedItems = await resolveOrderItems(payload.items);
+  } catch (itemsError) {
+    throw new Error(`Items Error: ${itemsError.message}`);
+  }
+
   // 1. Handle Customer Data
   const customerName = payload.customer?.name || 'Walk-in Customer';
   const customerPhone = payload.customer?.phone || '00000000000';
@@ -98,14 +134,15 @@ export const createPosOrder = async (payload) => {
   }
 
   // 3. Insert Order Items
-  const itemsToInsert = payload.items.map(item => ({
-    order_id: newOrder.id,
-    product_id: item.productId,
-    product_name: item.name,
-    quantity: item.quantity,
-    unit_price: item.unitPrice,
-    total_price: item.subtotal,
-    special_instructions: item.specialInstructions || ''
+  // Ginagamit na ang resolvedItems (galing sa resolveOrderItems) sa halip
+  // ng basta pag-map sa payload.items — dati'y nawawala ang order_slip_details,
+  // selected_price_options, customer_reference_url pati na ang bundle
+  // components (walang product_id kapag bundle dati, kaya hindi na-iinsert
+  // nang tama). Bawat resolved row ay may kumpletong product_id na, kaya
+  // gumagana rin ang stock deduction sa Step 4 sa ibaba.
+  const itemsToInsert = resolvedItems.map(item => ({
+    ...item,
+    order_id: newOrder.id
   }));
 
   try {
@@ -121,8 +158,10 @@ export const createPosOrder = async (payload) => {
       try {
         const product = await ProductModel.findById(item.product_id);
         if (product) {
-          const newStock = Math.max(0, product.stock_quantity - item.quantity);
-          await ProductModel.update(item.product_id, { stock_quantity: newStock });
+          const limitField = getStockLimitField(product);
+          const currentValue = Number(product[limitField]) || 0;
+          const newValue = Math.max(0, currentValue - item.quantity);
+          await ProductModel.update(item.product_id, { [limitField]: newValue });
         }
       } catch (err) {
         console.error(`[POS SERVICE] Error updating stock for product ${item.product_id}:`, err);

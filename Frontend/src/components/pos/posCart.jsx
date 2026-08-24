@@ -120,11 +120,34 @@ function getSlotLabel(value) {
   return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
+// ─────────────────────────────────────────────────────────────
+// Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
+// and the backend: `daily_limit` is the basis for Pre-order "slots";
+// `stock_quantity` is the basis for Pick-up Today produced stock.
+// If daily_limit is set (not null, > 0), it wins even when stock_quantity
+// is also set.
+// ─────────────────────────────────────────────────────────────
+function hasDailyLimitSet(item) {
+  return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
+}
+
+function isQuantityTracked(item) {
+  if (!item || item.type === 'bundle') return false;
+  return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
+}
+
+function getQuantityLimit(item) {
+  const basis = hasDailyLimitSet(item) ? item.daily_limit : item.stock_quantity;
+  return item.available_stock ?? basis ?? 0;
+}
+
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
 export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose }) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false); 
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [limitToast, setLimitToast] = useState(null); // { message } — auto-dismiss top toast, same style as Menu.jsx
+  const limitToastTimerRef = useRef(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
@@ -141,6 +164,40 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const isBuyNowOnly = hasBuyNow && !hasPreOrder;
 
   const prevCartLength = useRef(cart.length);
+
+  const showLimitToast = (message) => {
+    if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
+    setLimitToast({ message });
+    limitToastTimerRef.current = setTimeout(() => setLimitToast(null), 3200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
+    };
+  }, []);
+
+  // Kapag pinapataas ang quantity (delta > 0) ng isang tracked item
+  // (may daily_limit o stock_quantity), i-block bago pa lumagpas sa
+  // available limit — kasama ang ibang cart lines ng parehong product id.
+  const handleUpdateQty = (idx, delta) => {
+    const item = cart[idx];
+
+    if (delta > 0 && isQuantityTracked(item)) {
+      const currentQtyInCart = cart
+        .filter(i => i.id === item.id)
+        .reduce((sum, i) => sum + i.qty, 0);
+      const limit = getQuantityLimit(item);
+
+      if (currentQtyInCart + delta > limit) {
+        showLimitToast(`Sorry, only ${limit} of "${item.name}" ${limit === 1 ? 'is' : 'are'} available.`);
+        return;
+      }
+    }
+
+    onUpdateQty(idx, delta);
+  };
+
 
   useEffect(() => {
     if (cart.length > prevCartLength.current || cart.length === 0) {
@@ -259,14 +316,38 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const handlePlaceOrder = async () => {
     setIsProcessing(true);
 
-    const formattedItems = cart.map(item => ({
-      productId: item.id,
-      name: item.name,
-      quantity: item.qty,
-      unitPrice: item.price,
-      subtotal: item.price * item.qty,
-      specialInstructions: item.details || ''
-    }));
+    // FIX: dating ang product ID at price lang ang ipinapasa dito — nawawala
+    // ang order_slip_details / selected_price_options na kinukuha na ng
+    // PosProductModal (kaya wala talagang na-se-save sa DB kahit may
+    // sinasagot na fields ang cashier). Bundle items ay may sariling shape
+    // (`type`, `bundleId`) para ma-explode ito ng backend (resolveOrderItems)
+    // papunta sa kani-kanilang component product rows — parehong contract
+    // gaya ng ginagamit ng Online Ordering checkout.
+    // NOTE: `inspiration_image` (File object mula sa "Upload Reference
+    // Image") ay hindi pa rin dito isinasama — kailangan pang i-upload ito
+    // sa storage bucket muna (gamit ang /online-ordering upload endpoint)
+    // bago maging usable na URL. Hiwalay na TODO ito.
+    const formattedItems = cart.map(item => {
+      if (item.type === 'bundle') {
+        return {
+          type: 'bundle',
+          bundleId: item.bundleId,
+          quantity: item.qty,
+          orderSlip: item.order_slip_details || {},
+          specialInstructions: item.details || ''
+        };
+      }
+      return {
+        productId: item.id,
+        name: item.name,
+        quantity: item.qty,
+        unitPrice: item.price,
+        subtotal: item.price * item.qty,
+        orderSlip: item.order_slip_details || null,
+        selectedPriceOptions: item.selected_price_options || null,
+        specialInstructions: item.details || ''
+      };
+    });
 
     const subtotalCalc = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
     const percentageNumberVal = Number(discountPercentage) || 0;
@@ -387,6 +468,13 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   return (
     <>
+      {limitToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
+          <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+          <span className="leading-snug">{limitToast.message}</span>
+        </div>
+      )}
+
       {/* Mobile Overlay Background kapag bukas ang Cart */}
       {isCartOpen && (
         <div 
@@ -640,20 +728,36 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                       </p>
                     ))}
 
-                    {item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
-                      <p key={`slip-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
-                        <span className="font-medium">{key}:</span> {val}
-                      </p>
-                    ))}
+                    {item.type === 'bundle' && item.order_slip_details ? (
+                      // Bundle: nakagrupo per component product ID ang slip details
+                      Object.entries(item.order_slip_details).map(([prodId, answers]) => {
+                        const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
+                        return Object.entries(answers).map(([key, val]) => (
+                          <p key={`slip-${prodId}-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
+                            <span className="font-medium">{pName}</span> - {key}: {val}
+                          </p>
+                        ));
+                      })
+                    ) : (
+                      item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
+                        <p key={`slip-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
+                          <span className="font-medium">{key}:</span> {val}
+                        </p>
+                      ))
+                    )}
 
                     {item.inspiration_image && (
-                      <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Image Attached</p>
+                      <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">
+                        {item.type === 'bundle'
+                          ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
+                          : 'Image Attached'}
+                      </p>
                     )}
 
                     <div className="flex items-center gap-2 mt-2">
-                      <button onClick={() => onUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
+                      <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
                       <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
-                      <button onClick={() => onUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
+                      <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
                     </div>
                   </div>
                   <span className="font-semibold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
@@ -723,7 +827,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           </button>
         </div>
 
-        {showSummaryModal && (
+        {showSummaryModal && createPortal(
           <div className="fixed inset-0 z-[1900] flex items-center justify-center bg-black/50 px-4 py-6">
             <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] max-h-[90vh] flex flex-col overflow-hidden">
               <div className="p-4 pb-3 sm:p-5 sm:pb-4 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
@@ -791,11 +895,30 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                             </p>
                           ))}
 
-                          {item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
-                            <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                              <span className="font-medium">{label}:</span> {value}
+                          {item.type === 'bundle' && item.order_slip_details ? (
+                            Object.entries(item.order_slip_details).map(([prodId, answers]) => {
+                              const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
+                              return Object.entries(answers).map(([label, value]) => (
+                                <p key={`sum-slip-${prodId}-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                  <span className="font-medium">{pName}</span> - {label}: {value}
+                                </p>
+                              ));
+                            })
+                          ) : (
+                            item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
+                              <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                <span className="font-medium">{label}:</span> {value}
+                              </p>
+                            ))
+                          )}
+
+                          {item.inspiration_image && (
+                            <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug">
+                              {item.type === 'bundle'
+                                ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
+                                : 'Image Attached'}
                             </p>
-                          ))}
+                          )}
 
                           {item.details && (
                             <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
@@ -873,10 +996,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
-        {toastMessage && (
+        {toastMessage && createPortal(
           <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 px-4">
             <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-xl p-5 sm:p-6 w-full max-w-[320px] flex flex-col items-center text-center">
               <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
@@ -890,14 +1014,16 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                 Okay
               </button>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
-        {ereceiptData && (
+        {ereceiptData && createPortal(
           <PosEReceipt
             {...ereceiptData}
             onClose={() => setEreceiptData(null)}
-          />
+          />,
+          document.body
         )}
       </div>
     </>

@@ -33,6 +33,24 @@ const ProductModel = {
     return data;
   },
 
+  /**
+   * Kunin ang mga products na tumutugma sa listahan ng IDs — ginagamit ito
+   * ng Promo Bundles feature para makuha ang pangalan, presyo, at larawan
+   * ng bawat product na kasama sa isang bundle (para sa auto-computed
+   * pricing at sa default na "stacked" na larawan ng bundle).
+   */
+  async findByIds(ids = []) {
+    if (!ids || ids.length === 0) return [];
+
+    const { data, error } = await getSupabase()
+      .from('products')
+      .select('id, name, price, image_url, category, pricing_mode, price_matrix')
+      .in('id', ids);
+
+    if (error) throw error;
+    return data || [];
+  },
+
   async create(payload) {
     return getSupabase()
       .from('products')

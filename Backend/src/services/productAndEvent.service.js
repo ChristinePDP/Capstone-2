@@ -1,8 +1,9 @@
 import { supabase } from '../config/supabase.js'; 
 import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
+import { BundleModel } from '../model/bundle.model.js';
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
-import { AiCacheModel } from '../model/AiCache.model.js'; 
+import { AiCacheModel } from '../model/aiCache.model.js'; 
 
 // ============================================================
 // PRODUCT CRUD SERVICES
@@ -51,10 +52,7 @@ export const createDatabaseProduct = async (productData) => {
 
   try {
     const response = await ProductModel.create([productToInsert]);
-    
-    // Check if Supabase returned a constraint error
     if (response.error) throw new Error(response.error.message);
-    
     return Array.isArray(response.data) ? response.data[0] : response.data;
   } catch (productError) {
     throw new Error(`Product Error: ${productError.message}`);
@@ -93,10 +91,7 @@ export const updateDatabaseProduct = async (id, productData) => {
 
   try {
     const response = await ProductModel.update(id, productToUpdate);
-
-    // Check if Supabase returned a constraint error
     if (response.error) throw new Error(response.error.message);
-
     return response.data;
   } catch (error) {
     throw new Error(`Service Error (updateDatabaseProduct): ${error.message}`);
@@ -131,6 +126,208 @@ export const uploadImageToProductBucket = async (file) => {
     .getPublicUrl(fileName);
 
   return urlData.publicUrl;
+};
+
+// ============================================================
+// PROMO BUNDLE SERVICES
+// ============================================================
+const isBundleWithinDateRange = (bundle, today) => {
+  if (!bundle.start_month || !bundle.start_day || !bundle.end_month || !bundle.end_day) {
+    return true;
+  }
+
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+  const current = month * 100 + day;
+  const start = bundle.start_month * 100 + bundle.start_day;
+  const end = bundle.end_month * 100 + bundle.end_day;
+
+  if (start <= end) {
+    return current >= start && current <= end;
+  }
+  return current >= start || current <= end;
+};
+
+// Normalizes a value so combo matching isn't broken by type/case/whitespace
+// differences between how the option was saved (bundle_options) and how the
+// matrix combo was saved (product.price_matrix).
+const normalizeOptionValue = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().toLowerCase();
+};
+
+// Finds the matrix entry whose combo matches the selected options.
+// Tolerant of: string/number mismatches, casing, extra whitespace, and
+// combos that have MORE keys defined than the bundle actually stored
+// (only compares keys present in the matrix entry's combo).
+const findMatrixPrice = (product, options = {}) => {
+  if (!Array.isArray(product.price_matrix) || product.price_matrix.length === 0) {
+    return null;
+  }
+
+  const normalizedOptions = Object.fromEntries(
+    Object.entries(options).map(([k, v]) => [k, normalizeOptionValue(v)])
+  );
+
+  const match = product.price_matrix.find(entry =>
+    entry.combo &&
+    Object.entries(entry.combo).every(
+      ([k, v]) => normalizedOptions[k] === normalizeOptionValue(v)
+    )
+  );
+
+  if (match) return Number(match.price);
+
+  // Fallback: nothing matched exactly. Instead of silently defaulting to 0
+  // (which erases the discount % and strikethrough price on the frontend),
+  // fall back to the lowest price in the matrix and warn so the mismatch
+  // can be traced from the logs.
+  console.warn(
+    `[enrichBundleWithPricing] No price_matrix match for product "${product.name}" (id: ${product.id}). ` +
+    `Selected options: ${JSON.stringify(options)}. Available combos: ${JSON.stringify(product.price_matrix.map(e => e.combo))}. ` +
+    `Falling back to lowest matrix price.`
+  );
+  const lowest = product.price_matrix.reduce(
+    (min, entry) => Math.min(min, Number(entry.price) || Infinity),
+    Infinity
+  );
+  return Number.isFinite(lowest) ? lowest : null;
+};
+
+const enrichBundleWithPricing = async (bundle) => {
+  // Accept string OR number ids — don't silently drop numeric ids.
+  let safeIds = [];
+  if (Array.isArray(bundle.product_ids)) {
+    safeIds = bundle.product_ids
+      .filter(id => id !== null && id !== undefined && id !== '')
+      .map(id => String(id));
+  }
+
+  const products = await ProductModel.findByIds(safeIds);
+  const bundleOptions = bundle.bundle_options || {};
+
+  const originalTotal = products.reduce((sum, p) => {
+    // bundle_options keys may have been saved as either the string or
+    // number form of the product id — check both.
+    const options = bundleOptions[p.id] ?? bundleOptions[String(p.id)] ?? {};
+
+    let price = Number(p.price || 0); // Base/fixed price default
+
+    if (p.pricing_mode === 'variable') {
+      const matrixPrice = findMatrixPrice(p, options);
+      if (matrixPrice !== null) {
+        price = matrixPrice;
+      }
+    }
+
+    return sum + price;
+  }, 0);
+
+  const bundlePrice = Number(bundle.discounted_price || 0);
+
+  // Only show a discount % when the original total is actually higher
+  // than the bundle price.
+  const discountPercent = originalTotal > bundlePrice
+    ? Math.round((1 - bundlePrice / originalTotal) * 100)
+    : 0;
+
+  return {
+    ...bundle,
+    products,
+    original_total: originalTotal,
+    bundle_price: bundlePrice,
+    discount_percent: discountPercent,
+    is_within_date_range: isBundleWithinDateRange(bundle, new Date())
+  };
+};
+
+export const getAllBundles = async (filters = {}) => {
+  try {
+    const { data, error } = await BundleModel.findAll(filters);
+    if (error) throw error;
+
+    const bundlesWithPricing = await Promise.all(
+      (data || []).map(enrichBundleWithPricing)
+    );
+
+    return bundlesWithPricing;
+  } catch (error) {
+    throw new Error(`Service Error (getAllBundles): ${error.message}`);
+  }
+};
+
+export const getBundleById = async (id) => {
+  try {
+    const bundle = await BundleModel.findById(id);
+    if (!bundle) return null;
+    return enrichBundleWithPricing(bundle);
+  } catch (error) {
+    throw new Error(`Service Error (getBundleById): ${error.message}`);
+  }
+};
+
+export const createBundle = async (bundleData) => {
+  const bundleToInsert = {
+    bundle_name: bundleData.bundle_name,
+    product_ids: bundleData.product_ids || [],
+    bundle_options: bundleData.bundle_options || {},
+    discounted_price: bundleData.discounted_price || 0,
+    custom_image_url: bundleData.custom_image_url || null,
+    event_tag: bundleData.event_tag || null,
+    is_active: bundleData.is_active ?? true,
+    start_month: bundleData.start_month || null,
+    start_day: bundleData.start_day || null,
+    end_month: bundleData.end_month || null,
+    end_day: bundleData.end_day || null
+  };
+
+  try {
+    const response = await BundleModel.create(bundleToInsert);
+    if (response.error) throw new Error(response.error.message);
+
+    const savedBundle = Array.isArray(response.data) ? response.data[0] : response.data;
+    return enrichBundleWithPricing(savedBundle);
+  } catch (error) {
+    throw new Error(`Service Error (createBundle): ${error.message}`);
+  }
+};
+
+export const updateBundle = async (id, bundleData) => {
+  const bundleToUpdate = {
+    bundle_name: bundleData.bundle_name,
+    product_ids: bundleData.product_ids,
+    bundle_options: bundleData.bundle_options,
+    discounted_price: bundleData.discounted_price,
+    custom_image_url: bundleData.custom_image_url,
+    event_tag: bundleData.event_tag,
+    is_active: bundleData.is_active,
+    start_month: bundleData.start_month,
+    start_day: bundleData.start_day,
+    end_month: bundleData.end_month,
+    end_day: bundleData.end_day
+  };
+
+  Object.keys(bundleToUpdate).forEach((key) => {
+    if (bundleToUpdate[key] === undefined) delete bundleToUpdate[key];
+  });
+
+  try {
+    const response = await BundleModel.update(id, bundleToUpdate);
+    if (response.error) throw new Error(response.error.message);
+    return enrichBundleWithPricing(response.data);
+  } catch (error) {
+    throw new Error(`Service Error (updateBundle): ${error.message}`);
+  }
+};
+
+export const deleteBundle = async (id) => {
+  try {
+    const response = await BundleModel.delete(id);
+    if (response.error) throw new Error(response.error.message);
+    return response.data;
+  } catch (error) {
+    throw new Error(`Service Error (deleteBundle): ${error.message}`);
+  }
 };
 
 // ============================================================
