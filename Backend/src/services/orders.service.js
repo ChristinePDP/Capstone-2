@@ -8,6 +8,20 @@ import { ProductModel } from '../model/product.model.js';       // IN-IMPORT NAT
 // kaya dito rin natin itinugma.
 const ALLOWED_STATUSES = ['Confirmed', 'Ready', 'Completed', 'Cancelled'];
 
+// Same priority rule gaya ng ginagamit sa onlineOrdering.services.js
+// (getStockLimitField) — kailangan itong i-tugma dito dahil ITO ang
+// dinadaanan kapag ang order status ay in-i-update mula sa ADMIN "All
+// Orders" page, hiwalay sa customer-facing na completeOrderAndDeductStock.
+// Kung may laman (di null, > 0) ang `daily_limit`, ITO ang babawasan
+// (Pre-order "slots"); kung wala, sa `stock_quantity` babawas (Pick-up
+// Today na produced stock).
+const getStockLimitField = (product) => {
+  const hasDailyLimit = product?.daily_limit !== null
+    && product?.daily_limit !== undefined
+    && Number(product.daily_limit) > 0;
+  return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
+};
+
 const OrdersService = {
   /**
    * Kunin lahat ng orders KASAMA ang customer info at order items —
@@ -68,9 +82,11 @@ const OrdersService = {
             const product = await ProductModel.findById(item.product_id);
             
             if (product) {
-              const newStock = Math.max(0, product.stock_quantity - item.quantity);
-              await ProductModel.update(item.product_id, { stock_quantity: newStock });
-              console.log(`[ADMIN SERVICE] Deducted ${item.quantity} from ${product.name}. New stock: ${newStock}`);
+              const limitField = getStockLimitField(product);
+              const currentValue = Number(product[limitField]) || 0;
+              const newValue = Math.max(0, currentValue - item.quantity);
+              await ProductModel.update(item.product_id, { [limitField]: newValue });
+              console.log(`[ADMIN SERVICE] Deducted ${item.quantity} from ${product.name}'s ${limitField}. New value: ${newValue}`);
             }
           }
         }

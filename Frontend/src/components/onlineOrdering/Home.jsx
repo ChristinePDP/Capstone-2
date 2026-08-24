@@ -1,16 +1,14 @@
 // src/components/onlineOrdering/Home.jsx
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ChevronLeft, ChevronRight, Sparkles, ArrowRight, Star
+import {
+  ChevronLeft, ChevronRight, ArrowRight, ShoppingBasket, Tag, Package, Plus
 } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 import EventAdsModal from '../onlineOrdering/eventAdsModal';
 
 const HERO_FILE = 'heroimg.png';
-const CELEBRATION_FILE = 'images.png';
-const PASTRIES_FILE = 'imagee.png';
 
 const STEPS = [
   { n: '01', title: 'Browse the menu', copy: 'Cakes, pastries and celebration packages, all in one place.' },
@@ -22,19 +20,6 @@ const STEPS = [
 const GALLERY_FILES = [
   'image1.png', 'image2.png', 'image3.png', 'image4.png', 'image5.png',
   'image6.png', 'image7.png', 'image8.png', 'image9.png', 'image10.png',
-];
-
-const FEATURE_META = [
-  {
-    title: 'Celebration Packages',
-    copy: 'Themed cakes, cupcakes and balloons in one hassle-free set.',
-    file: CELEBRATION_FILE,
-  },
-  {
-    title: 'Filipino Common Pastries',
-    copy: 'Classic crinkles, brownies and premium ensaymada, baked daily.',
-    file: PASTRIES_FILE,
-  },
 ];
 
 function CreationsCarousel({ items, className = '' }) {
@@ -82,7 +67,7 @@ function CreationsCarousel({ items, className = '' }) {
               <img
                 src={src}
                 alt={`Past order ${i + 1}`}
-                className="w-full h-full object-cover saturate-[0.85] contrast-[0.96] hover:saturate-100 transition-all duration-500 ease-out"
+                className="w-full h-full object-cover transition-all duration-500 ease-out"
               />
             </div>
           </div>
@@ -101,23 +86,223 @@ function CreationsCarousel({ items, className = '' }) {
   );
 }
 
-// --- Ticket-style carousel for the AI DSS picks, with visible left/right arrow controls ---
-function TicketCarousel({ products, theme, navigate }) {
+function BundleTicketImage({ products = [], customImageUrl }) {
+  if (customImageUrl) {
+    return (
+      <img
+        src={customImageUrl}
+        alt="Bundle"
+        className="w-full h-full object-cover"
+        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+      />
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <Package size={28} className="text-[#DED4CC]" />
+      </div>
+    );
+  }
+
+  const MAX_IMAGE_SLOTS = 3;
+  const showCountTile = products.length > MAX_IMAGE_SLOTS;
+  const imageSlots = showCountTile ? products.slice(0, MAX_IMAGE_SLOTS - 1) : products;
+  const extraCount = products.length - imageSlots.length;
+  const segmentCount = imageSlots.length + (showCountTile ? 1 : 0);
+
+  return (
+    <div className="relative w-full h-full flex">
+      {imageSlots.map((p, idx) => {
+        const img = p.image_url || p.image;
+        return (
+          <div key={p.id ?? idx} className="flex-1 h-full relative overflow-hidden">
+            {img ? (
+              <img
+                src={img}
+                alt={p.name}
+                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-in-out"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            ) : (
+              <div className="w-full h-full bg-[#F5EFEB] flex items-center justify-center">
+                <Package size={22} className="text-[#DED4CC]" />
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {showCountTile && (
+        <div className="flex-1 h-full bg-[#3B1F0A] flex flex-col items-center justify-center text-white">
+          <span className="text-lg font-extrabold leading-none">+{extraCount}</span>
+          <span className="text-[9px] font-bold uppercase tracking-wide opacity-80">more</span>
+        </div>
+      )}
+
+      {Array.from({ length: segmentCount - 1 }).map((_, i) => (
+        <div
+          key={i}
+          className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center"
+          style={{ left: `${(100 / segmentCount) * (i + 1)}%` }}
+        >
+          <Plus size={13} className="text-[#3B1F0A]" strokeWidth={3} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BundleTicketCard({ bundle, navigate, idx = 0 }) {
+  if (bundle.isLoading) {
+    return (
+      <div className="snap-start shrink-0 w-[220px] sm:w-[280px] [contain:layout]">
+        <div className="bg-white rounded-2xl flex flex-col relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)]">
+          <div className="p-3 pb-0 animate-pulse">
+            <div className="aspect-[4/3] w-full rounded-[14px] bg-[#E8E2DD]"></div>
+          </div>
+          <div className="relative w-full h-0 my-3">
+            <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_-2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+            <div className="absolute left-3 right-3 top-0 border-t-2 border-dotted border-[#DED4CC]"></div>
+            <div className="absolute -right-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+          </div>
+          <div className="px-5 pb-6 pt-2 flex flex-col items-center text-center flex-1 animate-pulse">
+            <div className="h-2.5 bg-[#E8E2DD] rounded w-1/2 mb-2 mt-1"></div>
+            <div className="h-4 bg-[#E8E2DD] rounded w-3/4 mb-4 mt-2"></div>
+            <div className="mt-auto flex flex-col items-center w-full justify-end min-h-[36px]">
+              <div className="h-8 bg-[#E8E2DD] rounded-full w-24"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isDummy = bundle.isDummy;
+  const products = bundle.products || [];
+  const originalTotal = Number(bundle.original_total || 0);
+  const bundlePrice = Number(bundle.bundle_price || 0);
+  const discountPercent = Number(bundle.discount_percent || 0);
+
+  const productNamesList = products.map(p => p.name || 'Item').join(' + ');
+  const subTitle = isDummy 
+    ? bundle.event_tag 
+    : (bundle.event_tag || productNamesList || 'Promo Bundle');
+
+  return (
+    <div className="snap-start shrink-0 w-[220px] sm:w-[280px] [contain:layout]">
+      <div
+        onClick={() => !isDummy && navigate('/onlineOrdering/menu')}
+        className={`bg-white rounded-2xl flex flex-col group relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] transition-all duration-300 ease-out hover:-translate-y-2 hover:shadow-xl
+          ${isDummy ? 'cursor-default opacity-90' : 'cursor-pointer'}
+        `}
+      >
+        {!isDummy && (
+          <div className="absolute -top-3 -right-3 z-20 w-9 h-9 rounded-full bg-[#3B1F0A] border-2 border-white shadow-md flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform duration-300">
+            <ShoppingBasket size={14} className="text-white scale-110" />
+          </div>
+        )}
+
+        <div className="p-3 pb-0">
+          <div className="aspect-[4/3] w-full rounded-[14px] overflow-hidden relative bg-[#F5EFEB]">
+            <BundleTicketImage products={products} customImageUrl={bundle.custom_image_url} />
+
+            <div className="absolute top-2 left-2 bg-[#3B1F0A] text-white px-2.5 py-1 rounded-md shadow-md flex items-center gap-1.5">
+              <ShoppingBasket size={10} />
+              <span className="text-[10px] font-bold uppercase tracking-widest">
+                {isDummy ? 'Wait for it' : 'Bundle'}
+              </span>
+            </div>
+
+            {!isDummy && discountPercent > 0 && (
+              <div className="absolute top-2 right-2 bg-[#C0392B] text-white px-2 py-1 rounded-md shadow-md flex items-center gap-1">
+                <Tag size={9} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">-{discountPercent}%</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="relative w-full h-0 my-3">
+          <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_-2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+          <div className="absolute left-3 right-3 top-0 border-t-2 border-dotted border-[#DED4CC]"></div>
+          <div className="absolute -right-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
+        </div>
+
+        <div className="px-5 pb-6 pt-2 flex flex-col items-center text-center flex-1">
+          <span 
+            className="font-mono text-[10px] uppercase tracking-[0.15em] text-[#8A7264] mb-2 w-full leading-tight"
+            title={subTitle}
+          >
+            {subTitle}
+          </span>
+          <h3 className={`font-bold text-base sm:text-lg text-[#3B1F0A] leading-snug line-clamp-2 mb-4 w-full transition-colors ${!isDummy && 'group-hover:text-black'}`}>
+            {bundle.bundle_name}
+          </h3>
+          <div className="mt-auto flex flex-col items-center w-full justify-end min-h-[36px]">
+            {!isDummy ? (
+              <>
+                {originalTotal > bundlePrice && (
+                  <p className="text-[11px] text-[#B7A99F] line-through mb-0.5">
+                    ₱{originalTotal.toLocaleString()}
+                  </p>
+                )}
+                <p className="text-lg sm:text-xl font-black px-4 py-1.5 rounded-full bg-[#F5EFEB] text-[#3B1F0A]">
+                  ₱{Number(bundlePrice).toLocaleString()}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] font-bold uppercase tracking-widest text-[#B7A99F]">
+                Coming Soon
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BundleCarousel({ bundles, isLoading, navigate }) {
   const trackRef = useRef(null);
   const [atStart, setAtStart] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
+  const [hasOverflow, setHasOverflow] = useState(false);
+
+  let displayBundles = [];
+  if (isLoading) {
+    displayBundles = [
+      { id: 'load-1', isLoading: true },
+      { id: 'load-2', isLoading: true }
+    ];
+  } else if (bundles.length === 0) {
+    displayBundles = [
+      { id: 'dummy-1', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] },
+      { id: 'dummy-2', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] }
+    ];
+  } else if (bundles.length === 1) {
+    displayBundles = [
+      ...bundles,
+      { id: 'dummy-card', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] }
+    ];
+  } else {
+    displayBundles = bundles;
+  }
 
   const updateEdges = () => {
     const el = trackRef.current;
     if (!el) return;
     setAtStart(el.scrollLeft <= 4);
     setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
+    setHasOverflow(el.scrollWidth > el.clientWidth + 4);
   };
 
   useEffect(() => {
     updateEdges();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products]);
+    window.addEventListener('resize', updateEdges);
+    return () => window.removeEventListener('resize', updateEdges);
+  }, [displayBundles]);
 
   const scrollByAmount = (dir) => {
     const el = trackRef.current;
@@ -127,12 +312,11 @@ function TicketCarousel({ products, theme, navigate }) {
 
   return (
     <div className="relative w-full">
-      {/* Desktop / tablet arrow controls */}
       <button
         onClick={() => scrollByAmount(-1)}
         disabled={atStart}
-        aria-label="Previous picks"
-        className={`hidden sm:flex absolute -left-3 lg:-left-5 top-[38%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full ${theme.badgeBg} text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300`}
+        aria-label="Previous bundles"
+        className="hidden sm:flex absolute -left-3 lg:-left-5 top-[36%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300"
       >
         <ChevronLeft size={20} />
       </button>
@@ -140,103 +324,43 @@ function TicketCarousel({ products, theme, navigate }) {
       <div
         ref={trackRef}
         onScroll={updateEdges}
-        className="no-scrollbar flex gap-5 sm:gap-6 overflow-x-auto overscroll-x-contain snap-x snap-proximity scroll-smooth pb-8 pt-6 px-1"
+        className={`no-scrollbar flex gap-5 sm:gap-6 overflow-x-auto overscroll-x-contain snap-x snap-proximity scroll-smooth pb-6 pt-6 px-1 ${hasOverflow ? '' : 'justify-center'}`}
       >
-        {products.map((p, idx) => {
-          const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
-          const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
-
-          const tilt = idx % 2 === 0 ? '-rotate-1' : 'rotate-1';
-
-          return (
-            <div
-              key={p.id}
-              className="snap-start shrink-0 w-[180px] sm:w-[220px] [contain:layout]"
-            >
-              <div
-                onClick={() => navigate('/onlineOrdering/menu')}
-                className={`bg-white rounded-2xl flex flex-col group cursor-pointer relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] ${tilt} transform-gpu hover:rotate-0 hover:-translate-y-2 hover:shadow-xl transition-all duration-300 ease-out`}
-              >
-                {/* Corner sticker seal */}
-                <div className={`absolute -top-3 -right-3 z-20 w-9 h-9 rounded-full ${theme.badgeBg} border-2 border-white shadow-md flex items-center justify-center rotate-12 group-hover:rotate-0 transition-transform duration-300`}>
-                  <span className="text-white scale-110">{theme.smallIcon}</span>
-                </div>
-
-                {/* Top Image Section */}
-                <div className="p-2.5 pb-0">
-                  <div className="aspect-[4/3] w-full rounded-[14px] overflow-hidden relative bg-[#F5EFEB]">
-                    <img
-                      src={p.image_url}
-                      alt={p.name}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-in-out"
-                    />
-                    {/* Dynamic Tag */}
-                    <div className={`absolute top-2 left-2 ${theme.badgeBg} text-white px-2.5 py-1 rounded-md shadow-md flex items-center gap-1.5`}>
-                      {theme.smallIcon}
-                      <span className="text-[9px] font-bold uppercase tracking-widest">{theme.badge}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Ticket stub tear line */}
-                <div className="relative w-full h-0 my-3">
-                  <div className="absolute -left-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_-2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
-                  <div className="absolute left-3 right-3 top-0 border-t-2 border-dotted border-[#DED4CC]"></div>
-                  <div className="absolute -right-[13px] top-1/2 -translate-y-1/2 w-[26px] h-[26px] rounded-full shadow-[inset_2px_0_4px_rgba(0,0,0,0.10)] bg-[#FCFAF9]"></div>
-                </div>
-
-                {/* Bottom Details Section */}
-                <div className="px-5 pb-5 pt-2 flex flex-col items-center text-center flex-1">
-                  <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-[#8A7264] mb-2 w-full truncate">
-                    {p.category}
-                  </span>
-                  <h3 className="font-bold text-sm sm:text-base text-[#3B1F0A] leading-snug line-clamp-2 mb-3 w-full group-hover:text-black transition-colors">
-                    {p.name}
-                  </h3>
-                  <div className="mt-auto flex flex-col items-center w-full">
-                    <p className="text-[10px] text-[#8A7264] font-semibold uppercase tracking-wider mb-1">
-                      {isVariable ? 'Starts at' : 'Price'}
-                    </p>
-                    <p className="text-base sm:text-lg font-black px-3 py-1 rounded-full bg-[#F5EFEB] text-[#3B1F0A]">
-                      ₱{Number(minPrice).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {displayBundles.map((b, idx) => (
+          <BundleTicketCard key={b.id} bundle={b} navigate={navigate} idx={idx} />
+        ))}
       </div>
 
       <button
         onClick={() => scrollByAmount(1)}
         disabled={atEnd}
-        aria-label="Next picks"
-        className={`hidden sm:flex absolute -right-3 lg:-right-5 top-[38%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full ${theme.badgeBg} text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300`}
+        aria-label="Next bundles"
+        className="hidden sm:flex absolute -right-3 lg:-right-5 top-[36%] -translate-y-1/2 z-30 w-10 h-10 lg:w-12 lg:h-12 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-xl border-2 border-white/70 hover:scale-110 disabled:opacity-0 disabled:pointer-events-none transition-all duration-300"
       >
         <ChevronRight size={20} />
       </button>
 
-      {/* Mobile arrow controls */}
-      <div className="flex sm:hidden justify-center items-center gap-4 -mt-2">
-        <button
-          onClick={() => scrollByAmount(-1)}
-          disabled={atStart}
-          aria-label="Previous picks"
-          className={`w-9 h-9 rounded-full ${theme.badgeBg} text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all`}
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <span className={`font-mono text-[9px] uppercase tracking-[0.2em] ${theme.textColor}`}>Swipe for more</span>
-        <button
-          onClick={() => scrollByAmount(1)}
-          disabled={atEnd}
-          aria-label="Next picks"
-          className={`w-9 h-9 rounded-full ${theme.badgeBg} text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all`}
-        >
-          <ChevronRight size={16} />
-        </button>
-      </div>
+      {hasOverflow && (
+        <div className="flex sm:hidden justify-center items-center gap-4 mt-2">
+          <button
+            onClick={() => scrollByAmount(-1)}
+            disabled={atStart}
+            aria-label="Previous bundles"
+            className="w-9 h-9 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#8A7264]">Swipe for more</span>
+          <button
+            onClick={() => scrollByAmount(1)}
+            disabled={atEnd}
+            aria-label="Next bundles"
+            className="w-9 h-9 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -245,19 +369,8 @@ export default function Home() {
   const navigate = useNavigate();
   const [storageUrl, setStorageUrl] = useState(null);
   const [configError, setConfigError] = useState(false);
-  
-  // New unified state for the cached JSON payload
-  const [adData, setAdData] = useState(null);
-
-  const bgParticles = useMemo(
-    () =>
-      [...Array(6)].map(() => ({
-        left: Math.random() * 100,
-        delay: Math.random() * 10,
-        duration: 12 + Math.random() * 10,
-      })),
-    []
-  );
+  const [bundles, setBundles] = useState([]);
+  const [isLoadingBundles, setIsLoadingBundles] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -277,30 +390,26 @@ export default function Home() {
         if (!cancelled) setConfigError(true);
       });
 
-    // Fetch AI Ads directly from the cache endpoint
-    // NOTE: nag-match ito ngayon sa parehong base path na ginagamit ng
-    // eventAdsModal.jsx (/online-ordering/products/...). Kung sa app.js mo
-    // ay ibang mount path ang productManagement.routes.js (hal.
-    // '/product-management' sa halip na dito), i-update ang parehong
-    // fetch na ito.
-    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/homepage-ads`)
+    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
       .then(res => res.json())
       .then(data => {
         if (cancelled) return;
-        if (data.success && data.data) {
-          setAdData(data.data);
+        if (data.success && Array.isArray(data.data)) {
+          setBundles(data.data);
         }
+        setIsLoadingBundles(false);
       })
-      .catch(err => console.error('Failed to load homepage ads:', err));
+      .catch(err => {
+        console.error('Failed to load promo bundles:', err);
+        if (!cancelled) setIsLoadingBundles(false);
+      });
 
     return () => { cancelled = true; };
   }, []);
 
   const imgUrl = (file) => (storageUrl ? `${storageUrl}/${file}` : null);
-
   const heroImg = imgUrl(HERO_FILE);
   const GALLERY = GALLERY_FILES.map(imgUrl);
-  const FEATURES = FEATURE_META.map(f => ({ ...f, image: imgUrl(f.file) }));
 
   if (!storageUrl && !configError) {
     return (
@@ -310,93 +419,20 @@ export default function Home() {
     );
   }
 
-  const floatStyle = `
-    @keyframes floatUp {
-      0% { transform: translateY(100vh) rotate(0deg) scale(0.8); opacity: 0; }
-      20% { opacity: 0.6; }
-      80% { opacity: 0.6; }
-      100% { transform: translateY(-20vh) rotate(360deg) scale(1.2); opacity: 0; }
-    }
-    .animate-float-bg {
-      animation: floatUp 15s linear infinite;
-    }
+  const noScrollbarStyle = `
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   `;
 
-  // Merge JSON AI theme with necessary frontend components like standard icons
-  const activeTheme = adData ? {
-    ...adData.theme,
-    icon: <Sparkles size={18} className="opacity-80" />,
-    smallIcon: <Star size={8} className="fill-white" />,
-    particle: <Sparkles size={24} className="opacity-50" />
-  } : null;
-
   return (
     <div className="min-h-screen bg-[#FCFAF9] text-[#5A453C] font-sans">
-      <style>{floatStyle}</style>
+      <style>{noScrollbarStyle}</style>
       <EventAdsModal />
       <Header page="home" />
+      
       <main>
-        
-        {/* HIGH-END DYNAMIC AI DSS SECTION */}
-        {activeTheme && adData.products && adData.products.length > 0 && (
-          <section className={`w-full ${activeTheme.bgGradient} py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] transition-colors duration-700`}>
-            
-            <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-30 mix-blend-overlay">
-              {bgParticles.map((p, i) => (
-                <div 
-                  key={i} 
-                  className={`absolute bottom-0 animate-float-bg ${activeTheme.textColor}`}
-                  style={{ 
-                    left: `${p.left}%`, 
-                    animationDelay: `${p.delay}s`,
-                    animationDuration: `${p.duration}s` 
-                  }}
-                >
-                  {activeTheme.particle}
-                </div>
-              ))}
-            </div>
-
-            <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center lg:items-stretch gap-8 lg:gap-12">
-              
-              <div className="w-full lg:w-[320px] shrink-0 flex flex-col justify-center text-center lg:text-left">
-                <div className="inline-flex items-center justify-center lg:justify-start gap-2 mb-4">
-                  <div className={`p-2 rounded-full bg-white/50 backdrop-blur-sm shadow-sm border border-white/40 ${activeTheme.textColor}`}>
-                     {activeTheme.icon}
-                  </div>
-                  <span className={`font-mono text-[11px] uppercase tracking-[0.25em] font-bold ${activeTheme.textColor}`}>
-                    {activeTheme.badge}
-                  </span>
-                </div>
-                <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif text-[#3B1F0A] leading-[1.15] mb-4 drop-shadow-sm transition-all duration-500">
-                  {activeTheme.title}
-                </h2>
-                <p className="text-[#5A453C] text-sm sm:text-base leading-relaxed mb-6 max-w-md mx-auto lg:mx-0 opacity-90">
-                  {activeTheme.subtitle}
-                </p>
-                <button 
-                  onClick={() => navigate('/onlineOrdering/menu')}
-                  className={`inline-flex items-center justify-center lg:justify-start gap-2 ${activeTheme.textColor} font-bold text-xs hover:opacity-70 transition-opacity uppercase tracking-widest group`}
-                >
-                  View full menu 
-                  <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
-                    <ArrowRight size={14} />
-                  </span>
-                </button>
-              </div>
-
-              <div className="flex-1 w-full min-w-0">
-                <TicketCarousel products={adData.products} theme={activeTheme} navigate={navigate} />
-              </div>
-
-            </div>
-          </section>
-        )}
-
-        {/* Hero Section */}
-        <section className="w-full bg-[#E8E2DD] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
+        {/* 1. Hero Section */}
+        <section className="w-full bg-[#FCFAF9] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
           <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:translate-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-8 sm:gap-12 lg:gap-16 items-center">
               <div className="w-full mt-2 lg:mt-0">
@@ -437,13 +473,53 @@ export default function Home() {
           </div>
         </section>
 
-        {/* How to order */}
+        {/* 2. Promo Bundles Section */}
+        <section className="w-full bg-[#F5EFEB] py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center">
+          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
+
+            <div className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col justify-center text-center lg:text-left">
+              <div className="inline-flex items-center justify-center lg:justify-start gap-2 mb-4 lg:mb-6">
+                <div className="p-2 rounded-full bg-white/50 backdrop-blur-sm shadow-sm border border-white/40 text-[#3B1F0A]">
+                  <ShoppingBasket size={18} className="opacity-80" />
+                </div>
+                <span className="font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.3em] font-bold text-[#3B1F0A]">
+                  Promo Bundles
+                </span>
+              </div>
+              
+              <h2 className="text-[32px] leading-[1.1] sm:text-5xl lg:text-6xl xl:text-[68px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight drop-shadow-sm">
+                Bundle up & Save.
+              </h2>
+              
+              <p className="text-sm sm:text-lg lg:text-xl text-[#796860] mb-6 sm:mb-8 lg:mb-10 leading-relaxed max-w-lg mx-auto lg:mx-0 font-light">
+                Mix and match our favorites — save more when you order them together.
+              </p>
+              
+              <button
+                onClick={() => navigate('/onlineOrdering/menu')}
+                className="inline-flex items-center justify-center lg:justify-start gap-2 text-[#3B1F0A] font-bold text-xs sm:text-sm hover:opacity-70 transition-opacity uppercase tracking-widest group"
+              >
+                View full menu
+                <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
+                  <ArrowRight size={14} />
+                </span>
+              </button>
+            </div>
+
+            <div className="flex-1 w-full min-w-0">
+              <BundleCarousel bundles={bundles} isLoading={isLoadingBundles} navigate={navigate} />
+            </div>
+
+          </div>
+        </section>
+
+        {/* 3. How to order */}
         <section className="w-full bg-[#FCFAF9] min-h-[calc(100svh-76px)] lg:h-[calc(100vh-76px)] flex flex-col justify-center py-10 sm:py-16">
           <div className="max-w-[1200px] mx-auto px-5 sm:px-8 w-full">
             <div className="text-center mb-10 sm:mb-16 lg:mb-20">
               <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif text-[#3B1F0A]">How to Order</h2>
             </div>
-            
+
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-10 sm:gap-x-8 sm:gap-y-12 lg:gap-12">
               {STEPS.map((step, idx) => (
                 <div key={step.n} className="flex flex-col items-center text-center">
@@ -462,7 +538,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Some Past Creations */}
+        {/* 4. Some Past Creations */}
         <section className="w-full bg-[#F5EFEB] min-h-[420px] sm:min-h-[600px] lg:min-h-0 lg:h-[calc(100vh-76px)] overflow-hidden flex items-center">
           <div className="max-w-[1300px] w-full mx-auto px-2 sm:px-8 py-10 sm:py-16 lg:py-8 h-full flex flex-col justify-center">
             <div className="text-center mb-6 sm:mb-8 lg:mb-6 shrink-0 px-4 sm:px-0">
@@ -478,42 +554,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Custom orders + features */}
-        <section className="w-full bg-[#FCFAF9] min-h-[550px] sm:min-h-[600px] lg:min-h-0 lg:h-[calc(100vh-76px)] overflow-hidden flex items-center">
-          <div className="max-w-[1300px] w-full mx-auto px-5 sm:px-8 py-10 sm:py-16 lg:py-8 h-full flex flex-col justify-center">
-            <div className="text-center mb-8 sm:mb-10 lg:mb-8 shrink-0">
-              <p className="text-sm sm:text-lg text-[#5A453C] mb-3 sm:mb-4">
-                Want something customized for your special day?
-              </p>
-              <button
-                onClick={() => navigate('/onlineOrdering/menu')}
-                className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.2em] text-[#3B1F0A] border-b border-[#3B1F0A] pb-1 hover:text-[#8A7264] hover:border-[#8A7264] transition-colors"
-              >
-                Start Your Order Here
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8 h-[480px] sm:h-auto sm:aspect-[16/9] lg:aspect-auto lg:flex-1 lg:min-h-0">
-              {FEATURES.map((f) => (
-                <div
-                  key={f.title}
-                  className="relative h-full w-full rounded-xl sm:rounded-2xl overflow-hidden group"
-                >
-                  <img
-                    src={f.image}
-                    alt={f.title}
-                    className="w-full h-full object-cover saturate-[0.9] group-hover:saturate-100 group-hover:scale-[1.03] transition-all duration-500 ease-out"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                  <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 lg:p-8">
-                    <h3 className="font-serif text-lg sm:text-xl lg:text-2xl text-white mb-1.5 sm:mb-2">{f.title}</h3>
-                    <p className="text-white/80 text-xs sm:text-sm lg:text-base max-w-[95%] leading-relaxed">{f.copy}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
       </main>
       <Footer />
     </div>

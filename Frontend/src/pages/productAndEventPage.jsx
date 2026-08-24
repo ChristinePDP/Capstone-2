@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 // Ayusin mo na lang ang path (e.g., '../components/...') depende sa folder structure mo.
 import ProductManagementPage from '../components/productAndEvent/productManagement';
 import EventManager from '../components/productAndEvent/EventManager';
+import PromoBundles from '../components/productAndEvent/PromoBundles';
 
 export default function ProductAndEventPage() {
   const { pathname } = useLocation();
@@ -11,10 +12,19 @@ export default function ProductAndEventPage() {
 
   // Ang route na talagang naka-register sa App.jsx ay "/productAndEvent"
   // (may "/*" wildcard para pumasok din ang sub-path). Default sa "products"
-  // ang base path mismo, at "/productAndEvent/events" naman ang Events tab.
-  const activeTab = pathname.endsWith('/events') ? 'events' : 'products';
+  // ang base path mismo, "/productAndEvent/events" ang Events tab, at
+  // "/productAndEvent/bundles" naman ang bagong Promo Bundles tab.
+  const activeTab = pathname.endsWith('/events')
+    ? 'events'
+    : pathname.endsWith('/bundles')
+      ? 'bundles'
+      : 'products';
 
-  const goToTab = (tab) => navigate(tab === 'events' ? '/productAndEvent/events' : '/productAndEvent');
+  const goToTab = (tab) => {
+    if (tab === 'events') navigate('/productAndEvent/events');
+    else if (tab === 'bundles') navigate('/productAndEvent/bundles');
+    else navigate('/productAndEvent');
+  };
 
   return (
     <div className="space-y-6">
@@ -47,6 +57,16 @@ export default function ProductAndEventPage() {
           >
             Event Manager
           </button>
+          <button
+            onClick={() => goToTab('bundles')}
+            className={`px-4 sm:px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+              activeTab === 'bundles'
+                ? 'bg-white text-brand-900 shadow-sm'
+                : 'text-brand-500 hover:text-brand-800'
+            }`}
+          >
+            Promo Bundles
+          </button>
         </div>
       </div>
 
@@ -54,6 +74,7 @@ export default function ProductAndEventPage() {
       <div className="pt-2">
         {activeTab === 'products' && <ProductManagementPage />}
         {activeTab === 'events' && <EventManager />}
+        {activeTab === 'bundles' && <PromoBundles />}
       </div>
 
     </div>

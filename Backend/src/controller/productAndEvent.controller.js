@@ -10,7 +10,12 @@ import {
   updateEvent,
   deleteEvent,
   generateHomepageAds,
-  generateEventAds
+  generateEventAds,
+  getAllBundles,
+  getBundleById,
+  createBundle,
+  updateBundle,
+  deleteBundle
 } from '../services/productAndEvent.service.js';
 
 import { AiCacheModel } from '../model/AiCache.model.js';
@@ -119,6 +124,136 @@ export const uploadProductImage = async (req, res) => {
   } catch (error) {
     console.error('Product Image Upload Error:', error);
     res.status(500).json({ success: false, message: 'Failed to upload product image' });
+  }
+};
+
+// ============================================================
+// PROMO BUNDLES CRUD
+// ============================================================
+
+export const getBundles = async (req, res) => {
+  try {
+    const bundles = await getAllBundles(req.query);
+    res.status(200).json({
+      success: true,
+      message: 'Bundles fetched successfully',
+      data: bundles
+    });
+  } catch (error) {
+    console.error('Fetch Bundles Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch bundles.',
+      error: error.message
+    });
+  }
+};
+
+export const getBundle = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const bundle = await getBundleById(id);
+
+    if (!bundle) {
+      return res.status(404).json({ success: false, message: 'Bundle not found.' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Bundle fetched successfully',
+      data: bundle
+    });
+  } catch (error) {
+    console.error('Fetch Bundle Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch bundle.',
+      error: error.message
+    });
+  }
+};
+
+export const addBundle = async (req, res) => {
+  try {
+    const bundleData = req.body;
+
+    if (!bundleData.bundle_name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bundle name is required.'
+      });
+    }
+
+    if (!Array.isArray(bundleData.product_ids) || bundleData.product_ids.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pumili ng hindi bababa sa 2 products para sa isang bundle.'
+      });
+    }
+
+    const savedBundle = await createBundle(bundleData);
+
+    res.status(201).json({
+      success: true,
+      message: 'Bundle added successfully',
+      data: savedBundle
+    });
+  } catch (error) {
+    console.error('Bundle Creation Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add bundle.',
+      error: error.message
+    });
+  }
+};
+
+export const editBundle = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const bundleData = req.body;
+
+    if (bundleData.product_ids && bundleData.product_ids.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pumili ng hindi bababa sa 2 products para sa isang bundle.'
+      });
+    }
+
+    const updatedBundle = await updateBundle(id, bundleData);
+
+    res.status(200).json({
+      success: true,
+      message: 'Bundle updated successfully',
+      data: updatedBundle
+    });
+  } catch (error) {
+    console.error('Bundle Update Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update bundle.',
+      error: error.message
+    });
+  }
+};
+
+export const removeBundle = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedBundle = await deleteBundle(id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Bundle deleted successfully',
+      data: deletedBundle
+    });
+  } catch (error) {
+    console.error('Bundle Delete Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete bundle.',
+      error: error.message
+    });
   }
 };
 

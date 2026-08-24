@@ -14,7 +14,12 @@ import {
   getHomepageAds,
   getEventAds,
   regenerateHomepageAds,
-  regenerateEventAds
+  regenerateEventAds,
+  getBundles,
+  getBundle,
+  addBundle,
+  editBundle,
+  removeBundle
 } from '../controller/productAndEvent.controller.js';
 
 const router = express.Router();
@@ -29,6 +34,15 @@ router.post('/add', addProduct);
 router.put('/:id', editProduct);
 router.delete('/:id', removeProduct);
 router.post('/upload-image', upload.single('image'), uploadProductImage);
+
+// ============================================================
+// PROMO BUNDLES CRUD
+// ============================================================
+router.get('/bundles', getBundles);
+router.get('/bundles/:id', getBundle);
+router.post('/bundles', addBundle);
+router.put('/bundles/:id', editBundle);
+router.delete('/bundles/:id', removeBundle);
 
 // ============================================================
 // EVENTS CRUD (Dating Occasions)
