@@ -163,9 +163,9 @@ export function Pagination({ page, total, perPage, count, onChange }) {
   const start = (page - 1) * perPage + 1;
   const end = Math.min(page * perPage, count);
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-brand-100">
+    <div className="flex flex-col gap-2 px-4 py-3 border-t border-brand-100 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-xs text-brand-400">Showing {start}–{end} of {count} {total}</span>
-      <div className="flex gap-1">
+      <div className="flex gap-1 overflow-x-auto">
         <button disabled={page === 1} onClick={() => onChange(page - 1)} className="w-8 h-8 rounded-lg border border-brand-200 flex items-center justify-center text-brand-400 hover:border-brand-400 disabled:opacity-30 disabled:cursor-not-allowed text-sm">‹</button>
         {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
           <button key={p} onClick={() => onChange(p)} className={`w-8 h-8 rounded-lg border text-sm font-semibold transition-all ${p === page ? 'bg-brand-600 border-brand-600 text-white' : 'border-brand-200 text-brand-500 hover:border-brand-400'}`}>{p}</button>
