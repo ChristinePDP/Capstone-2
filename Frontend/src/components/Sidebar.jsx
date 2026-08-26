@@ -2,7 +2,7 @@ import { useState,  } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LineChart, Monitor, ClipboardCheck,
-  ShoppingCart, List, X, Settings
+  ShoppingCart, List, X, Settings, LogOut
 } from 'lucide-react';
 import brandLogo from '../assets/427bffe9-d983-4566-9ec9-de6c2b1bdaa2-removebg-preview.png';
 import Header from './Header';
