@@ -507,7 +507,7 @@ if (data.success && data.checkoutUrl) {
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
                           <input
                             type="text"
-                            placeholder="Anything else we should know? (e.g. cake message, allergies, design notes)"
+                            placeholder="Anything else we should know?"
                             value={form.instructions}
                             className="w-full h-[42px] border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-ellipsis overflow-hidden whitespace-nowrap"
                             onChange={e => setForm({...form, instructions: e.target.value})}

@@ -193,7 +193,7 @@ function BundleTicketCard({ bundle, navigate, idx = 0 }) {
   return (
     <div className="snap-start shrink-0 w-[220px] sm:w-[280px] [contain:layout]">
       <div
-        onClick={() => !isDummy && navigate('/onlineOrdering/menu')}
+        onClick={() => !isDummy && navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
         className={`bg-white rounded-2xl flex flex-col group relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] transition-all duration-300 ease-out hover:-translate-y-2 hover:shadow-xl
           ${isDummy ? 'cursor-default opacity-90' : 'cursor-pointer'}
         `}
@@ -433,7 +433,7 @@ export default function Home() {
       <main>
         {/* 1. Hero Section */}
         <section className="w-full bg-[#FCFAF9] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
-          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:translate-y-4">
+          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:-translate-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-8 sm:gap-12 lg:gap-16 items-center">
               <div className="w-full mt-2 lg:mt-0">
                 <span className="inline-block font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.3em] text-[#8A7264] border border-[#5A453C]/20 rounded-full px-3 py-1 mb-4 sm:mb-6 lg:mb-8">
@@ -456,8 +456,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="relative w-full">
-                <div className="aspect-[4/3] sm:aspect-square lg:aspect-auto lg:h-[54vh] w-full rounded-2xl sm:rounded-[28px] overflow-hidden shadow-[0_20px_40px_-15px_rgba(59,31,10,0.3)]">
+              <div className="relative w-full lg:w-fit lg:mx-auto">
+                <div className="aspect-square w-full lg:w-[62vh] lg:h-[62vh] rounded-2xl sm:rounded-[28px] overflow-hidden shadow-[0_20px_40px_-15px_rgba(59,31,10,0.3)]">
                   <img
                     src={heroImg}
                     alt="Featured artisan cake"
@@ -496,10 +496,10 @@ export default function Home() {
               </p>
               
               <button
-                onClick={() => navigate('/onlineOrdering/menu')}
+                onClick={() => navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
                 className="inline-flex items-center justify-center lg:justify-start gap-2 text-[#3B1F0A] font-bold text-xs sm:text-sm hover:opacity-70 transition-opacity uppercase tracking-widest group"
               >
-                View full menu
+                View promo bundles
                 <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
                   <ArrowRight size={14} />
                 </span>

@@ -142,11 +142,13 @@ export default function Confirm({ orderId }) {
       <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
         <Header page="confirm" />
         <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px]">
-          <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
-          <h2 className="text-lg font-serif text-[#3B1F0A] mb-1">Confirming your payment…</h2>
-          <p className="text-xs text-[#8A7264] max-w-[320px] text-center">
-            Kinukumpirma pa namin sa PayMongo ang bayad mo. Huwag mo munang isarado ang tab na ito.
-          </p>
+          <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
+            <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
+            <h2 className="text-lg font-serif text-[#3B1F0A] mb-1">Confirming your payment…</h2>
+            <p className="text-xs text-[#8A7264] max-w-[320px] text-center">
+              We are still confirming your payment with PayMongo. Please do not close this tab.
+            </p>
+          </div>
         </div>
         <Footer />
       </div>
@@ -158,20 +160,22 @@ export default function Confirm({ orderId }) {
       <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
         <Header page="confirm" />
         <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px] text-center">
-          <h2 className="text-lg font-serif text-[#3B1F0A] mb-2">
-            {paymentStatus === 'failed' ? 'Payment not completed' : 'Still confirming your payment'}
-          </h2>
-          <p className="text-xs text-[#8A7264] max-w-[340px] mb-5">
-            {paymentStatus === 'failed'
-              ? 'Mukhang na-cancel o hindi natuloy ang bayad mo. Wala kaming na-save na order — pwede kang bumalik at subukan ulit.'
-              : 'Nabayaran mo na, pero medyo tumagal ang confirmation. Subukan mong i-refresh pagkalipas ng ilang segundo, o makipag-ugnayan sa amin kung magpapatuloy.'}
-          </p>
-          <button
-            onClick={() => navigate('/onlineOrdering/home')}
-            className="text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] transition-colors"
-          >
-            &larr; Back to Home
-          </button>
+          <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
+            <h2 className="text-lg font-serif text-[#3B1F0A] mb-2">
+              {paymentStatus === 'failed' ? 'Payment not completed' : 'Still confirming your payment'}
+            </h2>
+            <p className="text-xs text-[#8A7264] max-w-[340px] mb-5">
+              {paymentStatus === 'failed'
+                ? 'It looks like your payment was cancelled or failed. We did not save your order — you can go back and try again.'
+                : 'Your payment may have gone through, but confirmation is taking longer than usual. Please try refreshing after a few seconds, or contact us if this persists.'}
+            </p>
+            <button
+              onClick={() => navigate('/onlineOrdering/home')}
+              className="text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] transition-colors"
+            >
+              &larr; Back to Home
+            </button>
+          </div>
         </div>
         <Footer />
       </div>

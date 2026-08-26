@@ -63,20 +63,22 @@ function Sidebar({ open, onClose }) {
         </button>
 
         {/* Logo Section */}
-        <div className="flex flex-col items-center pt-8 pb-5 border-b border-white/10">
+        <div className="flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0">
           <img
             src={brandLogo}
             alt="Logo"
-            className="w-[110px] h-[100px] "
+            className="w-[88px] h-[80px]"
           />
-          <h2 className="font-serif text-[20px] font-bold text-white tracking-wide text-center leading-tight">
+          <h2 className="font-serif text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5">
             Aileen Cake Max
           </h2>
-          <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-1 font-medium">Bake Shop</p>
+          <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium">Bake Shop</p>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 py-4 px-3 overflow-hidden">
+        <nav
+          className="flex-1 py-4 px-3 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        >
           {NAV.map((group, idx) => (
             <div key={group.section} className={idx !== 0 ? "mt-6" : ""}>
               <p className="text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2">
@@ -106,7 +108,7 @@ function Sidebar({ open, onClose }) {
         </nav>
 
         {/* Footer - Settings */}
-        <div className="mt-auto px-3 pb-6 pt-2 shrink-0">
+        <div className="px-3 pb-5 pt-2 shrink-0">
           <div className="border-t border-white/10 pt-3">
             <NavLink
               to="/settings"
