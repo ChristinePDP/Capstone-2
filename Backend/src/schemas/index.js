@@ -7,6 +7,42 @@ const LoginSchema = z.object({
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
+const ForgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Please enter a valid email address.'),
+});
+
+const ResetPasswordSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email('Please enter a valid email address.'),
+    otp: z.string().trim().regex(/^\d{6}$/, 'Code must be exactly 6 digits.'),
+    password: z.string()
+      .min(8, 'Password must be at least 8 characters.')
+      .regex(/[A-Z]/, 'Password must include at least one uppercase letter.')
+      .regex(/[a-z]/, 'Password must include at least one lowercase letter.')
+      .regex(/[0-9]/, 'Password must include at least one number.'),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match.',
+    path: ['confirmPassword'],
+  });
+
+const RequestOtpSchema = z.object({
+  email: z.string().email('Invalid email address'),
+});
+
+// ✅ BAGONG SCHEMA PARA SA OTP VERIFICATION LANG (STEP 1)
+const VerifyOtpOnlySchema = z.object({
+  email: z.string().email('Invalid email address'),
+  otp: z.string().length(8, 'OTP must be 8 digits'), 
+});
+
+// SCHEMA PARA SA FINAL PASSWORD RESET (STEP 2)
+const VerifyOtpSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  otp: z.string().length(8, 'OTP must be 8 digits'),
+  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+});
 
 // ─── PRODUCTS ────────────────────────────────────────────────────────────────
 
@@ -130,6 +166,8 @@ const ForecastViewSchema = z.enum(['day', 'week', 'month', 'year', 'allTime']).d
 // ─── EXPORTS (ES Modules) ────────────────────────────────────────────────────
 export {
   LoginSchema,
+  ForgotPasswordSchema,
+  ResetPasswordSchema,
   ProductSchema,
   UpdateProductSchema,
   OrderItemSchema,
@@ -145,5 +183,8 @@ export {
   ConfirmBatchSchema,
   WasteLogSchema,
   ViewSchema,
-  ForecastViewSchema
+  ForecastViewSchema,
+  RequestOtpSchema,
+  VerifyOtpSchema,
+  VerifyOtpOnlySchema // ✅ IDINAGDAG DITO
 };

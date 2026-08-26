@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 import brandLogo from '../assets/427bffe9-d983-4566-9ec9-de6c2b1bdaa2-removebg-preview.png';
 import * as authService from '../services/authService';
@@ -35,9 +35,34 @@ const IconSignIn = () => (
     <line x1="15" y1="12" x2="3" y2="12"/>
   </svg>
 );
+const IconArrowLeft = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+    <line x1="19" y1="12" x2="5" y2="12"/>
+    <polyline points="12 19 5 12 12 5"/>
+  </svg>
+);
+const IconCheckCircle = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 15, height: 15, flexShrink: 0 }}>
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+    <polyline points="22 4 12 14.01 9 11.01"/>
+  </svg>
+);
+
+// ── Validation helpers ───────────────────────────────────────
+const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const isValidOtp = (v) => /^\d{8}$/.test(v);
+
+function passwordIssues(v) {
+  const issues = [];
+  if (v.length < 8) issues.push('at least 8 characters');
+  if (!/[A-Z]/.test(v)) issues.push('one uppercase letter');
+  if (!/[a-z]/.test(v)) issues.push('one lowercase letter');
+  if (!/[0-9]/.test(v)) issues.push('one number');
+  return issues;
+}
 
 // ── Shared Input Field ────────────────────────────────────────
-function InputField({ icon: Icon, type, value, onChange, placeholder, autoComplete, error, children }) {
+function InputField({ icon: Icon, type, value, onChange, placeholder, autoComplete, error, inputMode, maxLength, children }) {
   return (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
       <span style={{
@@ -56,6 +81,8 @@ function InputField({ icon: Icon, type, value, onChange, placeholder, autoComple
         onChange={onChange}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        inputMode={inputMode}
+        maxLength={maxLength}
         style={{
           width: '100%',
           padding: '10px 38px 10px 38px',
@@ -85,6 +112,94 @@ function InputField({ icon: Icon, type, value, onChange, placeholder, autoComple
   );
 }
 
+// ── NEW: Box Input UI Para sa OTP ─────────────────────────────
+function OtpBoxInput({ length = 8, value, onChange, error }) {
+  const inputs = useRef([]);
+
+  const handleChange = (e, index) => {
+    const val = e.target.value.replace(/\D/g, ''); // Numbers only
+    const otpArray = value.padEnd(length, ' ').split('');
+
+    if (val) {
+      otpArray[index] = val[val.length - 1]; // Use last typed char
+      onChange(otpArray.join('').replace(/ /g, ''));
+      // Move to next box automatically
+      if (index < length - 1) inputs.current[index + 1].focus();
+    }
+  };
+
+  const handleKeyDown = (e, index) => {
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      const otpArray = value.padEnd(length, ' ').split('');
+      if (otpArray[index] !== ' ') {
+        otpArray[index] = ' ';
+        onChange(otpArray.join('').replace(/ /g, ''));
+      } else if (index > 0) {
+        otpArray[index - 1] = ' ';
+        onChange(otpArray.join('').replace(/ /g, ''));
+        inputs.current[index - 1].focus();
+      }
+    }
+  };
+
+  const handlePaste = (e) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
+    if (pasted) {
+      onChange(pasted);
+      const nextFocus = Math.min(pasted.length, length - 1);
+      inputs.current[nextFocus].focus();
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: '6px', justifyContent: 'space-between', marginBottom: error ? '6px' : '0' }}>
+      {Array.from({ length }).map((_, index) => {
+        const char = value[index] || '';
+        return (
+          <input
+            key={index}
+            ref={el => inputs.current[index] = el}
+            type="text"
+            inputMode="numeric"
+            maxLength={2}
+            value={char}
+            onChange={(e) => handleChange(e, index)}
+            onKeyDown={(e) => handleKeyDown(e, index)}
+            onPaste={handlePaste}
+            style={{
+              width: '100%',
+              minWidth: '32px',
+              maxWidth: '48px',
+              aspectRatio: '1', // Makes it a perfect square
+              textAlign: 'center',
+              fontSize: '18px',
+              fontWeight: '700',
+              color: '#0F172A',
+              background: '#fff',
+              border: `1px solid ${error ? '#EF4444' : '#E2E8F0'}`,
+              borderRadius: '8px',
+              outline: 'none',
+              boxShadow: error ? '0 0 0 3px #FEF2F2' : 'none',
+              transition: 'border-color 0.15s, box-shadow 0.15s',
+              padding: 0
+            }}
+            onFocus={e => {
+              e.target.style.borderColor = error ? '#EF4444' : '#5C3317';
+              e.target.style.boxShadow = error ? '0 0 0 3px #FEF2F2' : '0 0 0 3px #FDF6F0';
+            }}
+            onBlur={e => {
+              e.target.style.borderColor = error ? '#EF4444' : '#E2E8F0';
+              e.target.style.boxShadow = error ? '0 0 0 3px #FEF2F2' : 'none';
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Toggle PW Button ──────────────────────────────────────────
 function TogglePwBtn({ shown, onToggle }) {
   return (
@@ -108,7 +223,7 @@ function TogglePwBtn({ shown, onToggle }) {
 }
 
 // ── Field Wrapper ─────────────────────────────────────────────
-function Field({ label, error, children }) {
+function Field({ label, error, hint, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{
@@ -120,6 +235,9 @@ function Field({ label, error, children }) {
       {children}
       {error && (
         <p style={{ fontSize: 12, color: '#EF4444', marginTop: 5, fontWeight: 500 }}>{error}</p>
+      )}
+      {!error && hint && (
+        <p style={{ fontSize: 12, color: '#94A3B8', marginTop: 5, fontWeight: 500 }}>{hint}</p>
       )}
     </div>
   );
@@ -153,19 +271,123 @@ function PrimaryBtn({ onClick, children, disabled }) {
   );
 }
 
+// ── Text Link Button (Forgot password? / Back to Sign in / Resend) ──
+function LinkBtn({ onClick, children, disabled, style }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: 'none', border: 'none', padding: 0,
+        fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+        color: disabled ? '#CBD5E1' : '#5C3317',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── Info / Success Banner ─────────────────────────────────────
+function Banner({ children }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 8,
+      background: '#F0FDF4', border: '1px solid #BBF7D0',
+      borderRadius: 9, padding: '10px 12px',
+      color: '#166534', fontSize: 13, fontWeight: 600,
+      marginBottom: 16, lineHeight: 1.5,
+    }}>
+      <IconCheckCircle />
+      <span>{children}</span>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════
 export default function LoginPage({ onLogin }) {
 
+  // 'login' | 'forgot' | 'verify-otp' | 'set-password'
+  const [view, setView] = useState('login');
+  const [infoMessage, setInfoMessage] = useState('');
+
+  // ── Login state ──
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loginErrors, setLoginErrors] = useState({});
   const [loginPending, setLoginPending] = useState(false);
 
-  const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  // ── Forgot-password state ──
+  const [forgotErrors, setForgotErrors] = useState({});
+  const [forgotPending, setForgotPending] = useState(false);
 
+  // ── Reset-password state ──
+  const [resetEmail, setResetEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [resetErrors, setResetErrors] = useState({});
+  const [resetPending, setResetPending] = useState(false);
+
+  // ── Resend cooldown (iwas spam-click ng "Resend code") ──
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef(null);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((s) => (s <= 1 ? 0 : s - 1));
+    }, 1000);
+    return () => clearInterval(cooldownRef.current);
+  }, [resendCooldown]);
+
+  // ── View transitions ──
+  const goToLogin = () => {
+    setView('login');
+    setPassword('');
+    setLoginErrors({});
+    setForgotErrors({});
+    setResetErrors({});
+  };
+
+  const goToForgot = () => {
+    setView('forgot');
+    setInfoMessage('');
+    setForgotErrors({});
+  };
+
+  // ✅ AUTO-CLEAR ERROR KAPAG NAG-TYPE ULIT
+  const handleOtpChange = (newOtp) => {
+    setOtp(newOtp);
+    if (resetErrors.otp) {
+      setResetErrors((prev) => ({ ...prev, otp: null }));
+    }
+  };
+
+  // 👇 INAYOS NA NG TULUYAN: Tinanggal ang backend API call rito para 
+  // hindi masunog ang OTP nang maaga!
+  const doProceedToPassword = () => {
+    if (!isValidOtp(otp)) {
+      setResetErrors({ otp: 'Please enter the full 8-digit code.' });
+      return;
+    }
+    
+    // Ililipat na agad natin sa Password Screen nang hindi tine-test sa database.
+    // Kapag pinindot na ang "Save New Password", saka lang magv-verify.
+    setResetErrors({});
+    setView('set-password');
+  };
+
+  // ── Actions ──
   const doLogin = async () => {
     const errs = {};
     if (!email || !isValidEmail(email)) errs.email = 'Please enter a valid email address.';
@@ -184,9 +406,80 @@ export default function LoginPage({ onLogin }) {
     }
   };
 
+  const doForgotPassword = async () => {
+    const errs = {};
+    if (!email || !isValidEmail(email)) errs.email = 'Please enter a valid email address.';
+    setForgotErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
+    setForgotPending(true);
+    try {
+      await authService.requestPasswordReset(email);
+      setResetEmail(email);
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setResetErrors({});
+      setInfoMessage(`We sent an 8-digit code to ${email}. It expires shortly, so enter it soon.`);
+      setResendCooldown(30);
+      setView('verify-otp');
+    } catch (err) {
+      setForgotErrors({ email: err.message || 'Failed to send reset code.' });
+    } finally {
+      setForgotPending(false);
+    }
+  };
+
+  const doResendCode = async () => {
+    if (resendCooldown > 0) return;
+    setForgotPending(true);
+    try {
+      await authService.requestPasswordReset(resetEmail);
+      setInfoMessage(`We sent a new code to ${resetEmail}.`);
+      setResendCooldown(30);
+    } catch (err) {
+      setResetErrors({ otp: err.message || 'Failed to resend code.' });
+    } finally {
+      setForgotPending(false);
+    }
+  };
+
+  // Dito pa lang natin ipapadala yung OTP + Password para isahan lang ang checking
+  const doResetPassword = async () => {
+    const errs = {};
+    const pwIssues = passwordIssues(newPassword);
+    if (pwIssues.length > 0) errs.newPassword = `Password must have ${pwIssues.join(', ')}.`;
+
+    if (!confirmPassword) errs.confirmPassword = 'Please confirm your new password.';
+    else if (newPassword !== confirmPassword) errs.confirmPassword = 'Passwords do not match.';
+
+    setResetErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
+    setResetPending(true);
+    try {
+      await authService.resetPasswordWithOtp(resetEmail, otp, newPassword);
+      setEmail(resetEmail);
+      setPassword('');
+      setOtp('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setInfoMessage('Password reset successful. You can now log in with your new password.');
+      setView('login');
+    } catch (err) {
+      setView('verify-otp'); 
+      setResetErrors({ otp: err.message || 'Invalid or expired code.' });
+    } finally {
+      setResetPending(false);
+    }
+  };
+
   const handleKeyDown = (e) => {
     if (e.key !== 'Enter') return;
-    doLogin();
+    if (view === 'login') doLogin();
+    else if (view === 'forgot') doForgotPassword();
+    else if (view === 'verify-otp') doProceedToPassword();
+    else if (view === 'set-password') doResetPassword();
   };
 
   const S = {
@@ -240,6 +533,14 @@ export default function LoginPage({ onLogin }) {
     panelSub:   { fontSize: 14, color: '#64748B', marginBottom: 28, lineHeight: 1.6 },
   };
 
+  // ── Copy per view ──
+  const titles = {
+    login:  { title: 'Welcome back', sub: 'Sign in to your admin account to continue.' },
+    forgot: { title: 'Forgot password?', sub: "Enter your email and we'll send you an 8-digit code to reset your password." },
+    'verify-otp': { title: 'Enter reset code', sub: `Check ${resetEmail} for the 8-digit code we sent.` },
+    'set-password': { title: 'Set new password', sub: 'Create a new, secure password for your account.' },
+  };
+
   return (
     <div style={S.root} onKeyDown={handleKeyDown}>
       <style>{`
@@ -280,23 +581,23 @@ export default function LoginPage({ onLogin }) {
           .responsive-card {
             flex-direction: column;
             min-height: auto;
-            max-height: calc(100vh - 32px); /* Tinitiyak na hindi lalampas sa screen height */
-            overflow-y: auto; /* Magkakaroon ng scrollbar ang loob kapag sobrang liit ng phone */
-            margin: 16px; /* Binawasan ang margin para mas lumaki ang space sa loob */
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            margin: 16px;
           }
           .responsive-brand {
             width: 100%;
-            padding: 24px 16px; /* Pinaliit lalo ang padding */
+            padding: 24px 16px;
           }
           .responsive-logo {
-            width: 130px; /* Pinaliit pa lalo para sa maliit na screens */
+            width: 130px;
             margin-bottom: 8px;
           }
           .responsive-title {
             font-size: 18px;
           }
           .responsive-form {
-            padding: 24px 20px; /* Mas maliit na padding sa form area */
+            padding: 24px 20px;
           }
         }
       `}</style>
@@ -327,40 +628,146 @@ export default function LoginPage({ onLogin }) {
         {/* ── RIGHT: FORM PANEL ── */}
         <div style={S.formPanel} className="responsive-form">
           <div>
-            <h1 style={S.panelTitle}>Welcome back</h1>
-            <p style={S.panelSub}>Sign in to your admin account to continue.</p>
+            <h1 style={S.panelTitle}>{titles[view].title}</h1>
+            <p style={S.panelSub}>{titles[view].sub}</p>
 
-            <Field label="Email Address" error={loginErrors.email}>
-              <InputField
-                icon={IconMail}
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="@gmail.com"
-                autoComplete="email"
-                error={loginErrors.email}
-              />
-            </Field>
+            {infoMessage && <Banner>{infoMessage}</Banner>}
 
-            <Field label="Password" error={loginErrors.password}>
-              <InputField
-                icon={IconLock}
-                type={showPw ? 'text' : 'password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                error={loginErrors.password}
-              >
-                <TogglePwBtn shown={showPw} onToggle={() => setShowPw(v => !v)} />
-              </InputField>
-            </Field>
+            {/* ── LOGIN VIEW ── */}
+            {view === 'login' && (
+              <>
+                <Field label="Email Address" error={loginErrors.email}>
+                  <InputField
+                    icon={IconMail}
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="@gmail.com"
+                    autoComplete="email"
+                    error={loginErrors.email}
+                  />
+                </Field>
 
-            <div style={{ height: 20 }} />
+                <Field label="Password" error={loginErrors.password}>
+                  <InputField
+                    icon={IconLock}
+                    type={showPw ? 'text' : 'password'}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    error={loginErrors.password}
+                  >
+                    <TogglePwBtn shown={showPw} onToggle={() => setShowPw(v => !v)} />
+                  </InputField>
+                </Field>
 
-            <PrimaryBtn onClick={doLogin} disabled={loginPending}>
-              <IconSignIn /> {loginPending ? 'Signing in...' : 'Sign in'}
-            </PrimaryBtn>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+                  <LinkBtn onClick={goToForgot}>Forgot password?</LinkBtn>
+                </div>
+
+                <PrimaryBtn onClick={doLogin} disabled={loginPending}>
+                  <IconSignIn /> {loginPending ? 'Signing in...' : 'Sign in'}
+                </PrimaryBtn>
+              </>
+            )}
+
+            {/* ── FORGOT PASSWORD VIEW ── */}
+            {view === 'forgot' && (
+              <>
+                <Field label="Email Address" error={forgotErrors.email}>
+                  <InputField
+                    icon={IconMail}
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="@gmail.com"
+                    autoComplete="email"
+                    error={forgotErrors.email}
+                  />
+                </Field>
+
+                <div style={{ height: 6 }} />
+
+                <PrimaryBtn onClick={doForgotPassword} disabled={forgotPending}>
+                  {forgotPending ? 'Sending code...' : 'Send Reset Code'}
+                </PrimaryBtn>
+
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                  <LinkBtn onClick={goToLogin}><IconArrowLeft /> Back to Sign in</LinkBtn>
+                </div>
+              </>
+            )}
+
+            {/* ── STEP 1: VERIFY OTP VIEW (WITH BOX INPUTS) ── */}
+            {view === 'verify-otp' && (
+              <>
+                <Field label="8-Digit Code" error={resetErrors.otp} hint="Check your inbox (and spam folder).">
+                  <OtpBoxInput 
+                    length={8} 
+                    value={otp} 
+                    onChange={handleOtpChange} 
+                    error={resetErrors.otp} 
+                  />
+                </Field>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+                  <LinkBtn onClick={doResendCode} disabled={forgotPending || resendCooldown > 0}>
+                    {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
+                  </LinkBtn>
+                </div>
+
+                <PrimaryBtn onClick={doProceedToPassword}>
+                  Verify Code
+                </PrimaryBtn>
+
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                  <LinkBtn onClick={goToLogin}><IconArrowLeft /> Back to Sign in</LinkBtn>
+                </div>
+              </>
+            )}
+
+            {/* ── STEP 2: SET NEW PASSWORD VIEW ── */}
+            {view === 'set-password' && (
+              <>
+                <Field label="New Password" error={resetErrors.newPassword} hint="At least 8 characters, with uppercase, lowercase, and a number.">
+                  <InputField
+                    icon={IconLock}
+                    type={showNewPw ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    error={resetErrors.newPassword}
+                  >
+                    <TogglePwBtn shown={showNewPw} onToggle={() => setShowNewPw(v => !v)} />
+                  </InputField>
+                </Field>
+
+                <Field label="Confirm New Password" error={resetErrors.confirmPassword}>
+                  <InputField
+                    icon={IconLock}
+                    type={showConfirmPw ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    error={resetErrors.confirmPassword}
+                  >
+                    <TogglePwBtn shown={showConfirmPw} onToggle={() => setShowConfirmPw(v => !v)} />
+                  </InputField>
+                </Field>
+
+                <PrimaryBtn onClick={doResetPassword} disabled={resetPending}>
+                  {resetPending ? 'Saving...' : 'Save New Password'}
+                </PrimaryBtn>
+
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                  <LinkBtn onClick={() => setView('verify-otp')}><IconArrowLeft /> Back to OTP</LinkBtn>
+                </div>
+              </>
+            )}
+            
           </div>
         </div>
 

@@ -66,9 +66,9 @@ function OrderDetailModal({ order, isOpen, onClose, onStatusChange }) {
         </div>
       }
     >
-      <div className="grid grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         {/* Customer */}
-        <div className="col-span-4 bg-[#fdf8f6] rounded-2xl p-6 border-2 border-brand-100 flex flex-col h-full">
+        <div className="md:col-span-4 bg-[#fdf8f6] rounded-2xl p-6 border-2 border-brand-100 flex flex-col h-full">
           <p className="text-[11px] font-black uppercase tracking-widest text-brand-600 mb-5">Customer Details</p>
           <h3 className="text-2xl font-black text-brand-950 mb-6 leading-tight">{customer.name || 'Walk-in'}</h3>
           <div className="space-y-4 mb-8 text-[14px]">
@@ -89,7 +89,7 @@ function OrderDetailModal({ order, isOpen, onClose, onStatusChange }) {
         </div>
 
         {/* Order Summary */}
-        <div className="col-span-4 flex flex-col h-full">
+        <div className="md:col-span-4 flex flex-col h-full">
           <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl overflow-hidden flex flex-col flex-1">
             <div className="px-5 py-3 border-b-2 border-slate-200 bg-white flex items-center gap-2">
               <ReceiptText size={14} className="text-slate-600" />
@@ -127,7 +127,7 @@ function OrderDetailModal({ order, isOpen, onClose, onStatusChange }) {
         </div>
 
         {/* Reference & Instructions */}
-        <div className="col-span-4 space-y-5 flex flex-col h-full">
+        <div className="md:col-span-4 space-y-5 flex flex-col h-full">
           <div>
             <p className="text-[11px] font-black uppercase tracking-widest text-brand-700 mb-3 px-1">Customer Reference</p>
             <div className="rounded-2xl overflow-hidden bg-brand-100 border-2 border-brand-200 aspect-video flex items-center justify-center shadow-inner">
@@ -150,15 +150,15 @@ function OrderDetailModal({ order, isOpen, onClose, onStatusChange }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-3 mt-10 pt-6 border-t-2 border-brand-200">
-        <Button variant="secondary" onClick={onClose} className="px-8 border-2 border-brand-300 text-brand-950 font-black">Close</Button>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 mt-10 pt-6 border-t-2 border-brand-200">
+        <Button variant="secondary" onClick={onClose} className="w-full sm:w-auto px-8 border-2 border-brand-300 text-brand-950 font-black">Close</Button>
         {order.status === 'Confirmed' && (
-          <Button variant="danger" onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }} className="px-8 bg-red-100 text-red-900 border-2 border-red-200 font-black hover:bg-red-200">
+          <Button variant="danger" onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }} className="w-full sm:w-auto px-8 bg-red-100 text-red-900 border-2 border-red-200 font-black hover:bg-red-200">
             Cancel Order
           </Button>
         )}
         {nextStatus[order.status] && (
-          <Button variant="primary" className="px-10 bg-brand-950 text-white shadow-xl shadow-brand-200 font-black hover:bg-black transition-all"
+          <Button variant="primary" className="w-full sm:w-auto px-10 bg-brand-950 text-white shadow-xl shadow-brand-200 font-black hover:bg-black transition-all"
             onClick={() => { onStatusChange(order.id, nextStatus[order.status]); onClose(); }}>
             Mark as {nextStatus[order.status]}
           </Button>
@@ -244,6 +244,70 @@ function ScanResultModal({ order, isOpen, onClose, onStatusChange, onViewDetails
   );
 }
 
+// ─── ORDER CARD (replaces table row — responsive on all screen sizes) ──
+function OrderCard({ order, onView }) {
+  const customer    = order.customer    || order.customers || {};
+  const grandTotal  = order.grandTotal  || order.grand_total || 0;
+  const orderType   = order.orderType   || order.order_type  || order.type;
+  const pickupDate  = order.pickupDate  || order.pickup_date;
+  const pickupTime  = order.pickupTime  || order.pickup_time;
+  const orderId     = order.order_number || order.id;
+  const items       = order.items       || order.order_items || [];
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3 hover:shadow-md hover:border-slate-300 transition-all">
+      {/* Header: order id / customer / status */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium text-slate-400 truncate">#{orderId}</p>
+          <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{customer.name || 'Walk-in'}</p>
+          {customer.phone && <p className="text-[12px] text-slate-500">{customer.phone}</p>}
+        </div>
+        <Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none shrink-0">
+          {order.status}
+        </Badge>
+      </div>
+
+      {/* Type + pick-up schedule */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge variant={typeVariant(orderType)} className="font-medium px-2 py-0.5 text-xs">{orderType}</Badge>
+        <span className="text-[13px] text-slate-700 font-medium flex items-center gap-1">
+          <Calendar size={13} className="text-slate-400" />
+          {pickupDate ? `${pickupDate}${pickupTime ? ' — ' + pickupTime : ''}` : '—'}
+        </span>
+      </div>
+
+      {/* Items preview — full list is always in the detail modal */}
+      {items.length > 0 && (
+        <div className="border-t border-slate-100 pt-2 space-y-1">
+          {items.slice(0, 3).map((item, i) => (
+            <div key={i} className="flex justify-between gap-2 text-[12.5px] text-slate-600">
+              <span className="truncate">{item.name || item.product_name}</span>
+              <span className="text-slate-400 shrink-0">x{item.qty || item.quantity}</span>
+            </div>
+          ))}
+          {items.length > 3 && (
+            <p className="text-[11px] text-slate-400">+{items.length - 3} more item(s)</p>
+          )}
+        </div>
+      )}
+
+      {/* Amount / payment + action */}
+      <div className="flex items-end justify-between border-t border-slate-100 pt-3 mt-auto gap-2">
+        <div className="min-w-0">
+          <p className="text-[12px] text-slate-400 mb-0.5">Total {fmt(grandTotal)}</p>
+          {paymentDisplay(order)}
+        </div>
+        <Button size="sm" variant="secondary"
+          className="font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs px-3 py-1.5 shrink-0"
+          onClick={onView}>
+          View Details
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 const PER_PAGE = 8;
 
 export default function AllOrdersPage() {
@@ -320,18 +384,39 @@ export default function AllOrdersPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-4">
-          <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-72 border-2 border-brand-200" />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 w-full sm:flex-row sm:items-center sm:gap-4 sm:w-auto">
+          <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-full sm:w-72 border-2 border-brand-200" />
           <FilterPills options={ORDER_STATUSES} value={statusFilter} onChange={v => { setStatusFilter(v); setPage(1); }} />
         </div>
-        <Button variant="primary" className="bg-brand-900 text-white font-bold shadow-md flex items-center gap-2"
+        <Button variant="primary" className="w-full sm:w-auto bg-brand-900 text-white font-bold shadow-md flex items-center justify-center gap-2"
           onClick={() => { setScannerOpen(true); setManualOrderId(''); }}>
           <QrCode size={18} /> Scan Receipt QR
         </Button>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Mobile / tablet — cards */}
+      <div className="md:hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        {loading ? (
+          <p className="text-center py-16 text-slate-400 font-medium">Loading orders…</p>
+        ) : paged.length ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {paged.map(order => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                onView={() => { setSelectedOrder(order); setDetailOpen(true); }}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-slate-500 font-medium py-16 text-sm">No orders found.</p>
+        )}
+        <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+      </div>
+
+      {/* Desktop — table */}
+      <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <Table columns={columns}>
           {loading ? (
             <Tr><Td className="text-center py-16 text-slate-400 font-medium" colSpan={8}>Loading orders…</Td></Tr>

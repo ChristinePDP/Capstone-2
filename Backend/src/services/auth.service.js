@@ -35,7 +35,50 @@ async function getProfile(adminId) {
   return data;
 }
 
-const AuthService = { login, getProfile };
+// hakbang 1 — magpadala ng OTP sa email
+async function requestPasswordReset(email) {
+  const { error } = await AuthModel.requestPasswordReset(email);
+  if (error) {
+    const err = new Error('Unable to send reset code. Please try again.');
+    err.statusCode = 400;
+    throw err;
+  }
+  return { message: 'OTP sent to email' };
+}
 
+// ✅ BAGONG FUNCTION: hakbang 1.5 — i-verify lang yung OTP 
+async function verifyOtpOnly(email, otp) {
+  const { data, error } = await AuthModel.verifyRecoveryOtp(email, otp);
+  if (error || !data?.user) {
+    const err = new Error('Invalid or expired OTP');
+    err.statusCode = 401;
+    throw err;
+  }
+  return { message: 'OTP is valid' };
+}
 
-export { login, getProfile, AuthService };
+// hakbang 2 — i-verify yung OTP tapos i-update ang password
+async function verifyResetOtp(email, otp, newPassword) {
+  const { data, error } = await AuthModel.verifyRecoveryOtp(email, otp);
+  if (error || !data?.user) {
+    const err = new Error('Invalid or expired OTP');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const { error: updateError } = await AuthModel.updatePasswordByUserId(
+    data.user.id,
+    newPassword
+  );
+  if (updateError) {
+    const err = new Error('Failed to update password');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  return { message: 'Password updated successfully' };
+}
+
+const AuthService = { login, getProfile, requestPasswordReset, verifyOtpOnly, verifyResetOtp };
+
+export { login, getProfile, requestPasswordReset, verifyOtpOnly, verifyResetOtp, AuthService };
