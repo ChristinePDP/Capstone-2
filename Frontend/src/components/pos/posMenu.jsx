@@ -1,7 +1,21 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, X, Package, Plus, ChevronRight, ArrowUp } from 'lucide-react';
+import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
 
 const BASE_CATEGORIES = ['All', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
+
+// ─────────────────────────────────────────────────────────────
+// Icon for each category tab (used on mobile where labels are hidden) —
+// parehong mapping gaya ng customer-facing Menu.jsx.
+// ─────────────────────────────────────────────────────────────
+const CATEGORY_ICONS = {
+  'All': LayoutGrid,
+  'Promo Bundle': Tag,
+  'Package': Package,
+  'Cake': Cake,
+  'Pastry': Croissant,
+  'Celebration Material': PartyPopper,
+};
+const getCategoryIcon = (cat) => CATEGORY_ICONS[cat] || Tag;
 
 // ─────────────────────────────────────────────────────────────
 // Same dynamic bundle logic ginagamit ng customer-facing Menu.jsx —
@@ -714,7 +728,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
             <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
           </div>
           
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
               const isStockTracked = isQuantityTracked(p);
@@ -761,17 +775,17 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                       </div>
                     )}
                   </div>
-                  <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
+                  <div className="p-3 sm:p-4 lg:p-4 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                    <div className="flex-1 mb-1.5 lg:mb-1.5 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.25rem]">
-                      <h3 className={`font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug ${isBundle ? 'line-clamp-1' : 'line-clamp-2'}`}>{p.name}</h3>
+                    <div className="flex-1 mb-1.5 lg:mb-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.5rem]">
+                      <h3 className={`font-bold text-xs sm:text-sm lg:text-sm text-[#3B1F0A] leading-snug ${isBundle ? 'line-clamp-1' : 'line-clamp-2'}`}>{p.name}</h3>
                       {isBundle && (
                         <p className="text-[10px] sm:text-[11px] text-[#8A7264] truncate mt-0.5" title={getBundleDescription(p)}>
                           {getBundleDescription(p)}
                         </p>
                       )}
                     </div>
-                    <p className="text-xs sm:text-sm lg:text-xs font-bold text-[#5A453C] mb-2 lg:mb-2 truncate">
+                    <p className="text-xs sm:text-sm lg:text-sm font-bold text-[#5A453C] mb-2 lg:mb-2 truncate">
                       {isBundle && p.discount_percent > 0 && p.original_price > 0 && (
                         <span className="text-[10px] sm:text-[11px] text-[#B7A99F] line-through font-normal mr-1.5">
                           ₱{p.original_price.toLocaleString()}
@@ -787,7 +801,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                           : onAddToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
                       disabled={isSoldOut}
-                      className={`w-full py-2 sm:py-2.5 lg:py-2 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
+                      className={`w-full py-2 sm:py-2.5 lg:py-2.5 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
                         isSoldOut
                           ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed'
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
@@ -836,20 +850,26 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           </div>
           
           <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'}`}>
-            <div className="flex gap-5 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
-              {categories.map(cat => (
-                <button 
-                  key={cat} 
-                  onClick={() => setActiveCategory(cat)}
-                  className={`shrink-0 pb-2.5 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                    activeCategory === cat 
-                      ? 'border-[#3B1F0A] text-[#3B1F0A]' 
-                      : 'border-transparent text-[#8A7264] hover:text-[#3B1F0A]'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
+            <div className="flex sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
+              {categories.map(cat => {
+                const Icon = getCategoryIcon(cat);
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    title={cat}
+                    aria-label={cat}
+                    className={`flex-1 sm:flex-initial shrink-0 flex items-center justify-center sm:justify-start gap-1.5 pb-2.5 px-1.5 sm:px-0 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
+                      activeCategory === cat
+                        ? 'border-[#3B1F0A] text-[#3B1F0A]'
+                        : 'border-transparent text-[#8A7264] hover:text-[#3B1F0A]'
+                    }`}
+                  >
+                    <Icon size={20} className="sm:hidden" />
+                    <span className="hidden sm:inline">{cat}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

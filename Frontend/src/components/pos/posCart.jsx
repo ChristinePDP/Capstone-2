@@ -190,7 +190,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       const limit = getQuantityLimit(item);
 
       if (currentQtyInCart + delta > limit) {
-        showLimitToast(`Sorry, only ${limit} of "${item.name}" ${limit === 1 ? 'is' : 'are'} available.`);
+        showLimitToast(`Sorry, you've reached the available limit for "${item.name}".`);
         return;
       }
     }
