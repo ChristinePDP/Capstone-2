@@ -10,6 +10,8 @@ const PAGE_TITLES = {
   '/orders':   'All Orders',
   '/products': 'Product Management',
   '/inventory':'Inventory',
+  '/settings': 'Settings',
+  '/settings/website-editor': 'Website Appearance',
 };
 
 // Ang "/productAndEvent" ay may "/*" wildcard sa route nito (para pumasok

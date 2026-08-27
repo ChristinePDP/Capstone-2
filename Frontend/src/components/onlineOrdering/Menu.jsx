@@ -641,6 +641,12 @@ export default function Menu({ cart, setCart }) {
     };
   }, []);
 
+  // Laging mag-scroll sa taas pag pumasok dito (hal. galing sa "View promo bundles"
+  // na pindot sa Home, na baka naka-scroll pababa na ang page).
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   const BACK_TO_TOP_THRESHOLD = 400;
 
   const checkScrollPosition = () => {
@@ -991,7 +997,7 @@ export default function Menu({ cart, setCart }) {
               </div>
               
               <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'}`}>
-                <div className="flex gap-4 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
+                <div className="flex w-full justify-between sm:justify-start gap-2 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
                   {['All', ...categories].map(cat => {
                     const Icon = getCategoryIcon(cat);
                     return (

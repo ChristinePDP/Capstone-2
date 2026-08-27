@@ -116,11 +116,11 @@ export default function ActionableRecommendation({ recommendations = {} }) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        {SECTIONS.map((section, idx) => (
+      <div className="flex flex-col gap-4">
+        {SECTIONS.map((section) => (
           <div
             key={section.key}
-            className={idx > 0 ? 'pt-6 border-t border-[#e7ded4]' : ''}
+            className="rounded-xl border border-[#e7ded4] bg-[#fdfbf8] p-4"
           >
             <RecommendationSection section={section} items={dataByKey[section.key]} />
           </div>

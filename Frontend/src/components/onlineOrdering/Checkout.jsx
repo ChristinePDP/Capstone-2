@@ -240,9 +240,12 @@ export default function Checkout({ cart, setCart }) {
     let updatedCart = [...cart];
 
     for (let i = 0; i < updatedCart.length; i++) {
-      if (updatedCart[i].inspiration_image instanceof File) {
+      const img = updatedCart[i].inspiration_image;
+
+      if (img instanceof File) {
+        // Regular (non-bundle) product — iisang File lang.
         const formData = new FormData();
-        formData.append('image', updatedCart[i].inspiration_image);
+        formData.append('image', img);
 
         try {
           const uploadRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/upload-inspiration`, {
@@ -256,6 +259,38 @@ export default function Checkout({ cart, setCart }) {
           }
         } catch (err) {
           console.error('Item image upload error:', err);
+        }
+      } else if (img && typeof img === 'object') {
+        // FIX: Bundle item — `inspiration_image` dito ay `{ [productId]: File }`
+        // (isang larawan per component, mula sa BundleModal). Dating hindi
+        // ito napapansin ng `instanceof File` check kaya kahit nag-upload
+        // na ng larawan ang customer sa bundle, hindi ito na-uupload sa
+        // storage at walang na-se-save na URL. Ngayon, ini-upload na ang
+        // bawat File sa map at binubuo ang `inspiration_urls` bilang
+        // `{ [productId]: url }` para maipasa sa backend.
+        const urls = {};
+        for (const [productId, file] of Object.entries(img)) {
+          if (!(file instanceof File)) continue;
+
+          const formData = new FormData();
+          formData.append('image', file);
+
+          try {
+            const uploadRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/upload-inspiration`, {
+              method: 'POST',
+              body: formData,
+            });
+            const uploadData = await uploadRes.json();
+
+            if (uploadData.success) {
+              urls[productId] = uploadData.url;
+            }
+          } catch (err) {
+            console.error(`Bundle item image upload error (product ${productId}):`, err);
+          }
+        }
+        if (Object.keys(urls).length > 0) {
+          updatedCart[i].inspiration_urls = urls;
         }
       }
     }
@@ -287,6 +322,11 @@ export default function Checkout({ cart, setCart }) {
           orderSlip: item.order_slip_details || {},
           selectedPriceOptions: item.selected_price_options || null, 
           inspirationUrl: item.inspiration_url || null,
+          // FIX: idinagdag para sa bundle items — per-component image URLs
+          // (`{ [productId]: url }`), binabasa na ng resolveBundleLineItem
+          // sa backend para malagyan ng customer_reference_url ang tamang
+          // exploded row.
+          inspirationUrls: item.inspiration_urls || null,
           // Kailangan ito para malaman ng backend (onlineOrdering.services.js
           // resolveOrderItems) na dapat i-explode ang item na ito sa
           // individual component products ng bundle, sa halip na ituring
