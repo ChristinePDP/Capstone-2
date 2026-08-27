@@ -154,7 +154,7 @@ function OtpBoxInput({ length = 8, value, onChange, error }) {
   };
 
   return (
-    <div style={{ display: 'flex', gap: '6px', justifyContent: 'space-between', marginBottom: error ? '6px' : '0' }}>
+    <div style={{ display: 'flex', gap: 'clamp(4px, 1.5vw, 8px)', justifyContent: 'space-between', marginBottom: error ? '6px' : '0' }}>
       {Array.from({ length }).map((_, index) => {
         const char = value[index] || '';
         return (
@@ -179,7 +179,7 @@ function OtpBoxInput({ length = 8, value, onChange, error }) {
               color: '#0F172A',
               background: '#fff',
               border: `1px solid ${error ? '#EF4444' : '#E2E8F0'}`,
-              borderRadius: '8px',
+              borderRadius: '9px',
               outline: 'none',
               boxShadow: error ? '0 0 0 3px #FEF2F2' : 'none',
               transition: 'border-color 0.15s, box-shadow 0.15s',
@@ -225,7 +225,7 @@ function TogglePwBtn({ shown, onToggle }) {
 // ── Field Wrapper ─────────────────────────────────────────────
 function Field({ label, error, hint, children }) {
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ marginBottom: 12 }}>
       <label style={{
         display: 'block', marginBottom: 6,
         fontSize: 12, fontWeight: 700,
@@ -300,7 +300,7 @@ function Banner({ children }) {
       background: '#F0FDF4', border: '1px solid #BBF7D0',
       borderRadius: 9, padding: '10px 12px',
       color: '#166534', fontSize: 13, fontWeight: 600,
-      marginBottom: 16, lineHeight: 1.5,
+      marginBottom: 14, lineHeight: 1.5,
     }}>
       <IconCheckCircle />
       <span>{children}</span>
@@ -529,8 +529,8 @@ export default function LoginPage({ onLogin }) {
       flexDirection: 'column',
       justifyContent: 'center',
     },
-    panelTitle: { fontSize: 22, fontWeight: 700, color: '#0F172A', marginBottom: 6 },
-    panelSub:   { fontSize: 14, color: '#64748B', marginBottom: 28, lineHeight: 1.6 },
+    panelTitle: { color: '#0F172A', marginBottom: 6 },
+    panelSub:   { color: '#64748B', marginBottom: 24, lineHeight: 1.6 },
   };
 
   // ── Copy per view ──
@@ -553,7 +553,15 @@ export default function LoginPage({ onLogin }) {
         
         .input-icon { width: 15px; height: 15px; }
 
-        /* ── RESPONSIVE CLASSES ── */
+        .panel-title { font-size: clamp(17px, 2.2vw, 22px); font-weight: 700; margin: 0 0 6px; }
+        .panel-sub   { font-size: clamp(13px, 1.4vw, 14px); margin: 0 0 20px; }
+
+        /* ── RESPONSIVE CLASSES ──
+           Ginagamit ang % / clamp() sa halip na fixed px, para hindi biglaan
+           (sudden jump) ang sukat sa pagitan ng mobile at desktop breakpoint —
+           dahan-dahan itong lumiliit/lumalaki habang nag-re-resize ang window,
+           kaya walang "sandwiched"/hindi-pantay na sukat sa mga in-between
+           (tablet-width) na screens. */
         .responsive-card {
           display: flex;
           flex-direction: row;
@@ -561,44 +569,40 @@ export default function LoginPage({ onLogin }) {
           margin: 24px 16px;
         }
         .responsive-brand {
-          width: 580px;
-          padding: 48px 32px;
+          width: 42%;
+          min-width: 280px;
+          padding: clamp(20px, 4vw, 48px) clamp(16px, 3vw, 32px);
+          box-sizing: border-box;
         }
         .responsive-logo {
-          width: 300px;
+          width: clamp(96px, 20vw, 300px);
           height: auto;
-          margin-bottom: 20px;
+          margin-bottom: clamp(8px, 1.5vw, 20px);
         }
         .responsive-title {
-          font-size: 22px;
+          font-size: clamp(15px, 1.8vw, 22px);
         }
         .responsive-form {
-          padding: 48px 44px;
+          flex: 1 1 0%;
+          min-width: 0;
+          padding: clamp(20px, 4vw, 48px) clamp(18px, 4vw, 44px);
+          box-sizing: border-box;
         }
 
-        /* ── MEDIA QUERIES PARA SA TABLET AT MOBILE ── */
+        /* ── SA MOBILE, NAGIGING STACKED (column) na layout ── */
         @media (max-width: 900px) {
           .responsive-card {
             flex-direction: column;
             min-height: auto;
-            max-height: calc(100vh - 32px);
-            overflow-y: auto;
-            margin: 16px;
+            max-height: calc(100vh - 32px); /* Tinitiyak na hindi lalampas sa screen height */
+            overflow-y: auto; /* Magkakaroon ng scrollbar ang loob kapag sobrang liit ng phone */
+            margin: 16px; /* Binawasan ang margin para mas lumaki ang space sa loob */
           }
           .responsive-brand {
             width: 100%;
-            padding: 24px 16px;
+            min-width: 0;
           }
-          .responsive-logo {
-            width: 130px;
-            margin-bottom: 8px;
-          }
-          .responsive-title {
-            font-size: 18px;
-          }
-          .responsive-form {
-            padding: 24px 20px;
-          }
+          .panel-sub { margin-bottom: 16px; }
         }
       `}</style>
 
@@ -628,8 +632,8 @@ export default function LoginPage({ onLogin }) {
         {/* ── RIGHT: FORM PANEL ── */}
         <div style={S.formPanel} className="responsive-form">
           <div>
-            <h1 style={S.panelTitle}>{titles[view].title}</h1>
-            <p style={S.panelSub}>{titles[view].sub}</p>
+            <h1 style={S.panelTitle} className="panel-title">{titles[view].title}</h1>
+            <p style={S.panelSub} className="panel-sub">{titles[view].sub}</p>
 
             {infoMessage && <Banner>{infoMessage}</Banner>}
 
@@ -662,7 +666,7 @@ export default function LoginPage({ onLogin }) {
                   </InputField>
                 </Field>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
                   <LinkBtn onClick={goToForgot}>Forgot password?</LinkBtn>
                 </div>
 
@@ -693,7 +697,7 @@ export default function LoginPage({ onLogin }) {
                   {forgotPending ? 'Sending code...' : 'Send Reset Code'}
                 </PrimaryBtn>
 
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
                   <LinkBtn onClick={goToLogin}><IconArrowLeft /> Back to Sign in</LinkBtn>
                 </div>
               </>
@@ -711,7 +715,7 @@ export default function LoginPage({ onLogin }) {
                   />
                 </Field>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
                   <LinkBtn onClick={doResendCode} disabled={forgotPending || resendCooldown > 0}>
                     {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
                   </LinkBtn>
@@ -721,7 +725,7 @@ export default function LoginPage({ onLogin }) {
                   Verify Code
                 </PrimaryBtn>
 
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
                   <LinkBtn onClick={goToLogin}><IconArrowLeft /> Back to Sign in</LinkBtn>
                 </div>
               </>
@@ -762,7 +766,7 @@ export default function LoginPage({ onLogin }) {
                   {resetPending ? 'Saving...' : 'Save New Password'}
                 </PrimaryBtn>
 
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
                   <LinkBtn onClick={() => setView('verify-otp')}><IconArrowLeft /> Back to OTP</LinkBtn>
                 </div>
               </>
