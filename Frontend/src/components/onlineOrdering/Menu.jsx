@@ -1,9 +1,22 @@
 // src/components/onlineOrdering/Menu.jsx
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
+
+// ─────────────────────────────────────────────────────────────
+// Icon for each category tab (used on mobile where labels are hidden)
+// ─────────────────────────────────────────────────────────────
+const CATEGORY_ICONS = {
+  'All': LayoutGrid,
+  'Promo Bundle': Tag,
+  'Package': Package,
+  'Cake': Cake,
+  'Pastry': Croissant,
+  'Celebration Material': PartyPopper,
+};
+const getCategoryIcon = (cat) => CATEGORY_ICONS[cat] || Tag;
 
 // ─────────────────────────────────────────────────────────────
 // Builds "Product A (Option, Option) + Product B" text for a bundle —
@@ -492,13 +505,65 @@ function ProductModal({ product, onClose, onAddToCart }) {
 
 function ImagePreviewModal({ product, onClose }) {
   if (!product) return null;
+
+  const isBundleGrid = product.type === 'bundle' && !product.custom_image_url && product.products && product.products.length > 0;
+
+  const renderGrid = () => {
+    const products = product.products;
+    const MAX_IMAGE_SLOTS = 3;
+    const showCountTile = products.length > MAX_IMAGE_SLOTS;
+    const imageSlots = showCountTile ? products.slice(0, MAX_IMAGE_SLOTS - 1) : products;
+    const extraCount = products.length - imageSlots.length;
+    const segmentCount = imageSlots.length + (showCountTile ? 1 : 0);
+
+    return (
+      <div className="relative w-full h-[50vh] sm:h-[60vh] flex rounded-[14px] overflow-hidden bg-[#F5EFEB]">
+        {imageSlots.map((p, idx) => {
+          const img = p.image_url || p.image;
+          return (
+            <div key={p.id ?? idx} className="flex-1 h-full relative overflow-hidden">
+              {img ? (
+                <img src={img} alt={p.name} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-[#F5EFEB] flex items-center justify-center">
+                  <Package size={32} className="text-[#DED4CC]" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {showCountTile && (
+          <div className="flex-1 h-full bg-[#3B1F0A] flex flex-col items-center justify-center text-white">
+            <span className="text-3xl sm:text-4xl font-extrabold leading-none">+{extraCount}</span>
+            <span className="text-xs font-bold uppercase tracking-wide opacity-80 mt-1">more</span>
+          </div>
+        )}
+
+        {Array.from({ length: segmentCount - 1 }).map((_, i) => (
+          <div
+            key={i}
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 w-10 h-10 rounded-full bg-white shadow-lg flex items-center justify-center"
+            style={{ left: `${(100 / segmentCount) * (i + 1)}%` }}
+          >
+            <Plus size={20} className="text-[#3B1F0A]" strokeWidth={3} />
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 bg-[#1F1108]/80 backdrop-blur-md z-[5000] flex items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200" onClick={onClose}>
       <div className="relative w-full max-w-2xl flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
         <button onClick={onClose} className="absolute -top-4 -right-2 sm:-top-3 sm:-right-3 w-9 h-9 rounded-full bg-white text-[#3B1F0A] flex items-center justify-center shadow-lg hover:bg-[#F5EFEB] active:scale-95 transition-all z-10"><X size={18} /></button>
         <div className="p-2 sm:p-3 bg-gradient-to-br from-[#EFE0C8] via-[#FCFAF9] to-[#DDC3A0] rounded-[22px] shadow-2xl w-full">
           <div className="rounded-2xl border border-[#3B1F0A]/25 p-1">
-            <img src={product.image_url} alt={product.name} className="w-full max-h-[65vh] sm:max-h-[70vh] object-contain rounded-[14px] bg-[#F5EFEB]" />
+            {isBundleGrid ? (
+              renderGrid()
+            ) : (
+              <img src={product.custom_image_url || product.image_url} alt={product.name} className="w-full max-h-[65vh] sm:max-h-[70vh] object-contain rounded-[14px] bg-[#F5EFEB]" />
+            )}
           </div>
         </div>
         <div className="mt-4 text-center px-4">
@@ -550,7 +615,8 @@ function getQuantityLimit(item) {
 
 export default function Menu({ cart, setCart }) {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('All');
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(location.state?.category || 'All');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
@@ -698,7 +764,7 @@ export default function Menu({ cart, setCart }) {
       if (isQuantityTracked(item)) {
         const limit = getQuantityLimit(item);
         if (currentQtyInCart + item.qty > limit) {
-          showToast(`Sorry, hanggang ${limit} na lang ang available para sa ${item.name}.`);
+          showToast(`Sorry, you've reached the available limit for ${item.name}.`);
           return prev;
         }
       }
@@ -721,7 +787,7 @@ export default function Menu({ cart, setCart }) {
       const currentQtyInCart = prev.filter(i => i.id === item.id).reduce((s, i) => s + i.qty, 0);
       const limit = getQuantityLimit(item);
       if (currentQtyInCart + delta > limit) {
-        showToast(`Limit reached: ${limit} na lang ang available para sa ${item.name}.`);
+        showToast(`Limit reached for ${item.name}.`);
         return prev;
       }
     }
@@ -786,7 +852,7 @@ export default function Menu({ cart, setCart }) {
             <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-4">
             {catProducts.map(p => {
               const isStockTracked = isQuantityTracked(p);
               const currentStock = getQuantityLimit(p);
@@ -805,10 +871,10 @@ export default function Menu({ cart, setCart }) {
                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105 group-hover:blur-[3px] group-hover:brightness-[0.55]" />
                     )}
 
-                    {isStockTracked && (
-                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                    {isStockTracked && isSoldOut && (
+                      <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-red-500/90 text-white">
                         <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {isSoldOut ? 'Sold Out' : `${currentStock} Available`}
+                          Sold Out
                         </span>
                       </div>
                     )}
@@ -925,20 +991,26 @@ export default function Menu({ cart, setCart }) {
               </div>
               
               <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'}`}>
-                <div className="flex gap-5 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
-                  {['All', ...categories].map(cat => (
-                    <button 
-                      key={cat} 
-                      onClick={() => setActiveTab(cat)}
-                      className={`shrink-0 pb-2.5 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                        activeTab === cat 
-                          ? 'border-[#3B1F0A] text-[#3B1F0A]' 
-                          : 'border-transparent text-[#8A7264] hover:text-[#3B1F0A]'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                <div className="flex gap-4 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
+                  {['All', ...categories].map(cat => {
+                    const Icon = getCategoryIcon(cat);
+                    return (
+                      <button 
+                        key={cat} 
+                        onClick={() => setActiveTab(cat)}
+                        title={cat}
+                        aria-label={cat}
+                        className={`shrink-0 flex items-center justify-center sm:justify-start gap-1.5 pb-2.5 px-1.5 sm:px-0 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
+                          activeTab === cat 
+                            ? 'border-[#3B1F0A] text-[#3B1F0A]' 
+                            : 'border-transparent text-[#8A7264] hover:text-[#3B1F0A]'
+                        }`}
+                      >
+                        <Icon size={20} className="sm:hidden" />
+                        <span className="hidden sm:inline">{cat}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

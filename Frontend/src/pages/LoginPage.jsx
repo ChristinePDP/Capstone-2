@@ -541,6 +541,14 @@ export default function LoginPage({ onLogin }) {
     'set-password': { title: 'Set new password', sub: 'Create a new, secure password for your account.' },
   };
 
+  // ── Copy per view ──
+  const titles = {
+    login:  { title: 'Welcome back', sub: 'Sign in to your admin account to continue.' },
+    forgot: { title: 'Forgot password?', sub: "Enter your email and we'll send you an 8-digit code to reset your password." },
+    'verify-otp': { title: 'Enter reset code', sub: `Check ${resetEmail} for the 8-digit code we sent.` },
+    'set-password': { title: 'Set new password', sub: 'Create a new, secure password for your account.' },
+  };
+
   return (
     <div style={S.root} onKeyDown={handleKeyDown}>
       <style>{`
@@ -594,9 +602,9 @@ export default function LoginPage({ onLogin }) {
           .responsive-card {
             flex-direction: column;
             min-height: auto;
-            max-height: calc(100vh - 32px); /* Tinitiyak na hindi lalampas sa screen height */
-            overflow-y: auto; /* Magkakaroon ng scrollbar ang loob kapag sobrang liit ng phone */
-            margin: 16px; /* Binawasan ang margin para mas lumaki ang space sa loob */
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+            margin: 16px;
           }
           .responsive-brand {
             width: 100%;
