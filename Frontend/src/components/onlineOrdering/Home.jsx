@@ -11,10 +11,10 @@ import EventAdsModal from '../onlineOrdering/eventAdsModal';
 const HERO_FILE = 'heroimg.png';
 
 const STEPS = [
-  { n: '01', title: 'Browse the menu', copy: 'Cakes, pastries and celebration packages, all in one place.' },
-  { n: '02', title: 'Add to your cart', copy: 'Choose flavors and themes for made-to-order items.' },
-  { n: '03', title: 'Confirm details', copy: 'Tell us who it’s for, and when you’d like to pick it up.' },
-  { n: '04', title: 'Enjoy', copy: 'Show your digital receipt at the counter and take it home.' },
+  { n: '01', title: 'Select Items', copy: 'Browse the menu and add your favorite cakes and pastries to the cart.' },
+  { n: '02', title: 'Details', copy: 'Tell us who it’s for, and when you’d like to pick it up.' },
+  { n: '03', title: 'Payment', copy: 'Choose your payment method and complete your order securely.' },
+  { n: '04', title: 'Complete', copy: 'Show your e-receipt at the counter and take it home.' },
 ];
 
 const GALLERY_FILES = [
@@ -23,64 +23,74 @@ const GALLERY_FILES = [
 ];
 
 function CreationsCarousel({ items, className = '' }) {
-  const trackRef = useRef(null);
-  const [atStart, setAtStart] = useState(true);
-  const [atEnd, setAtEnd] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const total = items.length;
 
-  const updateEdges = () => {
-    const el = trackRef.current;
-    if (!el) return;
-    setAtStart(el.scrollLeft <= 4);
-    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 4);
-  };
-
-  const scrollByAmount = (dir) => {
-    const el = trackRef.current;
-    if (!el) return;
-    el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: 'smooth' });
-  };
+  const goTo = (idx) => setActiveIndex(((idx % total) + total) % total);
+  const prev = () => goTo(activeIndex - 1);
+  const next = () => goTo(activeIndex + 1);
 
   return (
-    <div className={`relative w-full ${className}`}>
-      <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
-
+    <div className={`relative w-full flex items-center justify-center ${className}`}>
       <button
-        onClick={() => scrollByAmount(-1)}
-        disabled={atStart}
+        onClick={prev}
         aria-label="Previous creations"
-        className="flex absolute left-1 sm:-left-2 lg:-left-4 top-1/2 -translate-y-1/2 z-10 w-8 h-8 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] disabled:opacity-25 disabled:cursor-not-allowed transition-all"
+        className="flex absolute left-0 sm:left-1 lg:left-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
       >
-        <ChevronLeft size={16} className="sm:w-[18px] sm:h-[18px]" />
+        <ChevronLeft size={14} className="sm:w-[18px] sm:h-[18px]" />
       </button>
 
-      <div
-        ref={trackRef}
-        onScroll={updateEdges}
-        className="no-scrollbar flex gap-3 sm:gap-5 overflow-x-auto scroll-smooth snap-x snap-mandatory px-4 sm:px-1 h-[240px] sm:h-[350px] lg:h-full items-stretch py-2"
-      >
-        {items.map((src, i) => (
-          <div
-            key={i}
-            className="snap-start shrink-0 w-[140px] sm:w-[220px] lg:w-auto h-full lg:aspect-[3/4.2] bg-white p-1.5 sm:p-2 rounded-t-[999px] rounded-b-2xl border border-[#DED4CC] shadow-sm"
-          >
-            <div className="w-full h-full rounded-t-[999px] rounded-b-xl overflow-hidden">
-              <img
-                src={src}
-                alt={`Past order ${i + 1}`}
-                className="w-full h-full object-cover transition-all duration-500 ease-out"
-              />
+      <div className="relative w-full h-full flex items-center justify-center overflow-hidden px-8 sm:px-12 lg:px-14 py-5 sm:py-7 lg:py-9">
+        {items.map((src, i) => {
+          let offset = i - activeIndex;
+          if (offset > total / 2) offset -= total;
+          if (offset < -total / 2) offset += total;
+
+          const abs = Math.abs(offset);
+          if (abs > 2) return null;
+
+          const isActive = offset === 0;
+          const translatePct = offset * 58;
+          const scale = isActive ? 1 : abs === 1 ? 0.78 : 0.62;
+          const opacity = isActive ? 1 : abs === 1 ? 0.55 : 0.28;
+          const blurPx = isActive ? 0 : abs === 1 ? 2.5 : 5;
+
+          return (
+            <div
+              key={i}
+              onClick={() => !isActive && goTo(i)}
+              className={`group absolute w-[110px] sm:w-[195px] lg:w-[220px] h-[150px] sm:h-[250px] lg:h-[285px] transition-all duration-500 ease-out ${abs === 2 ? 'hidden sm:block' : ''} ${isActive ? 'cursor-default' : 'cursor-pointer'}`}
+              style={{
+                transform: `translateX(${translatePct}%) scale(${scale})`,
+                filter: `blur(${blurPx}px)`,
+                opacity,
+                zIndex: isActive ? 20 : 10 - abs,
+              }}
+            >
+              <div
+                className={`w-full h-full bg-white p-1.5 sm:p-2 rounded-t-[999px] rounded-b-2xl border border-[#DED4CC] shadow-md overflow-hidden transition-all duration-300 ${
+                  isActive ? 'group-hover:scale-[1.035] group-hover:shadow-2xl group-hover:border-[#D4A87A]' : ''
+                }`}
+              >
+                <div className="w-full h-full rounded-t-[999px] rounded-b-xl overflow-hidden">
+                  <img
+                    src={src}
+                    alt={`Past order ${i + 1}`}
+                    className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <button
-        onClick={() => scrollByAmount(1)}
-        disabled={atEnd}
+        onClick={next}
         aria-label="Next creations"
-        className="flex absolute right-1 sm:-right-2 lg:-right-4 top-1/2 -translate-y-1/2 z-10 w-8 h-8 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] disabled:opacity-25 disabled:cursor-not-allowed transition-all"
+        className="flex absolute right-0 sm:right-1 lg:right-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
       >
-        <ChevronRight size={16} className="sm:w-[18px] sm:h-[18px]" />
+        <ChevronRight size={14} className="sm:w-[18px] sm:h-[18px]" />
       </button>
     </div>
   );
@@ -154,10 +164,14 @@ function BundleTicketImage({ products = [], customImageUrl }) {
   );
 }
 
-function BundleTicketCard({ bundle, navigate, idx = 0 }) {
+function BundleTicketCard({ bundle, navigate, idx = 0, innerRef, focusStyle, onFocusEnter, onFocusLeave }) {
   if (bundle.isLoading) {
     return (
-      <div className="snap-start shrink-0 w-[220px] sm:w-[280px] [contain:layout]">
+      <div
+        ref={innerRef}
+        style={focusStyle}
+        className="snap-center shrink-0 w-[220px] sm:w-[280px] [contain:layout] transition-[filter,opacity,transform] duration-300 ease-out"
+      >
         <div className="bg-white rounded-2xl flex flex-col relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)]">
           <div className="p-3 pb-0 animate-pulse">
             <div className="aspect-[4/3] w-full rounded-[14px] bg-[#E8E2DD]"></div>
@@ -191,7 +205,13 @@ function BundleTicketCard({ bundle, navigate, idx = 0 }) {
     : (bundle.event_tag || productNamesList || 'Promo Bundle');
 
   return (
-    <div className="snap-start shrink-0 w-[220px] sm:w-[280px] [contain:layout]">
+    <div
+      ref={innerRef}
+      style={focusStyle}
+      onMouseEnter={onFocusEnter}
+      onMouseLeave={onFocusLeave}
+      className="snap-center shrink-0 w-[220px] sm:w-[280px] [contain:layout] transition-[filter,opacity,transform] duration-300 ease-out"
+    >
       <div
         onClick={() => !isDummy && navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
         className={`bg-white rounded-2xl flex flex-col group relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] transition-all duration-300 ease-out hover:-translate-y-2 hover:shadow-xl
@@ -266,9 +286,13 @@ function BundleTicketCard({ bundle, navigate, idx = 0 }) {
 
 function BundleCarousel({ bundles, isLoading, navigate }) {
   const trackRef = useRef(null);
+  const cardRefs = useRef([]);
+  const rafRef = useRef(null);
   const [atStart, setAtStart] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
+  const [focusVals, setFocusVals] = useState([]);
+  const [hoveredIdx, setHoveredIdx] = useState(null);
 
   let displayBundles = [];
   if (isLoading) {
@@ -307,7 +331,11 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
   const scrollByAmount = (dir) => {
     const el = trackRef.current;
     if (!el) return;
-    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: 'smooth' });
+    const card = el.querySelector(':scope > *');
+    if (!card) return;
+    const gap = parseFloat(getComputedStyle(el).columnGap || '0');
+    const step = card.getBoundingClientRect().width + gap;
+    el.scrollBy({ left: dir * step, behavior: 'smooth' });
   };
 
   return (
@@ -539,16 +567,16 @@ export default function Home() {
         </section>
 
         {/* 4. Some Past Creations */}
-        <section className="w-full bg-[#F5EFEB] min-h-[420px] sm:min-h-[600px] lg:min-h-0 lg:h-[calc(100vh-76px)] overflow-hidden flex items-center">
-          <div className="max-w-[1300px] w-full mx-auto px-2 sm:px-8 py-10 sm:py-16 lg:py-8 h-full flex flex-col justify-center">
-            <div className="text-center mb-6 sm:mb-8 lg:mb-6 shrink-0 px-4 sm:px-0">
-              <h2 className="text-2xl sm:text-4xl font-serif text-[#3B1F0A] mb-2 sm:mb-3 lg:mb-2">Some Past Creations</h2>
-              <p className="text-xs sm:text-base text-[#8A7264] italic">
+        <section className="w-full bg-[#F5EFEB] min-h-[380px] sm:min-h-[600px] lg:min-h-0 lg:h-[calc(100vh-76px)] overflow-hidden flex items-center">
+          <div className="max-w-[1300px] w-full mx-auto px-1 sm:px-8 py-8 sm:py-16 lg:py-8 h-full flex flex-col justify-center">
+            <div className="text-center mb-5 sm:mb-8 lg:mb-6 shrink-0 px-4 sm:px-0">
+              <h2 className="text-xl sm:text-4xl font-serif text-[#3B1F0A] mb-2 sm:mb-3 lg:mb-2">Some Past Creations</h2>
+              <p className="text-[11px] sm:text-base text-[#8A7264] italic">
                 A glimpse of the bespoke orders we've crafted for our customers.
               </p>
             </div>
 
-            <div className="lg:flex-1 w-full lg:min-h-0">
+            <div className="h-[220px] sm:h-auto lg:flex-1 w-full lg:min-h-0">
               <CreationsCarousel items={GALLERY} className="h-full" />
             </div>
           </div>

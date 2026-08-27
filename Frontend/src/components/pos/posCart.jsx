@@ -316,6 +316,58 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const handlePlaceOrder = async () => {
     setIsProcessing(true);
 
+    // FIX: dati'y wala talagang upload step dito kaya kahit may na-attach
+    // na larawan ang cashier sa "Upload Reference Image", hindi ito
+    // na-uupload sa storage bucket at walang laman ang customer_reference_url
+    // sa DB. Same pattern na gaya ng ginagamit ng Online Ordering
+    // (Checkout.jsx): i-upload muna ang bawat File sa
+    // `/online-ordering/upload-inspiration` bago gawin ang payload — regular
+    // product ay iisang File (`inspiration_image`), bundle naman ay
+    // `{ [productId]: File }` (isa per component).
+    const updatedCart = [...cart];
+    for (let i = 0; i < updatedCart.length; i++) {
+      const img = updatedCart[i].inspiration_image;
+
+      if (img instanceof File) {
+        const formData = new FormData();
+        formData.append('image', img);
+        try {
+          const uploadRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/upload-inspiration`, {
+            method: 'POST',
+            body: formData,
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success) {
+            updatedCart[i].inspiration_url = uploadData.url;
+          }
+        } catch (err) {
+          console.error('Item image upload error:', err);
+        }
+      } else if (img && typeof img === 'object') {
+        const urls = {};
+        for (const [productId, file] of Object.entries(img)) {
+          if (!(file instanceof File)) continue;
+          const formData = new FormData();
+          formData.append('image', file);
+          try {
+            const uploadRes = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/upload-inspiration`, {
+              method: 'POST',
+              body: formData,
+            });
+            const uploadData = await uploadRes.json();
+            if (uploadData.success) {
+              urls[productId] = uploadData.url;
+            }
+          } catch (err) {
+            console.error(`Bundle item image upload error (product ${productId}):`, err);
+          }
+        }
+        if (Object.keys(urls).length > 0) {
+          updatedCart[i].inspiration_urls = urls;
+        }
+      }
+    }
+
     // FIX: dating ang product ID at price lang ang ipinapasa dito — nawawala
     // ang order_slip_details / selected_price_options na kinukuha na ng
     // PosProductModal (kaya wala talagang na-se-save sa DB kahit may
@@ -323,18 +375,17 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     // (`type`, `bundleId`) para ma-explode ito ng backend (resolveOrderItems)
     // papunta sa kani-kanilang component product rows — parehong contract
     // gaya ng ginagamit ng Online Ordering checkout.
-    // NOTE: `inspiration_image` (File object mula sa "Upload Reference
-    // Image") ay hindi pa rin dito isinasama — kailangan pang i-upload ito
-    // sa storage bucket muna (gamit ang /online-ordering upload endpoint)
-    // bago maging usable na URL. Hiwalay na TODO ito.
-    const formattedItems = cart.map(item => {
+    const formattedItems = updatedCart.map(item => {
       if (item.type === 'bundle') {
         return {
           type: 'bundle',
           bundleId: item.bundleId,
           quantity: item.qty,
           orderSlip: item.order_slip_details || {},
-          specialInstructions: item.details || ''
+          specialInstructions: item.details || '',
+          // FIX: idinagdag — per-component image URLs, binabasa na ng
+          // resolveBundleLineItem sa backend.
+          inspirationUrls: item.inspiration_urls || null
         };
       }
       return {
@@ -345,7 +396,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         subtotal: item.price * item.qty,
         orderSlip: item.order_slip_details || null,
         selectedPriceOptions: item.selected_price_options || null,
-        specialInstructions: item.details || ''
+        specialInstructions: item.details || '',
+        // FIX: idinagdag — dating wala kaya laging null ang
+        // customer_reference_url ng POS orders.
+        inspirationUrl: item.inspiration_url || null
       };
     });
 

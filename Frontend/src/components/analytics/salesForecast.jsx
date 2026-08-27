@@ -143,10 +143,10 @@ export default function SalesForecast({
                 domain={[0, dataMax => Math.max(10000, dataMax || 10000)]} 
               />
 
-              <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#f1ece4', strokeWidth: 2 }} />
+              <Tooltip content={<CustomTooltip />} cursor={false} />
 
               <Line 
-                type="monotone" 
+                type="linear" 
                 dataKey="forecastSales" 
                 name="Forecast" 
                 stroke="#d97706" 

@@ -156,13 +156,35 @@ export const markPendingOrderPaid = async (pendingOrderId, paymentId, resultOrde
 // --- ACTUAL ORDER CREATION LOGIC ---
 
 const allocateBundlePrice = (products, discountedTotal) => {
-  // EVEN SPLIT — hinahati ang discounted bundle price nang PANTAY-PANTAY sa
-  // lahat ng products sa loob ng bundle, hindi proportional sa kani-kanilang
-  // orihinal na presyo. Ang huling product sa listahan ang kumukuha ng
-  // "remainder" sa halip na sarili niyang equal share, para eksaktong
-  // tumugma ang kabuuang sum sa totoong binayaran ng customer — walang
-  // centavo na "nawawala" o "sumosobra" dahil sa rounding.
-  const equalShare = Math.round((discountedTotal / products.length) * 100) / 100;
+  // PROPORTIONAL SPLIT — hinahati ang discounted bundle price base sa
+  // RELATIVE na orihinal na presyo (`price`) ng bawat product ("relative
+  // standalone selling price" method), hindi pantay-pantay. Kaya kung mas
+  // mahal ang isang product bago ma-discount, mas malaki rin ang share
+  // niya sa discounted total — parehong % discount ang naa-apply sa bawat
+  // item, tama ang per-product revenue/reporting, at fair kung sakaling
+  // kailanganing i-refund/i-cancel ang isa lang sa mga item.
+  //
+  // Ang huling product sa listahan ang kumukuha ng "remainder" sa halip
+  // na sarili niyang computed share, para eksaktong tumugma ang kabuuang
+  // sum sa totoong binayaran ng customer — walang centavo na "nawawala"
+  // o "sumosobra" dahil sa rounding.
+  const originalTotal = products.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
+
+  // Fallback kung 0/wala ang lahat ng original prices (hindi dapat
+  // mangyari sa totoong data, pero iwasan ang divide-by-zero) — balik sa
+  // dating equal split.
+  if (originalTotal <= 0) {
+    const equalShare = Math.round((discountedTotal / products.length) * 100) / 100;
+    let runningTotal = 0;
+    return products.map((p, idx) => {
+      if (idx === products.length - 1) {
+        const remainder = Math.round((discountedTotal - runningTotal) * 100) / 100;
+        return { ...p, allocated_price: remainder };
+      }
+      runningTotal += equalShare;
+      return { ...p, allocated_price: equalShare };
+    });
+  }
 
   let runningTotal = 0;
   return products.map((p, idx) => {
@@ -170,8 +192,10 @@ const allocateBundlePrice = (products, discountedTotal) => {
       const remainder = Math.round((discountedTotal - runningTotal) * 100) / 100;
       return { ...p, allocated_price: remainder };
     }
-    runningTotal += equalShare;
-    return { ...p, allocated_price: equalShare };
+    const weight = (Number(p.price) || 0) / originalTotal;
+    const share = Math.round(discountedTotal * weight * 100) / 100;
+    runningTotal += share;
+    return { ...p, allocated_price: share };
   });
 };
 
@@ -212,7 +236,15 @@ const resolveBundleLineItem = async (item) => {
     total_price: Math.round(p.allocated_price * quantity * 100) / 100,
     order_slip_details: item.orderSlip || {},
     selected_price_options: null,
-    customer_reference_url: null,
+    // FIX: dating hardcoded na `null` ito palagi — kahit may na-upload nang
+    // larawan ang customer per-component sa BundleModal (`bundleImages`,
+    // shape na `{ [productId]: File }`), hindi ito nababasa dito kaya laging
+    // walang laman ang customer_reference_url ng bundle rows. Ngayon,
+    // binabasa na ang `item.inspirationUrls` (object map na `{ [productId]: url }`,
+    // ibinubuo ng frontend pagkatapos i-upload ang bawat File sa bucket bago
+    // pa man ito ipasa dito) at ang tamang URL para sa product `p.id` ang
+    // ilalagay sa exploded row na iyon.
+    customer_reference_url: item.inspirationUrls?.[p.id] || null,
     bundle_id: bundle.id,
     bundle_group_id: bundleGroupId,
     bundle_name: bundle.bundle_name,

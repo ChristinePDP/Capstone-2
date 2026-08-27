@@ -11,6 +11,7 @@ import EventAdsModal from './components/onlineOrdering/eventAdsModal';
 
 import ProductAndEventPage from './pages/productAndEventPage';
 import PosPage from './pages/posPage';
+import SettingsPage from './pages/settingsPage'; // <-- ADDED
 
 import { ToastProvider } from './components/ui/index';
 import { Layout } from './components/Sidebar';
@@ -81,7 +82,10 @@ export default function App() {
            {/* ── PRODUCT & EVENT MANAGEMENT (Private) ── */}
           {/* "/*" wildcard para pumasok din ang "/productAndEvent/events" tab route */}
           <Route path="/productAndEvent/*" element={<ProtectedAdminRoute><ProductAndEventPage /></ProtectedAdminRoute>} />
-          
+
+          {/* ── SETTINGS (Private) — BAGO ── */}
+          <Route path="/settings" element={<ProtectedAdminRoute><SettingsPage /></ProtectedAdminRoute>} />
+
           {/* ── DAGDAG: Explicit redirect kapag eksaktong "/onlineOrdering" lang ang tinype ── */}
           <Route path="/onlineOrdering" element={<Navigate to="/onlineOrdering/home" replace />} />
           
