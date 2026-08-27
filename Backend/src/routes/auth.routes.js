@@ -11,7 +11,7 @@ router.get('/me', authMiddlewareJwt, AuthController.me);
 
 // NEW: forgot password flow
 router.post('/forgot-password', AuthController.requestReset);
-// 👇 ITO YUNG KULANG KAYA NAG-E-ERROR! IDINAGDAG KO NA 👇
+
 router.post('/verify-otp', AuthController.verifyOtpOnly); 
 router.post('/reset-password', AuthController.verifyReset);
 
