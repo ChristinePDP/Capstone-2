@@ -11,7 +11,6 @@ const PAGE_TITLES = {
   '/products':          'Product Management',
   '/inventory':         'Inventory',
   '/settings':          'Settings',
-  '/settings/website-editor': 'Website Appearance',
 };
 
 const resolveTitle = (pathname) => {
