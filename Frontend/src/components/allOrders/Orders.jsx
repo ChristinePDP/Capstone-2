@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Calendar } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td, Pagination, SearchBar, FilterPills } from '../ui';
+import { Badge, Button, Table, Tr, Td, Pagination, SearchBar } from '../ui';
 import QrScanner from './QrScanner';
 
 const ORDER_STATUSES = ['All', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
@@ -105,16 +105,45 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-col gap-3 w-full sm:flex-row sm:items-center sm:gap-4 sm:w-auto">
-          <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-full sm:w-72 border-2 border-brand-200" />
-          <FilterPills options={ORDER_STATUSES} value={statusFilter} onChange={v => { setStatusFilter(v); setPage(1); }} />
+      {/* Desktop (lg+): iisang row na lang ang search, status tabs, at
+          QR button — makatipid sa space. Mobile/tablet: hiwalay pa rin
+          ang bawat isa sa sariling row, mas komportable sa maliit na
+          screen. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+        <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-full lg:w-64 lg:shrink-0 border-2 border-brand-200" />
+
+        {/* Order status tabs — underline style (gaya ng category tabs sa
+            customer-facing Menu). Sa mobile, "justify-between" para
+            kumalat/mag-spread ang mga tab sa buong lapad; sa desktop
+            (lg+), "justify-start" na lang para naka-left-align sila sa
+            loob ng natitirang espasyo sa row, hindi na naka-spread. */}
+        <div className="flex w-full lg:flex-1 justify-between lg:justify-start gap-4 sm:gap-8 lg:gap-6 overflow-x-auto scrollbar-hide border-b border-slate-200 lg:border-b-0">
+          {ORDER_STATUSES.map(status => (
+            <button
+              key={status}
+              onClick={() => { setStatusFilter(status); setPage(1); }}
+              className={`shrink-0 pb-2.5 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
+                statusFilter === status
+                  ? 'border-slate-900 text-slate-900'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {status}
+            </button>
+          ))}
         </div>
+
         <QrScanner orders={orders} onStatusChange={onStatusChange} onViewOrder={onViewOrder} />
       </div>
 
-      {/* Mobile / tablet — cards */}
-      <div className="md:hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+      {/* Mobile / tablet — cards. Gamit ang "lg" breakpoint (1024px) sa
+          halip na "md" (768px): may 8 columns ang table (ID, Customer,
+          Type, Amount, Payment, Pick-up, Status, Action), kaya kahit sa
+          mga tablet-width na screen (768–1024px) masisikip/maiipit pa rin
+          ito kung ipipilit — mas maganda pa ring cards ang lumabas doon.
+          Totoong desktop-width (1024px+) na lang talaga dapat lumabas
+          ang table view. */}
+      <div className="lg:hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         {loading ? (
           <p className="text-center py-16 text-slate-400 font-medium">Loading orders…</p>
         ) : paged.length ? (
@@ -181,8 +210,11 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
         <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
       </div>
 
-      {/* Desktop — table */}
-      <div className="hidden md:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Desktop — table. Lumalabas lang mula lg (1024px) pataas, para
+          may sapat na lapad ang 8 columns. Dinagdagan pa rin ng
+          overflow-x-auto bilang safety net kung sakaling masikipan pa
+          rin sa mismong 1024px width. */}
+      <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         <Table columns={COLUMNS}>
           {loading ? (
             <Tr><Td className="text-center py-16 text-slate-400 font-medium" colSpan={8}>Loading orders…</Td></Tr>

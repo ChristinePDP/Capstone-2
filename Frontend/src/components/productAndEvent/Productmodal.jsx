@@ -18,6 +18,42 @@ const BLANK_PRODUCT = {
 const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select'];
 const NEEDS_OPTIONS = ['Select', 'Multi-select'];
 
+// FIX: dating fetchTags() lang ang laman ng useEffect na naka-bind sa
+// `isOpen` — kaya TUWING mag-oopen ang modal na ito (bawat "Add Product" o
+// "Edit" click) ay bagong fetch ulit sa /events endpoint, kahit kararating
+// mo lang. Module-scope cache ito ngayon (sa labas ng component) na may
+// TTL (5 minutes) — sapat na katagalan para hindi na paulit-ulit humingi sa
+// backend sa loob ng iisang session ng pag-add/edit ng maraming produkto,
+// pero hindi rin masyadong matagal para maging stale kung may bagong event
+// na na-save sa Event Manager tab.
+const TAGS_CACHE_TTL_MS = 5 * 60 * 1000;
+let tagsCache = null;
+let tagsCacheAt = 0;
+let tagsCachePromise = null;
+
+async function fetchEventTagsFromApi() {
+  const isFresh = tagsCache && (Date.now() - tagsCacheAt) < TAGS_CACHE_TTL_MS;
+  if (isFresh) return tagsCache;
+  if (tagsCachePromise) return tagsCachePromise;
+
+  tagsCachePromise = (async () => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/events?active=true`);
+      const data = await response.json();
+      if (data.success && data.data) {
+        const fetchedTags = data.data.map(event => event.event_tag).filter(Boolean);
+        tagsCache = [...new Set(fetchedTags)];
+        tagsCacheAt = Date.now();
+      }
+      return tagsCache || [];
+    } finally {
+      tagsCachePromise = null;
+    }
+  })();
+
+  return tagsCachePromise;
+}
+
 function Modal({ isOpen = true, onClose, title, children, footer, size = 'md' }) {
   if (!isOpen) return null;
   const sizeClass = size === 'xl' ? 'max-w-5xl' : size === 'lg' ? 'max-w-3xl' : 'max-w-lg';
@@ -344,22 +380,12 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     }
   }, [product, isOpen]);
 
-  // Fetch Tags mula sa updated backend URL (/events)
+  // Fetch Tags mula sa updated backend URL (/events) — dumaan na sa cache
   useEffect(() => {
-    const fetchTags = async () => {
-      try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/events?active=true`);
-        const data = await response.json();
-        if (data.success && data.data) {
-          const fetchedTags = data.data.map(event => event.event_tag).filter(Boolean);
-          setAvailableTags([...new Set(fetchedTags)]);
-        }
-      } catch (error) {
-        console.error("Failed to fetch event tags:", error);
-      }
-    };
     if (isOpen) {
-      fetchTags();
+      fetchEventTagsFromApi()
+        .then(tags => setAvailableTags(tags))
+        .catch(error => console.error("Failed to fetch event tags:", error));
     }
   }, [isOpen]);
 

@@ -5,6 +5,11 @@ import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand
 import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
+// Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
+// ng customer, para hindi mabilis maubos ang Supabase Storage.
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_SIZE_LABEL = '5MB';
+
 // ─────────────────────────────────────────────────────────────
 // Icon for each category tab (used on mobile where labels are hidden)
 // ─────────────────────────────────────────────────────────────
@@ -103,6 +108,7 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
+  const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
   const products = bundle.products || [];
 
   if (!bundle || products.length === 0) return null;
@@ -123,6 +129,12 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
   };
 
   const handleImageChange = (file) => {
+    if (file && file.size > MAX_FILE_SIZE_BYTES) {
+      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setBundleImages(prev => ({ ...prev, [currentProduct.id]: null }));
+      return;
+    }
+    setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: '' }));
     setBundleImages(prev => ({
       ...prev,
       [currentProduct.id]: file
@@ -242,7 +254,8 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
 
               {allowsImageUpload && (
                 <div className={hasFields ? 'border-t border-[#EAE4E0] pt-4' : ''}>
-                  <label className="text-xs font-semibold text-[#8A7264] mb-1.5 block">Upload Reference Image (Optional)</label>
+                  <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+                  <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
 
                   {!bundleImages[currentProduct.id] ? (
                     <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
@@ -267,6 +280,9 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
                         <X size={13} />
                       </button>
                     </div>
+                  )}
+                  {bundleImageErrors[currentProduct.id] && (
+                    <span className="text-[10px] text-red-500 mt-1 block">{bundleImageErrors[currentProduct.id]}</span>
                   )}
                 </div>
               )}
@@ -302,10 +318,26 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
 function ProductModal({ product, onClose, onAddToCart }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
+  const [imageError, setImageError] = useState('');
   
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
 
   if (!product) return null;
+
+  const handleImagePick = (file) => {
+    if (!file) {
+      setImageFile(null);
+      setImageError('');
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageFile(null);
+      return;
+    }
+    setImageError('');
+    setImageFile(file);
+  };
 
   const hasFields = product.order_slip_fields && product.order_slip_fields.length > 0;
   const isVariable = product.pricing_mode === 'variable' && product.price_groups && product.price_groups.length > 0;
@@ -453,7 +485,8 @@ function ProductModal({ product, onClose, onAddToCart }) {
 
           {product.allow_file_upload && (
             <div className={`mb-2 ${isVariable || hasFields ? 'border-t border-[#EAE4E0] pt-6' : ''}`}>
-              <label className="text-xs font-semibold text-[#8A7264] mb-1.5 block">Upload Reference Image (Optional)</label>
+              <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+              <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
 
               {!imageFile ? (
                 <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
@@ -462,7 +495,7 @@ function ProductModal({ product, onClose, onAddToCart }) {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                    onChange={(e) => handleImagePick(e.target.files?.[0] || null)}
                     className="hidden"
                   />
                 </label>
@@ -471,7 +504,7 @@ function ProductModal({ product, onClose, onAddToCart }) {
                   <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{imageFile.name}</span>
                   <button
                     type="button"
-                    onClick={() => setImageFile(null)}
+                    onClick={() => handleImagePick(null)}
                     aria-label="Remove file"
                     className="ml-3 w-6 h-6 rounded-full bg-white text-[#8A7264] flex items-center justify-center shrink-0 hover:bg-[#EAE4E0] hover:text-[#3B1F0A] transition-colors"
                   >
@@ -479,6 +512,7 @@ function ProductModal({ product, onClose, onAddToCart }) {
                   </button>
                 </div>
               )}
+              {imageError && <span className="text-[10px] text-red-500 mt-1 block">{imageError}</span>}
             </div>
           )}
 
@@ -613,6 +647,49 @@ function getQuantityLimit(item) {
   return item.available_stock ?? basis ?? 0;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Module-level cache — hindi React state, kaya hindi ito nawawala kada
+// mag-unmount/mag-mount ulit ang Menu (hal. paglipat papunta sa Home
+// tapos balik). Unang tawag lang talaga mag-fefetch; sa mga susunod na
+// mount, ibabalik na lang nito ang parehong promise/resulta — isang
+// request lang sa buong buhay ng tab.
+// ─────────────────────────────────────────────────────────────
+let menuProductsFetchPromise = null;
+function getMenuProducts() {
+  if (!menuProductsFetchPromise) {
+    menuProductsFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products`)
+      .then(res => res.json())
+      .then(json => (json.success && Array.isArray(json.data))
+        ? json.data.map(p => ({
+            ...p,
+            order_slip_fields: p.order_slip_fields || [],
+            pricing_mode: p.pricing_mode || 'fixed',
+            price_groups: p.price_groups || [],
+            price_matrix: p.price_matrix || []
+          }))
+        : [])
+      .catch(err => {
+        console.error('Failed to fetch products:', err);
+        return [];
+      });
+  }
+  return menuProductsFetchPromise;
+}
+
+let menuBundlesFetchPromise = null;
+function getMenuBundles() {
+  if (!menuBundlesFetchPromise) {
+    menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
+      .then(res => res.json())
+      .then(json => (json.success && Array.isArray(json.data)) ? json.data : [])
+      .catch(err => {
+        console.error('Failed to load promo bundles:', err);
+        return [];
+      });
+  }
+  return menuBundlesFetchPromise;
+}
+
 export default function Menu({ cart, setCart }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -621,10 +698,10 @@ export default function Menu({ cart, setCart }) {
   const [modal, setModal] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
-  const [products, setProducts] = useState([]);
+  const [rawProducts, setRawProducts] = useState([]);
+  const [rawBundles, setRawBundles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [categories, setCategories] = useState(['Package', 'Cake', 'Pastry', 'Celebration Material']);
   const [toast, setToast] = useState(null); // { message }
   const toastTimerRef = useRef(null);
   const productListRef = useRef(null);
@@ -666,93 +743,73 @@ export default function Menu({ cart, setCart }) {
   };
 
   useEffect(() => {
-    const fetchProductsAndBundles = async () => {
-      try {
-        setIsLoading(true);
+    let cancelled = false;
 
-        const [productsRes, bundlesRes] = await Promise.all([
-          fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products`),
-          fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`).catch(() => null)
-        ]);
+    Promise.all([getMenuProducts(), getMenuBundles()]).then(([productsData, bundlesData]) => {
+      if (cancelled) return;
+      setRawProducts(productsData);
+      setRawBundles(bundlesData);
+      setIsLoading(false);
+    });
 
-        let allProducts = [];
-        if (productsRes && productsRes.ok) {
-          const json = await productsRes.json();
-          if (json.success) {
-            allProducts = json.data.map(p => ({
-              ...p,
-              order_slip_fields: p.order_slip_fields || [],
-              pricing_mode: p.pricing_mode || 'fixed',
-              price_groups: p.price_groups || [],
-              price_matrix: p.price_matrix || []
-            }));
-          }
-        }
-
-        let bundlesData = [];
-        if (bundlesRes && bundlesRes.ok) {
-           const bJson = await bundlesRes.json();
-           bundlesData = bJson.data || [];
-        }
-
-        if (bundlesData.length > 0) {
-          setCategories(prev => prev.includes('Promo Bundle') ? prev : ['Promo Bundle', ...prev]);
-
-          // Gaya ng sa admin Promo Bundles page: ipakita lang ang mga bundle na
-          // active AT nasa loob ng promo date range nito (kung meron man).
-          const activeBundles = bundlesData
-            .filter(b => b.is_active && b.is_within_date_range !== false)
-            .map(b => {
-             const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
-             const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => p.id === id)).filter(Boolean);
-
-             const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-             const isTracked = trackedComponents.length > 0;
-             const bundleStock = isTracked
-               ? Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0))
-               : 999;
-
-             return {
-                 id: `bundle-${b.id}`, 
-                 name: b.bundle_name,
-                 category: 'Promo Bundle',
-                 price: Number(b.bundle_price || b.discounted_price || 0), 
-                 original_price: Number(b.original_total || 0),
-                 discount_percent: Number(b.discount_percent || 0),
-                 event_tag: b.event_tag || null,
-                 bundle_options: b.bundle_options || {},
-                 image_url: b.custom_image_url || fallbackImage,
-                 custom_image_url: b.custom_image_url,
-                 
-                 products: bundleProducts,
-                 order_type: resolveBundleOrderType(bundleProducts),
-                 pricing_mode: 'fixed',
-                 
-                 available_stock: Math.max(0, bundleStock), 
-                 is_tracked: isTracked,
-                 
-                 type: 'bundle',       
-                 bundleId: b.id,
-                 order_slip_fields: [],
-                 price_groups: [],
-                 price_matrix: []
-             };
-          });
-
-          setProducts([...activeBundles, ...allProducts]);
-        } else {
-          setProducts(allProducts);
-        }
-
-      } catch (error) {
-        console.error("Failed to fetch products or bundles:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    fetchProductsAndBundles();
+    return () => { cancelled = true; };
   }, []);
+
+  const products = useMemo(() => {
+    const allProducts = rawProducts;
+    const bundlesData = rawBundles;
+
+    if (bundlesData.length === 0) return allProducts;
+
+    // Gaya ng sa admin Promo Bundles page: ipakita lang ang mga bundle na
+    // active AT nasa loob ng promo date range nito (kung meron man).
+    const activeBundles = bundlesData
+      .filter(b => b.is_active && b.is_within_date_range !== false)
+      .map(b => {
+       const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
+       const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => p.id === id)).filter(Boolean);
+
+       const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
+       const isTracked = trackedComponents.length > 0;
+       const bundleStock = isTracked
+         ? Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0))
+         : 999;
+
+       return {
+           id: `bundle-${b.id}`, 
+           name: b.bundle_name,
+           category: 'Promo Bundle',
+           price: Number(b.bundle_price || b.discounted_price || 0), 
+           original_price: Number(b.original_total || 0),
+           discount_percent: Number(b.discount_percent || 0),
+           event_tag: b.event_tag || null,
+           bundle_options: b.bundle_options || {},
+           image_url: b.custom_image_url || fallbackImage,
+           custom_image_url: b.custom_image_url,
+           
+           products: bundleProducts,
+           order_type: resolveBundleOrderType(bundleProducts),
+           pricing_mode: 'fixed',
+           
+           available_stock: Math.max(0, bundleStock), 
+           is_tracked: isTracked,
+           
+           type: 'bundle',       
+           bundleId: b.id,
+           order_slip_fields: [],
+           price_groups: [],
+           price_matrix: []
+       };
+    });
+
+    return [...activeBundles, ...allProducts];
+  }, [rawProducts, rawBundles]);
+
+  const categories = useMemo(() => {
+    const base = ['Package', 'Cake', 'Pastry', 'Celebration Material'];
+    const hasActiveBundles = rawBundles.some(b => b.is_active && b.is_within_date_range !== false);
+    return hasActiveBundles ? ['Promo Bundle', ...base] : base;
+  }, [rawBundles]);
 
   const addToCart = (item) => {
     setCart(prev => {

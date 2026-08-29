@@ -1,6 +1,42 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
 
+// Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
+// ng customer, para hindi mabilis maubos ang Supabase Storage.
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_SIZE_LABEL = '5MB';
+
+// FIX: dating naka-loob ito sa useEffect ng component, kaya tuwing
+// mag-uunmount/mag-remount ang PosMenu (kasabay ng PosPage tuwing lilipat
+// ka papunta sa POS page) ay bagong fetch ulit sa backend. Module-scope
+// variable ito ngayon (sa labas ng component) kaya minsan lang talaga ito
+// magre-request habang bukas ang session.
+let posBundlesCache = null;
+let posBundlesPromise = null;
+
+async function fetchPosBundles() {
+  if (posBundlesCache) return posBundlesCache;
+  if (posBundlesPromise) return posBundlesPromise;
+
+  posBundlesPromise = (async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`);
+      if (!res.ok) return posBundlesCache || [];
+      const json = await res.json();
+      const data = Array.isArray(json.data) ? json.data : [];
+      posBundlesCache = data;
+      return data;
+    } catch (error) {
+      console.error('[POS MENU] Failed to fetch bundles:', error);
+      return posBundlesCache || [];
+    } finally {
+      posBundlesPromise = null;
+    }
+  })();
+
+  return posBundlesPromise;
+}
+
 const BASE_CATEGORIES = ['All', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
 
 // ─────────────────────────────────────────────────────────────
@@ -138,10 +174,26 @@ function getQuantityLimit(item) {
 function PosProductModal({ product, onClose, onAddToCart }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
+  const [imageError, setImageError] = useState('');
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
   
   // BAGO: State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
+
+  const handleImagePick = (file) => {
+    if (!file) {
+      setImageFile(null);
+      setImageError('');
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageFile(null);
+      return;
+    }
+    setImageError('');
+    setImageFile(file);
+  };
 
   if (!product) return null;
 
@@ -342,7 +394,8 @@ function PosProductModal({ product, onClose, onAddToCart }) {
 
           {product.allow_file_upload && (
             <div className={`mb-2 ${isVariable || hasFields ? 'border-t border-[#EAE4E0] pt-6' : ''}`}>
-              <label className="text-xs font-semibold text-[#8A7264] mb-1.5 block">Upload Reference Image (Optional)</label>
+              <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+              <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
               {!imageFile ? (
                 <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
                   <span className="mr-3 py-1 px-3 rounded-lg border-0 text-[10px] font-bold uppercase bg-white text-[#4A3B36] shrink-0">Choose File</span>
@@ -350,7 +403,7 @@ function PosProductModal({ product, onClose, onAddToCart }) {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                    onChange={(e) => handleImagePick(e.target.files?.[0] || null)}
                     className="hidden"
                   />
                 </label>
@@ -359,7 +412,7 @@ function PosProductModal({ product, onClose, onAddToCart }) {
                   <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{imageFile.name}</span>
                   <button
                     type="button"
-                    onClick={() => setImageFile(null)}
+                    onClick={() => handleImagePick(null)}
                     aria-label="Remove file"
                     className="ml-3 w-6 h-6 rounded-full bg-white text-[#8A7264] flex items-center justify-center shrink-0 hover:bg-[#EAE4E0] hover:text-[#3B1F0A] transition-colors"
                   >
@@ -367,6 +420,7 @@ function PosProductModal({ product, onClose, onAddToCart }) {
                   </button>
                 </div>
               )}
+              {imageError && <span className="text-[10px] text-red-500 mt-1 block">{imageError}</span>}
             </div>
           )}
 
@@ -399,6 +453,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
+  const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
   const products = bundle.products || [];
 
   if (!bundle || products.length === 0) return null;
@@ -416,6 +471,12 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
   };
 
   const handleImageChange = (file) => {
+    if (file && file.size > MAX_FILE_SIZE_BYTES) {
+      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setBundleImages(prev => ({ ...prev, [currentProduct.id]: null }));
+      return;
+    }
+    setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: '' }));
     setBundleImages(prev => ({ ...prev, [currentProduct.id]: file }));
   };
 
@@ -538,7 +599,8 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
 
               {allowsImageUpload && (
                 <div className={hasFields ? 'border-t border-[#EAE4E0] pt-4' : ''}>
-                  <label className="text-xs font-semibold text-[#8A7264] mb-1.5 block">Upload Reference Image (Optional)</label>
+                  <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+                  <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
 
                   {!bundleImages[currentProduct.id] ? (
                     <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
@@ -553,6 +615,9 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
                         <X size={13} />
                       </button>
                     </div>
+                  )}
+                  {bundleImageErrors[currentProduct.id] && (
+                    <span className="text-[10px] text-red-500 mt-1 block">{bundleImageErrors[currentProduct.id]}</span>
                   )}
                 </div>
               )}
@@ -608,18 +673,19 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   // Fetch mula sa parehong public bundles endpoint na ginagamit ng
   // customer-facing Menu.jsx — para makita rin ng cashier ang mga
   // active Promo Bundle sa POS, kasama ang lahat ng laman nito.
+  //
+  // FIX: dati, direktang `fetch()` ito tuwing mag-mo-mount ang PosMenu —
+  // kasabay ng PosPage, ibig sabihin TUWING lilipat papasok ang cashier sa
+  // POS page ay bago na namang request papunta sa backend. Dumadaan na
+  // ngayon sa `getPosBundlesCached` (posDataCache.js), na nag-iimbak sa
+  // module scope — kaya minsan lang talaga ito tatawag sa backend habang
+  // bukas ang session, hindi tuwing nag-navigate papunta rito.
   useEffect(() => {
-    const fetchBundles = async () => {
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`);
-        if (!res.ok) return;
-        const json = await res.json();
-        setBundles(Array.isArray(json.data) ? json.data : []);
-      } catch (error) {
-        console.error('[POS MENU] Failed to fetch bundles:', error);
-      }
-    };
-    fetchBundles();
+    let isMounted = true;
+    fetchPosBundles().then(data => {
+      if (isMounted) setBundles(data);
+    });
+    return () => { isMounted = false; };
   }, []);
 
   // I-map ang raw bundle rows papunta sa parehong shape na ginagamit sa

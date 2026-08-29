@@ -266,10 +266,23 @@ export const uploadProductImage = async (req, res) => {
   }
 };
 
+// FIX: idinagdag ang explicit check na ito dito sa controller bilang
+// karagdagang safety net sa itaas ng `limits.fileSize` na nasa multer config
+// (routes.js). Yung multer limit pa rin ang unang bantay (para hindi
+// mag-aksaya ng bandwidth/RAM sa pagbasa ng malaking file), pero ito namang
+// check dito ang tumitiyak na kahit paano dumating dito ang `req.file`
+// (galing man sa multer o sa ibang middleware balang araw), hindi pa rin
+// tatanggapin ang file na lampas 5MB.
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
 export const uploadInspiration = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    if (req.file.size > MAX_FILE_SIZE_BYTES) {
+      return res.status(400).json({ success: false, message: 'Masyadong malaki ang file (max 5MB lang).' });
     }
     
     const publicUrl = await uploadImageToBucket(req.file);

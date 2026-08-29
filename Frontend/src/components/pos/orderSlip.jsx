@@ -1,13 +1,34 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 
+// Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
+// ng customer, para hindi mabilis maubos ang Supabase Storage.
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_SIZE_LABEL = '5MB';
+
 export default function OrderSlip({ product, onClose, onConfirm }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
+  const [imageError, setImageError] = useState('');
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
   
   // State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
+
+  const handleImagePick = (file) => {
+    if (!file) {
+      setImageFile(null);
+      setImageError('');
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageFile(null);
+      return;
+    }
+    setImageError('');
+    setImageFile(file);
+  };
 
   if (!product) return null;
 
@@ -215,7 +236,8 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
 
           {product.allow_file_upload && (
             <div className={`mb-2 ${isVariable || hasFields ? 'border-t border-[#EAE4E0] pt-6' : ''}`}>
-              <label className="text-xs font-semibold text-[#8A7264] mb-1.5 block">Upload Reference Image (Optional)</label>
+              <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+              <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
 
               {!imageFile ? (
                 <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
@@ -224,7 +246,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                    onChange={(e) => handleImagePick(e.target.files?.[0] || null)}
                     className="hidden"
                   />
                 </label>
@@ -233,7 +255,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
                   <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{imageFile.name}</span>
                   <button
                     type="button"
-                    onClick={() => setImageFile(null)}
+                    onClick={() => handleImagePick(null)}
                     aria-label="Remove file"
                     className="ml-3 w-6 h-6 rounded-full bg-white text-[#8A7264] flex items-center justify-center shrink-0 hover:bg-[#EAE4E0] hover:text-[#3B1F0A] transition-colors"
                   >
@@ -241,6 +263,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
                   </button>
                 </div>
               )}
+              {imageError && <span className="text-[10px] text-red-500 mt-1 block">{imageError}</span>}
             </div>
           )}
 
