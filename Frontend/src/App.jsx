@@ -6,7 +6,6 @@ import InventoryPage from './pages/InventoryPage';
 import AnalyticsPage from './pages/analyticsPage';
 import OnlineOrderingPage from './pages/onlineOrderingPage';
 import AllOrdersPage from './pages/AllOrdersPage'; // <-- ADDED
-import QrScanner from './components/onlineOrdering/MobileScanner';
 import EventAdsModal from './components/onlineOrdering/eventAdsModal';
 
 import ProductAndEventPage from './pages/productAndEventPage';
@@ -91,7 +90,6 @@ export default function App() {
           
           {/* ── YUNG ORIGINAL MO: Sasalo sa /onlineOrdering/home, /menu, /checkout, etc. ── */}
           <Route path="/onlineOrdering/*" element={<OnlineOrderingPage />} />
-          <Route path="/qr" element={<QrScanner />} />
 
            <Route path="/eventads" element={<EventAdsModal />} />
 

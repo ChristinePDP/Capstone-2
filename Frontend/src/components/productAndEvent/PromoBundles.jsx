@@ -1,11 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 const PRODUCTS_API = API_BASE;
 const EVENTS_API = `${API_BASE}/events`;
-const BUNDLES_API = `${API_BASE}/bundles`;
+export const BUNDLES_API = `${API_BASE}/bundles`;
 const UPLOAD_IMAGE_API = `${API_BASE}/upload-image`;
+
+// Parehong tab strip na makikita sa Product Catalog — "Promo Bundle" ang laging
+// naka-highlight dito. Pag-click sa ibang item, bumabalik sa Product Catalog.
+const TAB_ITEMS = ['All', 'Promo Bundle', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
 
 const parseResponse = async (res) => {
   const result = await res.json().catch(() => ({}));
@@ -14,6 +19,52 @@ const parseResponse = async (res) => {
   }
   return result.data;
 };
+
+// FIX: dating fetchAll() lang ang laman ng useEffect ng component — kaya
+// tuwing lilipat ka papunta sa "Product Management" o "Event Manager" tab
+// (nag-uunmount ang PromoBundles) at babalik ka rito, tatlong bagong fetch
+// ulit sa backend (bundles + products + events). Inilipat sa MODULE SCOPE
+// ang cache (sa labas ng component) kaya minsan lang talaga itong tatlo
+// magre-request habang bukas ang session.
+let bundlesPageCache = null; // { bundles, allProducts, events }
+let bundlesPageCachePromise = null;
+
+async function fetchBundlesPageFromApi(force = false) {
+  if (bundlesPageCache && !force) return bundlesPageCache;
+  if (bundlesPageCachePromise && !force) return bundlesPageCachePromise;
+
+  bundlesPageCachePromise = (async () => {
+    try {
+      const [bundlesRes, productsRes, eventsRes] = await Promise.all([
+        fetch(BUNDLES_API),
+        fetch(PRODUCTS_API),
+        fetch(EVENTS_API),
+      ]);
+      const [bundlesData, productsData, eventsData] = await Promise.all([
+        parseResponse(bundlesRes),
+        parseResponse(productsRes),
+        parseResponse(eventsRes),
+      ]);
+      bundlesPageCache = {
+        bundles: bundlesData || [],
+        allProducts: productsData || [],
+        events: eventsData || [],
+      };
+      return bundlesPageCache;
+    } finally {
+      bundlesPageCachePromise = null;
+    }
+  })();
+
+  return bundlesPageCachePromise;
+}
+
+// Pinapayagan ang ibang page (hal. Product Catalog "All" view) na i-clear
+// itong shared cache pagkatapos nitong baguhin/burahin ang isang bundle sa
+// labas ng PromoBundles page, para sariwa ang datos pagbalik dito.
+export function clearBundlesPageCache() {
+  bundlesPageCache = null;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Minimal inline UI primitives
@@ -91,6 +142,30 @@ function useToast() {
   return { toast, show };
 }
 
+function CategoryTabs({ options, activeItem, onCategoryClick }) {
+  return (
+    <div className="flex items-center gap-5 sm:gap-7 flex-wrap border-b border-[#EAE4E0]">
+      {options.map(opt => {
+        const active = opt === activeItem;
+        return (
+          <button
+            key={opt}
+            onClick={() => { if (opt !== activeItem) onCategoryClick(opt); }}
+            className={`relative pb-2.5 text-xs sm:text-sm font-bold tracking-wide whitespace-nowrap transition-colors ${
+              active ? 'text-[#3B1F0A]' : 'text-[#8A7264] hover:text-[#3B1F0A]'
+            }`}
+          >
+            {opt}
+            {active && (
+              <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#3B1F0A] rounded-full" />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // Bundle Image Grid
 // ─────────────────────────────────────────────────────────────
@@ -153,7 +228,9 @@ function BundleImageGrid({ products = [], customImageUrl }) {
 // ─────────────────────────────────────────────────────────────
 // Bundle Card
 // ─────────────────────────────────────────────────────────────
-function BundleCard({ bundle, onEdit, onDelete }) {
+// Exported dahil ginagamit din ito ng Product Catalog "All" view
+// (productManagement.jsx) para maisama ang mga bundle sa parehong grid.
+export function BundleCard({ bundle, onEdit, onDelete }) {
   const products = bundle.products || [];
   const bundleOptions = bundle.bundle_options || {}; 
   const originalTotal = Number(bundle.original_total || 0);
@@ -188,6 +265,14 @@ function BundleCard({ bundle, onEdit, onDelete }) {
           <div className="absolute top-2 left-2">
             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest bg-white text-[#3B1F0A] px-2.5 py-1 rounded-full shadow-sm">
               <Tag size={10} /> {bundle.event_tag}
+            </span>
+          </div>
+        )}
+
+        {!bundle.event_tag && (
+          <div className="absolute top-2 left-2">
+            <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest bg-white text-[#3B1F0A] px-2 sm:px-2.5 py-1 rounded-full shadow-sm">
+              <Tag size={10} /> Bundle
             </span>
           </div>
         )}
@@ -392,19 +477,19 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
     setFormError(null);
 
     if (!form.bundle_name.trim()) {
-      setFormError('Kailangan ng bundle name.');
+      setFormError('Bundle name is required.');
       return;
     }
     if (form.product_items.length < 2) {
-      setFormError('Pumili ng hindi bababa sa 2 products.');
+      setFormError('Select at least 2 products.');
       return;
     }
     if (form.discount_percent === '' || Number(form.discount_percent) < 0 || Number(form.discount_percent) > 100) {
-      setFormError('Kailangan ng valid na discount % (0–100).');
+      setFormError('A valid discount % (0–100) is required.');
       return;
     }
     if (form.availabilityMode === 'event' && !form.event_tag) {
-      setFormError('Pumili ng event.');
+      setFormError('Select an event.');
       return;
     }
 
@@ -589,7 +674,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
                   ₱{computedPrice.toLocaleString()}
                 </>
               ) : (
-                'Pumili muna ng products'
+                'Select products first'
               )}
             </div>
           </div>
@@ -598,12 +683,12 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
         {/* Availability UI */}
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
-            Kailan ito pwedeng bilhin? (Pumili ng isa lang)
+            When can this be purchased? (Choose one)
           </label>
           <div className="flex gap-2 bg-[#F5EFEB] p-1.5 rounded-xl mb-4 border border-[#DED4CC]">
             {[
-              { id: 'always', label: 'Laging Available' },
-              { id: 'event', label: 'Naka-link sa Event' },
+              { id: 'always', label: 'Always Available' },
+              { id: 'event', label: 'Linked to Event' },
               { id: 'dates', label: 'Specific Dates' },
             ].map(mode => (
               <button
@@ -624,19 +709,19 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
           <div className="bg-[#FAF7F5] p-4 rounded-xl border border-[#DED4CC]">
             {form.availabilityMode === 'always' && (
               <p className="text-xs text-[#5A453C] font-medium text-center">
-                Makikita at mabibili agad ito sa menu anumang oras.
+                This will be visible and available for purchase on the menu at any time.
               </p>
             )}
 
             {form.availabilityMode === 'event' && (
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#8A7264] mb-2">Piliin ang Event Tag</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[#8A7264] mb-2">Select Event Tag</p>
                 <select
                   value={form.event_tag}
                   onChange={e => setForm(prev => ({ ...prev, event_tag: e.target.value }))}
                   className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white text-[#3B1F0A]"
                 >
-                  <option value="">Pumili ng event...</option>
+                  <option value="">Select an event...</option>
                   {events.map(ev => (
                     <option key={ev.id} value={ev.event_tag}>{ev.event_name}</option>
                   ))}
@@ -731,14 +816,16 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
             onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))}
             className="accent-[#3B1F0A]"
           />
-          <span className="text-xs font-semibold text-[#3B1F0A]">Active (visible sa online ordering)</span>
+          <span className="text-xs font-semibold text-[#3B1F0A]">Active (visible in online ordering)</span>
         </label>
       </div>
     </Modal>
   );
 }
 
-export default function PromoBundles() {
+export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } = {}) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [bundles, setBundles] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
   const [events, setEvents] = useState([]);
@@ -752,23 +839,14 @@ export default function PromoBundles() {
   const [editBundle, setEditBundle] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const fetchAll = async () => {
-    setIsLoading(true);
+  const fetchAll = async (force = false) => {
+    if (force || bundles.length === 0) setIsLoading(true);
     setError(null);
     try {
-      const [bundlesRes, productsRes, eventsRes] = await Promise.all([
-        fetch(BUNDLES_API),
-        fetch(PRODUCTS_API),
-        fetch(EVENTS_API),
-      ]);
-      const [bundlesData, productsData, eventsData] = await Promise.all([
-        parseResponse(bundlesRes),
-        parseResponse(productsRes),
-        parseResponse(eventsRes),
-      ]);
-      setBundles(bundlesData || []);
-      setAllProducts(productsData || []);
-      setEvents(eventsData || []);
+      const { bundles: b, allProducts: p, events: e } = await fetchBundlesPageFromApi(force);
+      setBundles(b);
+      setAllProducts(p);
+      setEvents(e);
     } catch (err) {
       console.error('Fetch Bundles Error:', err);
       setError(err.message || 'Something went wrong. Please try again.');
@@ -781,6 +859,22 @@ export default function PromoBundles() {
     fetchAll();
   }, []);
 
+  // Kung galing tayo sa Product Catalog "All" view (na-click ang Edit sa
+  // isang bundle card doon), buksan agad dito ang Edit modal ng target
+  // bundle pagkatapos itong ma-fetch, tapos i-clear ang navigation state
+  // para hindi na ito ulit mag-trigger sa refresh/back.
+  useEffect(() => {
+    const editBundleId = location.state?.editBundleId;
+    if (!editBundleId || bundles.length === 0) return;
+    const target = bundles.find(b => b.id === editBundleId);
+    if (target) {
+      setEditBundle(target);
+      setModalOpen(true);
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, bundles]);
+
   const filtered = bundles.filter(b => {
     if (!search) return true;
     return b.bundle_name.toLowerCase().includes(search.toLowerCase());
@@ -790,8 +884,19 @@ export default function PromoBundles() {
   const handleEdit = (bundle) => { setEditBundle(bundle); setModalOpen(true); };
   const handleCloseModal = () => { setModalOpen(false); setEditBundle(null); };
 
+  // Pinapayagan ang parent (ProductAndEventPage) na buksan ang "Add Bundle"
+  // modal mula sa nakapirming header nito, kahit saang sub-tab pa ito
+  // itinuturo pabalik.
+  useEffect(() => {
+    if (autoOpenAdd) {
+      handleAdd();
+      onAutoOpenHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenAdd]);
+
   const handleSaved = async () => {
-    await fetchAll();
+    await fetchAll(true); // force: kailangan bagong datos, hindi stale cache
     showToast(editBundle?.id ? 'Bundle updated.' : 'Bundle added.');
   };
 
@@ -802,6 +907,12 @@ export default function PromoBundles() {
       const res = await fetch(`${BUNDLES_API}/${deleteTarget.id}`, { method: 'DELETE' });
       await parseResponse(res);
       setBundles(prev => prev.filter(b => b.id !== deleteTarget.id));
+      if (bundlesPageCache) {
+        bundlesPageCache = {
+          ...bundlesPageCache,
+          bundles: bundlesPageCache.bundles.filter(b => b.id !== deleteTarget.id),
+        };
+      }
       showToast(`${deleteTarget.bundle_name} deleted.`, 'warning');
     } catch (err) {
       console.error('Delete Bundle Error:', err);
@@ -819,18 +930,13 @@ export default function PromoBundles() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-[#3B1F0A]">Promo Bundles</h1>
-          <p className="text-xs text-[#8A7264] mt-1">Pagsamahin ang mga products bilang isang promo na may discount</p>
-        </div>
-        <Button variant="dark" onClick={handleAdd}>
-          <Plus size={14} /> Add Bundle
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-4 mb-6 flex-wrap">
+      <div className="flex flex-col gap-4 mb-6">
         <SearchBar value={search} onChange={setSearch} placeholder="Search bundle..." className="w-full sm:w-64" />
+        <CategoryTabs
+          options={TAB_ITEMS}
+          activeItem="Promo Bundle"
+          onCategoryClick={() => navigate('/productAndEvent')}
+        />
       </div>
 
       {error && (
@@ -851,7 +957,7 @@ export default function PromoBundles() {
           ))}
           {!filtered.length && (
             <div className="col-span-2 md:col-span-4 text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">
-              Wala pang promo bundle. I-click ang "Add Bundle" para gumawa.
+              No promo bundles yet. Click "Add Bundle" to create one.
             </div>
           )}
         </div>

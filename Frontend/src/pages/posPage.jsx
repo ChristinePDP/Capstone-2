@@ -5,6 +5,47 @@ import PosCart from '../components/pos/posCart';
 import OrderSlip from '../components/pos/orderSlip';
 import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
 
+// FIX: dating naka-loob ito sa useEffect ng component (component state),
+// kaya tuwing mag-uunmount/mag-remount ang PosPage (nangyayari tuwing
+// lilipat ka papunta rito via routing) ay bagong fetch ulit sa backend.
+// Inilipat papunta sa MODULE SCOPE (sa labas ng component) ang aktwal na
+// cache — hindi ito nawawala kapag nag-unmount ang component, minsan lang
+// talaga ito magre-request sa backend habang bukas ang session.
+let posProductsCache = null;
+let posProductsPromise = null;
+
+async function fetchPosProducts(force = false) {
+  if (posProductsCache && !force) return posProductsCache;
+  if (posProductsPromise && !force) return posProductsPromise;
+
+  posProductsPromise = (async () => {
+    try {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+      const POS_API_URL = `${API_BASE}/pos/products`;
+
+      const response = await apiClient.get(POS_API_URL);
+      const result = response.data;
+
+      if (!result.success) throw new Error(result.message || 'Failed to load POS products');
+
+      const normalized = result.data.map(p => ({
+        ...p,
+        order_slip_fields: p.order_slip_fields || [],
+        pricing_mode: p.pricing_mode || 'fixed',
+        price_groups: p.price_groups || [],
+        price_matrix: p.price_matrix || []
+      }));
+
+      posProductsCache = normalized;
+      return normalized;
+    } finally {
+      posProductsPromise = null;
+    }
+  })();
+
+  return posProductsPromise;
+}
+
 export default function PosPage() {
   // 1. Initialized mula sa Local Storage
   const [cart, setCart] = useState(() => {
@@ -41,37 +82,42 @@ export default function PosPage() {
   // `/inventory` baseURL ng `apiClient` — parehong pattern gaya ng
   // ORDERS_API_URL sa AppContext.jsx. Cookie-based na ang auth (withCredentials
   // sa apiClient.js), kaya hindi na kailangan ng manual Authorization header.
+  //
+  // FIX: dati, laging tumatawag ito sa backend tuwing mag-mo-mount ang
+  // PosPage — ibig sabihin, TUWING lilipat ang cashier papasok sa POS page
+  // (routing = unmount/remount), fresh fetch ulit kahit kararating lang.
+  // Ngayon, dumadaan na ito sa `getPosProductsCached` (posDataCache.js) na
+  // nag-i-store ng datos sa MODULE SCOPE — hindi component state — kaya
+  // minsan lang talaga ito tatawag sa backend habang bukas ang session (o
+  // hangga't hindi ni-refresh manually). Loading spinner lang ang ipapakita
+  // kapag talagang wala pang laman ang cache (unang buksan ng app).
+  const loadProducts = async (force = false) => {
+    try {
+      if (force || products.length === 0) setLoading(true);
+
+      const normalized = await fetchPosProducts(force);
+      setProducts(normalized);
+    } catch (error) {
+      console.error('Error fetching POS products:', error);
+      alert('Could not load products. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        setLoading(true);
-
-        const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
-        const POS_API_URL = `${API_BASE}/pos/products`;
-
-        const response = await apiClient.get(POS_API_URL);
-        const result = response.data; 
-        
-        if (result.success) {
-          const normalized = result.data.map(p => ({
-            ...p,
-            order_slip_fields: p.order_slip_fields || [],
-            pricing_mode: p.pricing_mode || 'fixed',
-            price_groups: p.price_groups || [],
-            price_matrix: p.price_matrix || []
-          }));
-          setProducts(normalized);
-        }
-      } catch (error) {
-        console.error('Error fetching POS products:', error);
-        alert('Could not load products. Please check your connection.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProducts();
+    loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // I-call ito pagkatapos ng successful na Place Order, para agad ma-reflect
+  // sa cashier ang bagong stock/available_stock (bawas na dahil sa order na
+  // kalalagay lang) sa halip na ipakita ang stale na bilang hangga't hindi
+  // pa siya umaalis-balik sa POS page.
+  const refreshProductsAfterOrder = () => {
+    posProductsCache = null;
+    loadProducts(true);
+  };
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => 
@@ -159,6 +205,7 @@ export default function PosPage() {
         onClearCart={handleClearCart}
         isCartOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
+        onOrderPlaced={refreshProductsAfterOrder}
       />
 
       {/* Floating Action Button (FAB) para lang sa Mobile View */}

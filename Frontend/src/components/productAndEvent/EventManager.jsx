@@ -7,6 +7,32 @@ import { X, ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
 // hindi na "/api/products" para hindi maging "/api/api/products").
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 
+// FIX: dating fetchEvents() lang ang laman ng useEffect ng component — kaya
+// tuwing lilipat ka papunta sa "Product Management" o "Promo Bundles" tab
+// (nag-uunmount ang EventManager) at babalik ka rito, bagong fetch ulit sa
+// backend. Inilipat sa MODULE SCOPE ang cache (sa labas ng component) kaya
+// minsan lang talaga ito magre-request habang bukas ang session.
+let eventsCache = null;
+let eventsCachePromise = null;
+
+async function fetchEventsFromApi(force = false) {
+  if (eventsCache && !force) return eventsCache;
+  if (eventsCachePromise && !force) return eventsCachePromise;
+
+  eventsCachePromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/events`);
+      const data = await parseResponse(res);
+      eventsCache = data || [];
+      return eventsCache;
+    } finally {
+      eventsCachePromise = null;
+    }
+  })();
+
+  return eventsCachePromise;
+}
+
 const MONTHS = [
   { val: 1, label: 'January' }, { val: 2, label: 'February' }, 
   { val: 3, label: 'March' }, { val: 4, label: 'April' },
@@ -350,13 +376,12 @@ export default function EventManager() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Kunin lahat ng events mula sa backend
-  const fetchEvents = async () => {
-    setIsLoading(true);
+  const fetchEvents = async (force = false) => {
+    if (force || events.length === 0) setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/events`);
-      const data = await parseResponse(res);
-      setEvents(data || []);
+      const data = await fetchEventsFromApi(force);
+      setEvents(data);
     } catch (err) {
       console.error('Fetch Events Error:', err);
       setError(err.message);
@@ -400,7 +425,7 @@ export default function EventManager() {
       });
 
       await parseResponse(res);
-      await fetchEvents(); // i-refresh yung list galing sa totoong database
+      await fetchEvents(true); // force: kailangan bagong datos, hindi stale cache
       handleCloseModal();
     } catch (err) {
       console.error('Save Event Error:', err);
@@ -429,6 +454,7 @@ export default function EventManager() {
       const res = await fetch(`${API_BASE}/events/${deleteTarget.id}`, { method: 'DELETE' });
       await parseResponse(res);
       setEvents(prev => prev.filter(ev => ev.id !== deleteTarget.id));
+      if (eventsCache) eventsCache = eventsCache.filter(ev => ev.id !== deleteTarget.id);
       setDeleteTarget(null);
     } catch (err) {
       console.error('Delete Event Error:', err);
@@ -453,9 +479,9 @@ export default function EventManager() {
         </div>
         <button
           onClick={handleOpenAdd}
-          className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md flex items-center gap-1.5 shrink-0"
+          className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors shadow-md flex items-center gap-1.5 shrink-0"
         >
-          <Plus size={14} /> Add New Event
+          <Plus size={16} /> Add New Event
         </button>
       </div>
 

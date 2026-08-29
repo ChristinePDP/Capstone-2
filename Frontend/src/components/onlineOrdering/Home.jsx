@@ -393,6 +393,45 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// Module-level cache — "nabubuhay" ito habang naka-open ang tab (hindi
+// ito React state, kaya HINDI ito nawawala kada mag-unmount/mag-mount
+// ulit ang Home, hal. paglipat papunta sa Menu tapos balik). Sa unang
+// pagtawag lang dito talaga tatakbo ang fetch; sa susunod na mga pagtawag
+// (bagong mount ng Home), ibabalik na lang nito yung parehong promise na
+// nasa cache na — kaya isang request lang sa buong buhay ng tab, hindi na
+// paulit-ulit kada balik-balik sa Home.
+// ─────────────────────────────────────────────────────────────
+let configFetchPromise = null;
+function getConfig() {
+  if (!configFetchPromise) {
+    configFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/config`)
+      .then(res => res.json())
+      .then(data => (data.success && data.storageUrl)
+        ? { storageUrl: data.storageUrl, configError: false }
+        : { storageUrl: null, configError: true })
+      .catch(err => {
+        console.error('Failed to load storage config:', err);
+        return { storageUrl: null, configError: true };
+      });
+  }
+  return configFetchPromise;
+}
+
+let bundlesFetchPromise = null;
+function getBundles() {
+  if (!bundlesFetchPromise) {
+    bundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
+      .then(res => res.json())
+      .then(data => (data.success && Array.isArray(data.data)) ? data.data : [])
+      .catch(err => {
+        console.error('Failed to load promo bundles:', err);
+        return [];
+      });
+  }
+  return bundlesFetchPromise;
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [storageUrl, setStorageUrl] = useState(null);
@@ -403,34 +442,17 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/config`)
-      .then(res => res.json())
-      .then(data => {
-        if (cancelled) return;
-        if (data.success && data.storageUrl) {
-          setStorageUrl(data.storageUrl);
-        } else {
-          setConfigError(true);
-        }
-      })
-      .catch(err => {
-        console.error('Failed to load storage config:', err);
-        if (!cancelled) setConfigError(true);
-      });
+    getConfig().then(result => {
+      if (cancelled) return;
+      setStorageUrl(result.storageUrl);
+      setConfigError(result.configError);
+    });
 
-    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
-      .then(res => res.json())
-      .then(data => {
-        if (cancelled) return;
-        if (data.success && Array.isArray(data.data)) {
-          setBundles(data.data);
-        }
-        setIsLoadingBundles(false);
-      })
-      .catch(err => {
-        console.error('Failed to load promo bundles:', err);
-        if (!cancelled) setIsLoadingBundles(false);
-      });
+    getBundles().then(result => {
+      if (cancelled) return;
+      setBundles(result);
+      setIsLoadingBundles(false);
+    });
 
     return () => { cancelled = true; };
   }, []);

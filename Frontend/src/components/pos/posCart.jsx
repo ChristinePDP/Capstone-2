@@ -142,7 +142,7 @@ function getQuantityLimit(item) {
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
-export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose }) {
+export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced }) {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false); 
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
@@ -470,6 +470,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       }
 
       onClearCart();
+
+      // FIX: dati'y hindi nirerefresh ang product list pagkatapos mag-order,
+      // kaya kahit nabawasan na ang stock sa DB, tama pa rin ang lumang
+      // bilang na nakikita ng cashier hangga't hindi niya ni-reload / lumipat
+      // pabalik sa POS page. I-invalidate + i-refetch (force) ang cached
+      // products dito para agad ma-reflect ang bagong available_stock.
+      if (typeof onOrderPlaced === 'function') onOrderPlaced();
+
       setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '' });
       setAdditionalCharge('');
       setDiscountName('');

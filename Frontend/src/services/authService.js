@@ -8,6 +8,13 @@ export async function login(email, password) {
       withCredentials: true 
     });
     localStorage.setItem('isLoggedIn', 'true');
+
+    // Save the admin data returned by the backend so the header (and other
+    // parts of the app) can show the real logged-in account, not a fallback.
+    if (res.data?.data?.admin) {
+      localStorage.setItem('admin', JSON.stringify(res.data.data.admin));
+    }
+
     return res.data.data;
   } catch (err) {
     throw new Error(err.response?.data?.message || 'Login failed', { cause: err });
@@ -22,6 +29,7 @@ export async function logout() {
     return res.data;
   } finally {
     localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('admin');
   }
 }
 

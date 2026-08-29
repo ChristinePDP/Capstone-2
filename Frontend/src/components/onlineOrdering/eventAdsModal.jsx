@@ -79,6 +79,30 @@ const BRAND = {
   scrim: '#2A1608',
 };
 
+// ─────────────────────────────────────────────────────────────
+// Module-level cache — hindi React state, kaya nabubuhay ito habang
+// naka-open ang tab. Isang beses lang ito talaga tatawag sa server; sa
+// mga susunod na mount ng modal na ito (hal. balik-balik sa Home),
+// ibabalik na lang ang parehong resulta mula dito — walang bagong
+// request. Ang "lalabas ulit ang modal kada balik sa Home" na gawi ay
+// nananatili pa rin, dahil local component state pa rin ang `closed`
+// (nag-re-reset sa bawat fresh mount) — cached data lang ang hindi na
+// paulit-ulit kinukuha.
+// ─────────────────────────────────────────────────────────────
+let eventAdFetchPromise = null;
+function getEventAd() {
+  if (!eventAdFetchPromise) {
+    eventAdFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/event-ads`)
+      .then((res) => res.json())
+      .then((data) => (data.success && data.data && data.data.active) ? data.data : null)
+      .catch((err) => {
+        console.error('Failed to load event ads:', err);
+        return null;
+      });
+  }
+  return eventAdFetchPromise;
+}
+
 export default function EventAdsModal() {
   const navigate = useNavigate();
   const [adData, setAdData] = useState(null);
@@ -113,15 +137,9 @@ export default function EventAdsModal() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/event-ads`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data.success && data.data && data.data.active) {
-          setAdData(data.data);
-        }
-      })
-      .catch((err) => console.error('Failed to load event ads:', err));
+    getEventAd().then((data) => {
+      if (!cancelled) setAdData(data);
+    });
 
     return () => { cancelled = true; };
   }, []);
