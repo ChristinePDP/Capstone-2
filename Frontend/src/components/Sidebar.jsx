@@ -1,8 +1,9 @@
-import { useState,  } from 'react';
+import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LineChart, Monitor, ClipboardCheck,
-  ShoppingCart, List, X, Settings, LogOut
+  Package, Warehouse, X, Settings, LogOut,
+  PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import brandLogo from '../assets/427bffe9-d983-4566-9ec9-de6c2b1bdaa2-removebg-preview.png';
 import Header from './Header';
@@ -13,14 +14,14 @@ const NAV = [
     section: 'OPERATIONS',
     items: [
       { label: 'Point Of Sale', icon: Monitor, to: '/pos' },
-      { label: 'All Orders', icon: ClipboardCheck, to: '/orders' },
-      { label: 'Product & Event', icon: ShoppingCart, to: '/productAndEvent' },
+      { label: 'Orders', icon: ClipboardCheck, to: '/orders' },
+      { label: 'Product & Event', icon: Package, to: '/productAndEvent' },
     ],
   },
   {
     section: 'CATALOG',
     items: [
-      { label: 'Inventory', icon: List, to: '/inventory' },
+      { label: 'Inventory', icon: Warehouse, to: '/inventory' },
     ],
   },
   {
@@ -29,8 +30,21 @@ const NAV = [
   }
 ];
 
+// Sidebar widths — desktop switches between these two; mobile always uses the expanded width.
+const SIDEBAR_WIDTH_EXPANDED = 220;
+const SIDEBAR_WIDTH_COLLAPSED = 76;
+
 // ─── Sidebar (internal nav panel) ─────────────────────────────
-function Sidebar({ open, onClose }) {
+function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
+  // Small helper so we don't repeat this fade+shrink treatment on every label.
+  // Below `md`, these classes have no `md:` prefix so they never apply — mobile
+  // drawer always shows full labels regardless of the desktop collapsed state.
+  const labelClass = `overflow-hidden whitespace-nowrap transition-all ease-[cubic-bezier(0.4,0,0.2,1)] ${
+    collapsed
+      ? 'md:w-0 md:opacity-0 md:ml-0 duration-150'
+      : 'md:opacity-100 duration-300 md:delay-100'
+  }`;
+
   return (
     <>
       {open && (
@@ -43,11 +57,12 @@ function Sidebar({ open, onClose }) {
       <aside
         className={
           `bg-[#3B1F0A] flex flex-col fixed top-0 left-0 bottom-0 z-50 shadow-xl overflow-hidden ` +
-          `transition-transform duration-300 ease-in-out ` +
+          `transition-[width,transform] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] will-change-[width,transform] ` +
           `md:translate-x-0 ` +
-          (open ? 'translate-x-0' : '-translate-x-full')
+          (open ? 'translate-x-0' : '-translate-x-full') +
+          ` w-[220px] ` +
+          (collapsed ? 'md:w-[76px]' : 'md:w-[220px]')
         }
-        style={{ width: 'var(--sidebar-width, 220px)' }}
       >
 
         <div className="absolute top-[-70px] right-[-70px] w-[240px] h-[240px] rounded-full bg-white/[0.04] pointer-events-none" />
@@ -63,25 +78,44 @@ function Sidebar({ open, onClose }) {
         </button>
 
         {/* Logo Section */}
-        <div className="flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0">
+        <div className={`flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0 ${collapsed ? 'md:px-1' : ''}`}>
           <img
             src={brandLogo}
             alt="Logo"
-            className="w-[88px] h-[80px]"
+            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
+              collapsed ? 'w-[88px] md:w-11' : 'w-[88px]'
+            }`}
           />
-          <h2 className="font-serif text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5">
-            Aileen Cake Max
-          </h2>
-          <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium">Bake Shop</p>
+          <div className={labelClass}>
+            <h2 className="font-serif text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5 px-2">
+              Aileen Cake Max
+            </h2>
+            <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium text-center">Bake Shop</p>
+          </div>
         </div>
 
         {/* Navigation */}
         <nav
-          className="flex-1 py-4 px-3 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
+          {/* Collapse/Expand toggle — desktop only, sits above OPERATIONS */}
+          <button
+            onClick={onToggleCollapse}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={
+              `hidden md:flex items-center gap-3 px-3 py-2.5 mb-4 rounded-lg text-[13px] font-semibold ` +
+              `text-white/70 hover:bg-white/10 hover:text-white active:scale-95 ` +
+              `transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] border border-white/10 w-full ` +
+              (collapsed ? 'md:justify-center md:px-0' : '')
+            }
+          >
+            {collapsed ? <PanelLeftOpen size={16} strokeWidth={2.2} /> : <PanelLeftClose size={16} strokeWidth={2.2} />}
+            <span className={labelClass}>Collapse</span>
+          </button>
+
           {NAV.map((group, idx) => (
             <div key={group.section} className={idx !== 0 ? "mt-6" : ""}>
-              <p className="text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2">
+              <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2 ${labelClass}`}>
                 {group.section}
               </p>
               <div className="flex flex-col gap-1">
@@ -91,15 +125,18 @@ function Sidebar({ open, onClose }) {
                     to={item.to}
                     end={item.to === '/'}
                     onClick={onClose}
+                    title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 ` +
+                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold ` +
+                      `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+                      (collapsed ? 'md:justify-center md:px-0 ' : '') +
                       (isActive
                         ? 'bg-white/20 text-white shadow-sm'
                         : 'text-white/70 hover:bg-white/10 hover:text-white')
                     }
                   >
-                    <item.icon size={16} strokeWidth={2.2} />
-                    {item.label}
+                    <item.icon size={16} strokeWidth={2.2} className="shrink-0" />
+                    <span className={labelClass}>{item.label}</span>
                   </NavLink>
                 ))}
               </div>
@@ -113,15 +150,18 @@ function Sidebar({ open, onClose }) {
             <NavLink
               to="/settings"
               onClick={onClose}
+              title={collapsed ? 'Settings' : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 ` +
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold ` +
+                `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+                (collapsed ? 'md:justify-center md:px-0 ' : '') +
                 (isActive
                   ? 'bg-white/20 text-white shadow-sm'
                   : 'text-white/70 hover:bg-white/10 hover:text-white')
               }
             >
-              <Settings size={16} strokeWidth={2.2} />
-              Settings
+              <Settings size={16} strokeWidth={2.2} className="shrink-0" />
+              <span className={labelClass}>Settings</span>
             </NavLink>
           </div>
         </div>
@@ -136,6 +176,19 @@ export function Layout({ children, onLogout }) {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Desktop collapse state — persisted so it survives refresh/navigation.
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem('sidebar_collapsed') === '1';
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
+
   // Close the mobile drawer automatically whenever the route changes
   const [prevPathname, setPrevPathname] = useState(pathname);
 
@@ -147,12 +200,19 @@ export function Layout({ children, onLogout }) {
   }
 
   return (
-    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-brand-50" style={{ '--sidebar-width': '220px' }}>
+    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-brand-50">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapse={toggleCollapsed}
       />
-      <div className="flex-1 flex flex-col min-h-screen min-w-0 md:ml-[var(--sidebar-width,220px)]">
+      <div
+        className={
+          `flex-1 flex flex-col min-h-screen min-w-0 transition-[margin-left] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+          (collapsed ? 'md:ml-[76px]' : 'md:ml-[220px]')
+        }
+      >
         <Header onMenuClick={() => setSidebarOpen(true)} onLogoutClick={() => setLogoutOpen(true)} />
         <main className="flex-1 min-w-0 p-3 md:p-5 overflow-x-hidden overflow-y-auto">{children}</main>
       </div>

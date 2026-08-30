@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 import Home from '../components/onlineOrdering/Home';
 import Menu from '../components/onlineOrdering/Menu';
 import Checkout from '../components/onlineOrdering/Checkout';
 import Confirm from '../components/onlineOrdering/Confirm';
+import Header from '../components/onlineOrdering/Header';
 
 const CART_STORAGE_KEY = 'aileen_cake_max_cart';
 
@@ -38,7 +39,17 @@ export default function OnlineOrderingPage() {
 
   const [confirmedOrderId, setConfirmedOrderId] = useState('');
 
+  const location = useLocation();
+  // '/onlineOrdering/menu' -> 'menu', '/onlineOrdering/checkout' -> 'checkout', atbp.
+  const currentPage = location.pathname.split('/').filter(Boolean).pop() || 'home';
+
   return (
+    <>
+      {/* Isang beses lang ito nag-mo-mount — mananatili siya habang nagpapalit lang
+          ang `page` prop kada navigation, kaya tumatakbo na ang CSS transitions sa
+          step indicators sa halip na mag-reset sa bawat page load. */}
+      <Header page={currentPage} />
+
     <Routes>
       {/* Kapag nagpunta sa /onlineOrdering, i-redirect sa /onlineOrdering/home */}
       <Route index element={<Navigate to="/onlineOrdering/home" replace />} />
@@ -59,5 +70,6 @@ export default function OnlineOrderingPage() {
       {/* 404 Fallback sa loob ng ordering page */}
       <Route path="*" element={<Navigate to="/onlineOrdering/home" replace />} />
     </Routes>
+    </>
   );
 }

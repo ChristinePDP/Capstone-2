@@ -103,15 +103,15 @@ export default function ChangePass() {
   };
 
   return (
-    <div className="bg-white border border-brand-200 rounded-2xl shadow-sm max-w-xl">
-      <div className="px-5 md:px-6 py-4 border-b border-brand-100">
+    <div className="max-w-md">
+      <div className="mb-5">
         <h2 className="font-serif text-[17px] font-bold text-brand-800">Change Password</h2>
         <p className="text-[12.5px] text-brand-400 mt-0.5">
           Choose a strong password you don't use anywhere else.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="px-5 md:px-6 py-5 flex flex-col gap-4">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <PasswordField
           label="Current Password"
           value={currentPassword}
