@@ -31,24 +31,51 @@ function MobileSteps({ page }) {
           style={{ width: `${progressPct * 0.75}%` }}
         />
         <div className="flex justify-between relative z-10">
-          {STEPS.map((s) => {
+          {STEPS.map((s, idx) => {
             const state = getState(s.id);
             const isDone = state === 'completed' || (s.id === 4 && page === 'confirm');
+            const isActive = state === 'active';
             return (
               <div key={s.id} className="flex flex-col items-center gap-1.5 sm:gap-2 flex-1 px-0.5 min-w-0">
                 <div
-                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-bold text-[12px] sm:text-[15px] transition-all duration-300 shrink-0 ${
+                  className={`relative w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-bold text-[12px] sm:text-[15px] shrink-0 transition-colors duration-300 ease-out ${
                     isDone
-                      ? 'bg-[#5A453C] border-2 border-[#5A453C] text-white shadow-sm'
-                      : state === 'active'
-                      ? 'bg-white border-2 border-[#5A453C] text-[#5A453C] shadow-[0_0_0_4px_#F3ECE6]'
-                      : 'bg-white border-2 border-[#EAE4E0] text-[#B7A99F]'
+                      ? 'bg-[#5A453C] text-white shadow-sm'
+                      : isActive
+                      ? 'bg-white text-[#5A453C] shadow-[0_0_0_4px_#F3ECE6]'
+                      : 'bg-white text-[#B7A99F]'
                   }`}
                 >
-                  {isDone ? <Check size={16} strokeWidth={3} /> : s.id}
+                  <svg viewBox="0 0 36 36" className="absolute inset-0 w-full h-full -rotate-90">
+                    <circle
+                      cx="18" cy="18" r="16" fill="none"
+                      stroke={isDone || isActive ? '#5A453C' : '#EAE4E0'}
+                      strokeWidth="2"
+                      strokeDasharray={100.53}
+                      strokeDashoffset={isDone || isActive ? 0 : 100.53}
+                      strokeLinecap="round"
+                      style={{ transition: 'stroke-dashoffset 700ms ease-in-out, stroke 400ms ease' }}
+                    />
+                  </svg>
+                  <span
+                    className={`relative transition-opacity duration-200 ease-out ${
+                      isDone ? 'opacity-0' : 'opacity-100'
+                    }`}
+                    style={{ transitionDelay: isDone ? '0ms' : '250ms' }}
+                  >
+                    {s.id}
+                  </span>
+                  <span
+                    className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 ease-out ${
+                      isDone ? 'opacity-100' : 'opacity-0'
+                    }`}
+                    style={{ transitionDelay: isDone ? '550ms' : '0ms' }}
+                  >
+                    <Check size={16} strokeWidth={3} />
+                  </span>
                 </div>
                 <div
-                  className={`text-[9px] sm:text-[13px] font-bold text-center leading-tight tracking-wide uppercase sm:normal-case break-words ${
+                  className={`text-[9px] sm:text-[13px] font-bold text-center leading-tight tracking-wide uppercase sm:normal-case break-words transition-colors duration-300 ${
                     isDone || state === 'active' ? 'text-[#4A3B36]' : 'text-[#B7A99F]'
                   }`}
                 >
@@ -89,18 +116,44 @@ function DesktopSideSteps({ page }) {
             <div className="flex items-center gap-2.5 group/step">
               {/* Pinaliit ang bilog (w-8 h-8) para lumiit ang sakop na width */}
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[12px] shrink-0 transition-all duration-300 ${
+                className={`relative w-8 h-8 rounded-full flex items-center justify-center font-bold text-[12px] shrink-0 transition-colors duration-300 ease-out ${
                   isDone
                     ? 'bg-[#5A453C] text-white shadow-sm'
                     : isActive
-                    ? 'bg-white border-2 border-[#5A453C] text-[#5A453C] shadow-[0_0_0_4px_#F3ECE6]'
-                    : 'bg-white border-2 border-[#EAE4E0] text-[#B7A99F]'
+                    ? 'bg-white text-[#5A453C] shadow-[0_0_0_5px_#F3ECE6]'
+                    : 'bg-white text-[#B7A99F]'
                 }`}
               >
-                {isDone ? <Check size={14} strokeWidth={3} /> : s.id}
+                <svg viewBox="0 0 36 36" className="absolute inset-0 w-full h-full -rotate-90">
+                  <circle
+                    cx="18" cy="18" r="16" fill="none"
+                    stroke={isDone || isActive ? '#5A453C' : '#EAE4E0'}
+                    strokeWidth="2"
+                    strokeDasharray={100.53}
+                    strokeDashoffset={isDone || isActive ? 0 : 100.53}
+                    strokeLinecap="round"
+                    style={{ transition: 'stroke-dashoffset 700ms ease-in-out, stroke 400ms ease' }}
+                  />
+                </svg>
+                <span
+                  className={`relative transition-opacity duration-200 ease-out ${
+                    isDone ? 'opacity-0' : 'opacity-100'
+                  }`}
+                  style={{ transitionDelay: isDone ? '0ms' : '250ms' }}
+                >
+                  {s.id}
+                </span>
+                <span
+                  className={`absolute inset-0 flex items-center justify-center transition-opacity duration-200 ease-out ${
+                    isDone ? 'opacity-100' : 'opacity-0'
+                  }`}
+                  style={{ transitionDelay: isDone ? '550ms' : '0ms' }}
+                >
+                  <Check size={14} strokeWidth={3} />
+                </span>
               </div>
               <span
-                className={`text-[10px] font-bold uppercase tracking-widest whitespace-nowrap transition-all duration-300 ${
+                className={`text-[10px] font-bold uppercase tracking-widest whitespace-nowrap transition-colors duration-300 ease-out ${
                   isDone || isActive
                     ? 'opacity-100 text-[#4A3B36]'
                     : 'opacity-70 group-hover/step:opacity-100 text-[#B7A99F]'
@@ -111,12 +164,15 @@ function DesktopSideSteps({ page }) {
             </div>
 
             {!isLast && (
-              
-              <div
-                className={`w-[2px] flex-1 ml-[15px] my-2 rounded-full transition-colors duration-500 ${
-                  s.id < activeIndex ? 'bg-gradient-to-b from-[#D4A87A] to-[#5A453C]' : 'bg-[#EAE4E0]'
-                }`}
-              />
+              <div className="relative w-[2px] flex-1 ml-[15px] my-2 rounded-full bg-[#EAE4E0] overflow-hidden">
+                <div
+                  className="absolute top-0 left-0 w-full bg-gradient-to-b from-[#D4A87A] to-[#5A453C] rounded-full"
+                  style={{
+                    height: s.id < activeIndex ? '100%' : '0%',
+                    transition: 'height 700ms ease-in-out',
+                  }}
+                />
+              </div>
             )}
           </div>
         );
@@ -133,6 +189,11 @@ export default function Header({ page }) {
     { key: 'home', label: 'Home', to: '/onlineOrdering/home', icon: Home },
     { key: 'menu', label: 'Menu', to: '/onlineOrdering/menu', icon: UtensilsCrossed },
   ];
+
+  // Ang checkout/payment/confirm ay parte pa rin ng "Menu" flow — walang ibang
+  // nav item na dapat mag-highlight kapag naroon ang customer, kaya "Menu" pa
+  // rin ang dapat aktibo sa itaas na navigation.
+  const activeNavKey = ['checkout', 'payment', 'confirm'].includes(page) ? 'menu' : page;
 
   const go = (to) => {
     navigate(to);
@@ -172,7 +233,7 @@ export default function Header({ page }) {
                 <span
                   key={item.key}
                   className={`text-sm font-semibold cursor-pointer transition-all duration-200 px-5 py-2 rounded-full border ${
-                    page === item.key
+                    activeNavKey === item.key
                       ? 'bg-[#D4A87A]/15 border-[#D4A87A]/50 text-[#F3DFC0] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]'
                       : 'border-transparent text-white/70 hover:text-white hover:bg-white/5 hover:border-white/10'
                   }`}
@@ -204,7 +265,7 @@ export default function Header({ page }) {
             >
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const active = page === item.key;
+                const active = activeNavKey === item.key;
                 return (
                   <span
                     key={item.key}

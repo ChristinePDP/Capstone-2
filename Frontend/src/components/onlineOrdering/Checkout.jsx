@@ -1,8 +1,7 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle } from 'lucide-react';
-import Header from '../onlineOrdering/Header';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -147,6 +146,8 @@ export default function Checkout({ cart, setCart }) {
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  const timeDropdownRef = useRef(null);
 
   // Close the custom calendar popover when clicking outside of it.
   useEffect(() => {
@@ -159,6 +160,18 @@ export default function Checkout({ cart, setCart }) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
+
+  // Close the custom time dropdown when clicking outside of it.
+  useEffect(() => {
+    if (!showTimeDropdown) return;
+    const handleClickOutside = (e) => {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
+        setShowTimeDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTimeDropdown]);
 
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const halfAmount = totalAmount / 2;
@@ -393,7 +406,6 @@ if (data.success && data.checkoutUrl) {
 
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-      <Header page="checkout" />
 
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-6 lg:gap-10 px-5 sm:px-8 py-6 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
 
@@ -523,22 +535,60 @@ if (data.success && data.checkoutUrl) {
                                 </>
                               )}
                           </div>
-                          <div>
+                          <div ref={timeDropdownRef}>
                               <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
-                                <select
-                                  value={form.pickupTime}
-                                  onChange={(e) => setForm(f => ({ ...f, pickupTime: e.target.value }))}
-                                  className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white appearance-none pr-8 ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                <button
+                                  type="button"
+                                  onClick={() => setShowTimeDropdown(s => !s)}
+                                  className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                                 >
-                                  <option value="" disabled>Pick-up Time *</option>
-                                  {TIME_SLOTS.map(slot => (
-                                    <option key={slot.value} value={slot.value} disabled={isSlotDisabled(slot)}>
-                                      {slot.label}{isSlotDisabled(slot) ? ' (Past)' : ''}
-                                    </option>
-                                  ))}
-                                </select>
-                                <ChevronDown size={14} className="text-[#8A7264] shrink-0 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                  <span className="flex items-center gap-2 truncate">
+                                    <Clock size={13} className="text-[#8A7264] shrink-0" />
+                                    <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : 'Pick-up Time *'}</span>
+                                  </span>
+                                  <ChevronDown
+                                    size={14}
+                                    className={`text-[#8A7264] shrink-0 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
+                                  />
+                                </button>
+
+                                {showTimeDropdown && (
+                                  <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden">
+                                    <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                                      {TIME_SLOTS.map(slot => {
+                                        const disabled = isSlotDisabled(slot);
+                                        const selected = form.pickupTime === slot.value;
+                                        return (
+                                          <li key={slot.value}>
+                                            <button
+                                              type="button"
+                                              disabled={disabled}
+                                              onClick={() => {
+                                                setForm(f => ({ ...f, pickupTime: slot.value }));
+                                                setShowTimeDropdown(false);
+                                              }}
+                                              className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                                                disabled
+                                                  ? 'text-[#C9BEB6] cursor-not-allowed'
+                                                  : selected
+                                                  ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
+                                                  : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
+                                              }`}
+                                            >
+                                              <span>{slot.label}</span>
+                                              {disabled ? (
+                                                <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
+                                              ) : selected ? (
+                                                <Check size={13} className="text-[#5A453C] shrink-0" />
+                                              ) : null}
+                                            </button>
+                                          </li>
+                                        );
+                                      })}
+                                    </ul>
+                                  </div>
+                                )}
                               </div>
                           </div>
                       </div>

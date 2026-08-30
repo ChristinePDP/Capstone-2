@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, ArrowRight, ShoppingBasket, Tag, Package, Plus
 } from 'lucide-react';
-import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 import EventAdsModal from '../onlineOrdering/eventAdsModal';
 
@@ -478,49 +477,76 @@ export default function Home() {
     <div className="min-h-screen bg-[#FCFAF9] text-[#5A453C] font-sans">
       <style>{noScrollbarStyle}</style>
       <EventAdsModal />
-      <Header page="home" />
-      
+
       <main>
         {/* 1. Hero Section */}
         <section className="w-full bg-[#FCFAF9] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
-          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:-translate-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-8 sm:gap-12 lg:gap-16 items-center">
-              <div className="w-full mt-2 lg:mt-0">
-                <span className="inline-block font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.3em] text-[#8A7264] border border-[#5A453C]/20 rounded-full px-3 py-1 mb-4 sm:mb-6 lg:mb-8">
-                  Order Online — Ready for Pickup
+          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:-translate-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.92fr] gap-10 sm:gap-14 lg:gap-10 items-center">
+              <div className="w-full mt-2 lg:mt-0 relative z-20 text-center lg:text-left">
+                <span className="inline-flex items-center gap-2 -rotate-2 border border-dashed border-[#3B1F0A]/25 rounded-full px-3.5 py-1.5 mb-5 sm:mb-7 lg:mb-8 bg-[#FCFAF9]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#D4A87A] shrink-0" />
+                  <span className="font-serif italic text-[12px] sm:text-sm text-[#5A453C]">
+                    a small family bakery, made by hand
+                  </span>
                 </span>
-                <h1 className="text-[32px] leading-[1.1] sm:text-5xl lg:text-6xl xl:text-[68px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight">
-                  Elevating everyday moments.
+
+                <h1 className="text-[32px] leading-[1.15] sm:text-5xl lg:text-[52px] xl:text-[60px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight">
+                  Cakes we'd be proud
+                  <br className="hidden sm:block" /> to serve at <span className="italic text-[#B4813F]">our own</span> table.
                 </h1>
-                <p className="text-sm sm:text-lg lg:text-xl text-[#796860] mb-6 sm:mb-8 lg:mb-10 leading-relaxed max-w-lg font-light">
-                  Handcrafted cakes and Filipino pastries, baked fresh daily and ready when you are.
-                </p>
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                <div className="mt-6 sm:mt-8 lg:mt-10 flex justify-center lg:justify-start">
                   <button
                     onClick={() => navigate('/onlineOrdering/menu')}
-                    className="bg-[#3B1F0A] text-white px-6 py-3.5 sm:px-10 sm:py-4 text-xs sm:text-sm uppercase tracking-[0.15em] font-semibold rounded-full hover:bg-[#2A1608] transition-colors w-full sm:w-auto text-center shadow-lg"
+                    className="inline-flex items-center gap-3 text-[#3B1F0A] font-bold text-xs sm:text-sm uppercase tracking-[0.15em] hover:opacity-70 transition-opacity group"
                   >
-                    Explore Menu
+                    See Full Menu
+                    <span className="bg-[#3B1F0A] text-white p-2 sm:p-2.5 rounded-full group-hover:translate-x-1 transition-transform shadow-sm">
+                      <ArrowRight size={14} />
+                    </span>
                   </button>
-                  <span className="text-xs sm:text-sm text-[#8A7264] text-center sm:text-left">Pickup only — no delivery yet</span>
                 </div>
               </div>
 
-              <div className="relative w-full lg:w-fit lg:mx-auto">
-                <div className="aspect-square w-full lg:w-[62vh] lg:h-[62vh] rounded-2xl sm:rounded-[28px] overflow-hidden shadow-[0_20px_40px_-15px_rgba(59,31,10,0.3)]">
-                  <img
-                    src={heroImg}
-                    alt="Featured artisan cake"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="absolute -bottom-4 -left-2 sm:-bottom-8 sm:-left-8 bg-[#FCFAF9] rounded-xl sm:rounded-2xl px-4 py-3 sm:px-5 sm:py-4 shadow-[0_15px_30px_-10px_rgba(59,31,10,0.25)] border border-[#EAE4E0] max-w-[160px] sm:max-w-[220px]">
-                  <p className="font-serif text-lg sm:text-2xl text-[#3B1F0A] leading-none mb-1">Fresh Daily</p>
-                  <p className="font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.15em] text-[#B7A99F]">Baked to order</p>
+              <div className="relative w-full lg:w-[90%] lg:ml-auto mt-6 lg:mt-0">
+                <div className="relative aspect-[5/6] sm:aspect-square w-[62%] sm:w-full max-w-[220px] sm:max-w-[420px] mx-auto lg:mx-0 lg:ml-auto rotate-[-2deg]">
+                  <div className="absolute inset-0 rounded-[14px] sm:rounded-[20px] overflow-hidden shadow-[0_18px_35px_-16px_rgba(59,31,10,0.4)] sm:shadow-[0_25px_50px_-20px_rgba(59,31,10,0.45)] border-[4px] sm:border-[6px] border-white">
+                    <img
+                      src={heroImg}
+                      alt="A two-tier cake from Aileen Cake Max, freshly finished in the kitchen"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  {/* washi tape holding the photo down */}
+                  <div className="absolute -top-2 sm:-top-3 left-1/2 -translate-x-1/2 -rotate-3 w-9 h-4 sm:w-16 sm:h-7 bg-[#D4A87A]/70 shadow-sm" />
+
+                  {/* taped order-ticket tag, tucked inside the photo's own corner so it never bleeds past the screen */}
+                  <div
+                    className="absolute top-2 right-2 sm:-top-7 sm:-right-9 bg-[#FFFDF8] px-1.5 py-1.5 sm:px-5 sm:py-3.5 shadow-[0_8px_16px_-8px_rgba(59,31,10,0.35)] sm:shadow-[0_12px_24px_-10px_rgba(59,31,10,0.35)] border border-[#EAE4E0] rotate-[4deg] sm:rotate-[5deg] max-w-[64px] sm:max-w-[180px]"
+                    style={{ clipPath: 'polygon(6% 0%, 94% 0%, 100% 22%, 100% 100%, 0% 100%, 0% 22%)' }}
+                  >
+                    <p className="font-serif italic text-[7px] sm:text-lg text-[#3B1F0A] leading-[1.15]">
+                      made to order, just for you
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* scalloped edge, like a cake board, cutting into the section below */}
+          <svg
+            className="absolute bottom-0 left-0 w-full h-[16px] sm:h-[24px] text-[#F5EFEB] pointer-events-none"
+            preserveAspectRatio="none"
+            viewBox="0 0 200 10"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M0,10 L0,4 Q5,10 10,4 Q15,10 20,4 Q25,10 30,4 Q35,10 40,4 Q45,10 50,4 Q55,10 60,4 Q65,10 70,4 Q75,10 80,4 Q85,10 90,4 Q95,10 100,4 Q105,10 110,4 Q115,10 120,4 Q125,10 130,4 Q135,10 140,4 Q145,10 150,4 Q155,10 160,4 Q165,10 170,4 Q175,10 180,4 Q185,10 190,4 Q195,10 200,4 L200,10 Z"
+              fill="currentColor"
+            />
+          </svg>
         </section>
 
         {/* 2. Promo Bundles Section */}

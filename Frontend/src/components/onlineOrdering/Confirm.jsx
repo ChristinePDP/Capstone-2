@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
-import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
 const DUMMY_CART = [
@@ -140,7 +139,6 @@ export default function Confirm({ orderId }) {
   if (paymentStatus === 'checking') {
     return (
       <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-        <Header page="confirm" />
         <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px]">
           <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
             <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
@@ -158,7 +156,6 @@ export default function Confirm({ orderId }) {
   if (paymentStatus === 'timeout' || paymentStatus === 'error' || paymentStatus === 'failed') {
     return (
       <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-        <Header page="confirm" />
         <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px] text-center">
           <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
             <h2 className="text-lg font-serif text-[#3B1F0A] mb-2">
@@ -184,8 +181,6 @@ export default function Confirm({ orderId }) {
 
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-      <Header page="confirm" />
-
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px]">
         
         <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">

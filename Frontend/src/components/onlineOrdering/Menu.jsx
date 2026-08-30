@@ -2,7 +2,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
-import Header from '../onlineOrdering/Header';
 import Footer from '../onlineOrdering/Footer';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
@@ -1024,8 +1023,6 @@ export default function Menu({ cart, setCart }) {
           <span className="leading-snug">{toast.message}</span>
         </div>
       )}
-
-      <Header page="menu" />
 
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-8 lg:gap-10 px-4 sm:px-8 py-4 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
         
