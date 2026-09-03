@@ -1,50 +1,42 @@
-// import cron from 'node-cron';
-// import {
-//   ActionableRecommendationService,
-//   ProductForecastService,
-//   SalesForecastService,
-//   PerformanceSummaryService,
-// } from '../services/aiAnalytics.service.js';
+import {
+  ActionableRecommendationService,
+  ProductForecastService,
+  SalesForecastService,
+  PerformanceSummaryService,
+} from '../services/aiAnalytics.service.js';
 
-// import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js'; 
-// // 1. I-import yung ginawa mong cleanup function
-// import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.services.js';
+import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js';
+import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.services.js';
 
-// const setupAnalyticsCron = (
-//   scheduler = cron,
-//   services = {
-//     actionableRecommendationService: ActionableRecommendationService,
-//     productForecastService: ProductForecastService,
-//     salesForecastService: SalesForecastService,
-//     performanceSummaryService: PerformanceSummaryService,
-//   }
-// ) => {
-//   scheduler.schedule('10 * * * *', async () => {
-//     console.log('--- Cron Job Started: Refreshing AI Analytics & Homepage Ads ---');
-//     try {
-//       await services.actionableRecommendationService.getActionableRecommendations(true);
-//       const timeframes = ['7d', '30d', '60d'];
-//       for (const t of timeframes) {
-//         await services.productForecastService.getProductTrendsByTimeframe(t, true);
-//         await services.salesForecastService.getSalesTrendsByTimeframe(t, true);
-//       }
-//       await services.performanceSummaryService.getPerformanceSummary(true);
-      
-//       console.log('Generating Homepage Ads (Best Sellers) via Gemini...');
-//       await generateHomepageAds();
+// Dati: `cron.schedule(...)` sa loob ng process — nawawala pag natutulog ang free-tier service.
+// Ngayon: plain async function na lang ito. Si Render Cron Job na ang bahalang
+// mag-trigger nito via HTTP, sa oras na itinakda mo sa Render dashboard.
+export const runAnalyticsRefresh = async () => {
+  console.log('--- Cron Job Started: Refreshing AI Analytics & Homepage Ads ---');
+  try {
+    await ActionableRecommendationService.getActionableRecommendations(true);
 
-//       console.log('Checking for live occasion & generating Event Ads...');
-//       await generateEventAds();
+    const timeframes = ['7d', '30d', '60d'];
+    for (const t of timeframes) {
+      await ProductForecastService.getProductTrendsByTimeframe(t, true);
+      await SalesForecastService.getSalesTrendsByTimeframe(t, true);
+    }
 
-//       // 2. IDAGDAG ITO: I-run ang cleanup para sa abandoned orders
-//       console.log('Cleaning up expired pending checkouts...');
-//       await cleanupExpiredPendingOrders();
+    await PerformanceSummaryService.getPerformanceSummary(true);
 
-//       console.log('--- Cron Job Finished: All analytics & ads cached ---');
-//     } catch (error) {
-//       console.error('--- Cron Job Failed: ---', error);
-//     }
-//   });
-// };
+    console.log('Generating Homepage Ads (Best Sellers) via Gemini...');
+    await generateHomepageAds();
 
-// export { setupAnalyticsCron };
+    console.log('Checking for live occasion & generating Event Ads...');
+    await generateEventAds();
+
+    console.log('Cleaning up expired pending checkouts...');
+    await cleanupExpiredPendingOrders();
+
+    console.log('--- Cron Job Finished: All analytics & ads cached ---');
+    return { ok: true, finishedAt: new Date().toISOString() };
+  } catch (error) {
+    console.error('--- Cron Job Failed: ---', error);
+    throw error;
+  }
+};

@@ -171,7 +171,7 @@ function getQuantityLimit(item) {
 }
 
 // --- ORDER SLIP / OPTIONS MODAL ---
-function PosProductModal({ product, onClose, onAddToCart }) {
+function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imageError, setImageError] = useState('');
@@ -264,6 +264,11 @@ function PosProductModal({ product, onClose, onAddToCart }) {
       setErrors(newErrors);
       return;
     }
+
+    // RESTORED: exceed-limit check bago i-finalize ang pag-add — kailangan
+    // dito, hindi lang sa grid, dahil dumadaan dito ang mga variable-price
+    // at customizable na product bago pumasok sa cart.
+    if (checkAndWarnLimit && !checkAndWarnLimit(product, 1)) return;
 
     onAddToCart({
       ...product,
@@ -449,7 +454,7 @@ function PosProductModal({ product, onClose, onAddToCart }) {
 // Parehong stepper-per-component UX gaya ng Menu.jsx's BundleModal — dinadaan
 // dito ang cashier sa bawat product na laman ng bundle para masagutan ang
 // order slip fields nito bago ma-add sa cart bilang isang bundle line.
-function PosBundleModal({ bundle, onClose, onAddToCart }) {
+function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
@@ -497,6 +502,9 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
     if (!isLastStep) {
       setCurrentStep(prev => prev + 1);
     } else {
+      // RESTORED: exceed-limit check bago i-finalize ang buong bundle.
+      if (checkAndWarnLimit && !checkAndWarnLimit(bundle, 1)) return;
+
       const hasAnyImage = Object.values(bundleImages).some(Boolean);
       onAddToCart({
         ...bundle,
@@ -646,11 +654,54 @@ function PosBundleModal({ bundle, onClose, onAddToCart }) {
   );
 }
 
-export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart }) {
+export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, cart = [] }) {
   const [modal, setModal] = useState(null);
   const [bundles, setBundles] = useState([]);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const productListRef = useRef(null);
+
+  // ─────────────────────────────────────────────────────────────
+  // RESTORED: exceed-limit warning. Ito yung nawalang function — dating
+  // walang paraan ang PosMenu para malaman kung ilan na ang isang tracked
+  // product (daily_limit / stock_quantity / available_stock) na laman na
+  // ng cart, kaya patuloy pa ring naa-add ("Add to Cart" sa grid, sa
+  // PosProductModal, at sa PosBundleModal) kahit lampas na sa available
+  // stock. Kailangan i-pasa ang `cart` prop papunta dito galing sa parent
+  // (PosPage) para gumana ito — parehong toast message/style gaya ng
+  // ginagamit na sa posCart.jsx (handleUpdateQty doon).
+  // ─────────────────────────────────────────────────────────────
+  const [limitToast, setLimitToast] = useState(null);
+  const limitToastTimerRef = useRef(null);
+
+  const showLimitToast = (message) => {
+    if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
+    setLimitToast(message);
+    limitToastTimerRef.current = setTimeout(() => setLimitToast(null), 3200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
+    };
+  }, []);
+
+  const getCartQtyForId = (id) => cart.filter(i => i.id === id).reduce((sum, i) => sum + i.qty, 0);
+
+  // Bumabalik ng `true` kung pwede pang idagdag ang `addQty`. Kung
+  // malalampasan na nito ang available limit (kasama na ang dati nang
+  // laman ng cart para sa parehong product/bundle id), nagpapakita ng
+  // warning toast at bumabalik ng `false` — dapat itigil ng caller ang
+  // pag-add. Ginagamit ito sa lahat ng entry point papunta sa cart.
+  const checkAndWarnLimit = (item, addQty = 1) => {
+    if (!isQuantityTracked(item)) return true;
+    const limit = getQuantityLimit(item);
+    const currentQtyInCart = getCartQtyForId(item.id);
+    if (currentQtyInCart + addQty > limit) {
+      showLimitToast(`Sorry, you've reached the available limit for "${item.name}".`);
+      return false;
+    }
+    return true;
+  };
 
   const BACK_TO_TOP_THRESHOLD = 400;
 
@@ -798,7 +849,11 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
               const isStockTracked = isQuantityTracked(p);
-              const currentStock = getQuantityLimit(p);
+              // RESTORED: ibinabawas na ngayon ang laman ng cart (getCartQtyForId)
+              // sa available limit, kaya kung, halimbawa, 4 available at 4 na rin
+              // ang laman ng cart, "Sold Out" na agad ang makikita imbes na
+              // patuloy pa rin makaka-add ang cashier.
+              const currentStock = Math.max(0, getQuantityLimit(p) - getCartQtyForId(p.id));
               const isSoldOut = isStockTracked && currentStock <= 0;
               
               const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
@@ -862,9 +917,14 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     <button
                       onClick={() => {
                         if (isSoldOut) return;
-                        isCustomizable
-                          ? setModal(p)
-                          : onAddToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
+                        if (isCustomizable) {
+                          setModal(p);
+                          return;
+                        }
+                        // RESTORED: safety check bago direktang mai-add sa cart
+                        // (hindi dumadaan sa modal ang mga simpleng product).
+                        if (!checkAndWarnLimit(p, 1)) return;
+                        onAddToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
                       disabled={isSoldOut}
                       className={`w-full py-2 sm:py-2.5 lg:py-2.5 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
@@ -945,21 +1005,35 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
         {renderProductGrid()}
       </div>
 
-      {showBackToTop && (
-        <button
-          onClick={handleBackToTop}
-          aria-label="Back to top"
-          className="absolute bottom-6 right-6 z-50 w-11 h-11 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] active:scale-95 transition-all"
-        >
-          <ArrowUp size={20} />
-        </button>
-      )}
+      <button
+        onClick={handleBackToTop}
+        aria-label="Back to top"
+        tabIndex={showBackToTop ? 0 : -1}
+        aria-hidden={!showBackToTop}
+        className={`absolute bottom-6 right-6 z-50 w-11 h-11 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all duration-300 ease-out ${
+          showBackToTop
+            ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 scale-75 translate-y-3 pointer-events-none'
+        } active:scale-90`}
+      >
+        <ArrowUp size={20} />
+      </button>
 
       {modal && modal.type === 'bundle' ? (
-        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} />
+        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : modal ? (
-        <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} />
+        <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : null}
+
+      {/* RESTORED: exceed-limit warning toast — parehong style/z-index gaya
+          ng sa posCart.jsx (z-[6000]) para lumitaw ito kahit bukas ang
+          PosProductModal/PosBundleModal (z-[4000]). */}
+      {limitToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
+          <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+          <span className="leading-snug">{limitToast}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -10,26 +10,23 @@ import onlineOrderingRoutes from './routes/onlineOrdering.routes.js';
 import qrScaner from './routes/Qr.routes.js';
 import posRoutes from './routes/pos.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
-// Updated import path and variable name
 import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
+import internalRoutes from './routes/internal.routes.js';
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 import { handlePaymongoWebhook } from './controller/onlineOrdering.controller.js';
 
 const app = express(); 
 
+// FIXED: dating `origin: true` ay nag-a-allow ng credentials mula kahit saang site.
+// Ngayon, isang tiyak na domain lang (galing env var) ang pinapayagan.
 app.use(cors({
-  origin: true, 
+  origin: process.env.CORS_ORIGIN,
   credentials: true 
 }));
 
 // --- PAYMONGO WEBHOOK: DAPAT NASA ITAAS ITO, BAGO ANG express.json() ---
-// Kailangan ng RAW (Buffer) na request body ng webhook signature check.
-// Kapag na-parse na ng express.json() ang body bago ito marating, mapapalitan
-// na ito ng plain JS object at palaging mag-fa-fail ang signature
-// verification. Kaya dapat DITO na, bago pa man tawagin ang app.use(express.json()),
-// nakalagay ang route na ito — hindi sa loob ng onlineOrdering.routes.js.
 app.post(
   '/api/online-ordering/paymongo-webhook',
   express.raw({ type: 'application/json' }),
@@ -60,9 +57,11 @@ app.use('/api/online-ordering', onlineOrderingRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/Qr', qrScaner);
 app.use('/api/notifications', notificationRoutes);
-
-// Updated route usage
 app.use('/api/online-ordering/products', productAndEventRoutes);
+
+// NEW: internal endpoint na tinatawag ng Render Cron Job (hindi ng public/frontend)
+app.use('/api/internal', internalRoutes);
+
 app.use(errorHandler);
 
 export default app;
