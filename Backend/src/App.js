@@ -21,8 +21,11 @@ const app = express();
 // FIXED: dating `origin: true` ay nag-a-allow ng credentials mula kahit saang site.
 // Ngayon, isang tiyak na domain lang (galing env var) ang pinapayagan.
 app.use(cors({
-  origin: process.env.CORS_ORIGIN,
-  credentials: true 
+  origin: [
+    'http://localhost:5173',
+    'https://capstone-frontend-lake.vercel.app'
+  ],
+  credentials: true // kailangan ito dahil gumagamit ka ng withCredentials sa axios
 }));
 
 // --- PAYMONGO WEBHOOK: DAPAT NASA ITAAS ITO, BAGO ANG express.json() ---
