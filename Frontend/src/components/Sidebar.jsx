@@ -103,9 +103,9 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
             onClick={onToggleCollapse}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className={
-              `hidden md:flex items-center gap-3 px-3 py-2.5 mb-4 rounded-lg text-[13px] font-semibold ` +
-              `text-white/70 hover:bg-white/10 hover:text-white active:scale-95 ` +
-              `transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] border border-white/10 w-full ` +
+              `hidden md:flex items-center gap-3 px-3 py-2.5 mb-4 rounded-lg text-[13px] font-medium ` +
+              `text-white/40 hover:bg-white/5 hover:text-white/70 active:scale-95 ` +
+              `transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] border border-white/5 w-full ` +
               (collapsed ? 'md:justify-center md:px-0' : '')
             }
           >
@@ -132,7 +132,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
                       (collapsed ? 'md:justify-center md:px-0 ' : '') +
                       (isActive
                         ? 'bg-white/20 text-white shadow-sm'
-                        : 'text-white/70 hover:bg-white/10 hover:text-white')
+                        : 'text-white/90 hover:bg-white/10 hover:text-white')
                     }
                   >
                     <item.icon size={16} strokeWidth={2.2} className="shrink-0" />
@@ -157,7 +157,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
                 (collapsed ? 'md:justify-center md:px-0 ' : '') +
                 (isActive
                   ? 'bg-white/20 text-white shadow-sm'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white')
+                  : 'text-white/90 hover:bg-white/10 hover:text-white')
               }
             >
               <Settings size={16} strokeWidth={2.2} className="shrink-0" />

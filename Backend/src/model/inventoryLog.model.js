@@ -44,12 +44,18 @@ const InventoryLogModel = {
     return data;
   },
 
+  // FIX: idinagdag ang `.is('voided_at', null)` — ito ang ginagamit ng
+  // Four KPI (totalExpenses) at Stacked Bar services. Dati, kasama pa
+  // rin sa expenses total ang mga logs na na-void na, kaya sablay ang
+  // pagbilang. Tugma na ito ngayon sa pattern ng OrdersModel
+  // (excludeCancelled) at ng getNearExpiring dito mismo sa file na ito.
   getByDateRange: async (startDate, endDate, { ascending = true } = {}) => {
     const { data, error } = await supabase
       .from('inventory_logs')
       .select('id, item_type, item_name, transaction_type, quantity, cost, action, created_at, voided_at')
       .gte('created_at', startDate)
       .lte('created_at', endDate)
+      .is('voided_at', null)
       .order('created_at', { ascending });
 
     if (error) throw error;

@@ -95,7 +95,7 @@ export default function AnalyticsPage() {
           <PerformanceTimeframe value={perfTimeframe} onChange={setPerfTimeframe} />
         </div>
 
-        <FourKpi period={perfTimeframe} kpi={analyticsData?.kpi} />
+        <FourKpi period={perfTimeframe} kpi={analyticsData?.kpi} isLoading={isLoading} />
 
         <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 w-full items-stretch">
           <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} />

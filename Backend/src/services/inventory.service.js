@@ -27,6 +27,33 @@ const IngredientService = {
   create: async (body) => {
     const { data, error } = await IngredientModel.create(body);
     if (error) throw error;
+
+    // AUDIT LOG: ang raw_ingredients table ay walang `created_at` at
+    // ang `updated_at` nito ay nababago paulit-ulit (kada restock/edit),
+    // kaya walang paraan ang Analytics na makuha ang gastos ng UNANG
+    // pagkakagawa ng isang ingredient mula rito. Ito lang ang paraan
+    // para ma-preserve ang historical na "kailan at magkano" — hindi
+    // ito pagbabago sa logic ng stock_quantity/cost_per_unit, dagdag
+    // lang na audit entry sa inventory_logs, kagaya ng ginagawa na sa
+    // restock(). Ginamit ang `data.*` (galing mismo sa DB pagkatapos
+    // ng insert) sa halip na `body.*`, dahil confirmed real columns
+    // ang stock_quantity at cost_per_unit sa schema.
+    const initialQty = Number(data.stock_quantity || 0);
+    const initialCost = parseFloat((Number(data.cost_per_unit || 0) * initialQty).toFixed(2));
+
+    if (initialQty > 0) {
+      await InventoryLogModel.logHistory({
+        item_type: 'raw',
+        item_name: data.name,
+        transaction_type: 'IN',
+        quantity: initialQty,
+        cost: initialCost,
+        action: 'Initial Stock',
+        remaining_quantity: initialQty,
+        expiration_date: body.expiration_date || null,
+      });
+    }
+
     return data;
   },
 
@@ -109,6 +136,26 @@ const MaterialService = {
   create: async (body) => {
     const { data, error } = await MaterialModel.create(body);
     if (error) throw error;
+
+    // AUDIT LOG: kaparehong dahilan ng IngredientService.create() —
+    // walang created_at ang celebration_materials, kaya dito lang
+    // (inventory_logs) mare-record ang gastos sa unang pagkakagawa.
+    const initialQty = Number(data.stock_quantity || 0);
+    const initialCost = parseFloat((Number(data.cost_per_unit || 0) * initialQty).toFixed(2));
+
+    if (initialQty > 0) {
+      await InventoryLogModel.logHistory({
+        item_type: 'material',
+        item_name: data.name,
+        transaction_type: 'IN',
+        quantity: initialQty,
+        cost: initialCost,
+        action: 'Initial Stock',
+        remaining_quantity: initialQty,
+        expiration_date: body.expiration_date || null,
+      });
+    }
+
     return data;
   },
 
@@ -493,10 +540,6 @@ const WasteService = {
 
     const { data: updated, error: voidErr } = await WasteModel.markVoided(id);
     if (voidErr) throw new AppError('Failed to mark waste log as voided', 500);
-
-    // Tingnan ang paliwanag sa itaas (WasteService.log) — hindi rin dapat
-    // isama ang 'product' dito, dahil enum lang ang inventory_logs.item_type
-    // ('raw'/'material' lang) — mag-e-error kung 'product' ang ipapasa.
     if (['ingredient', 'material'].includes(log.waste_type)) {
       await InventoryLogModel.logHistory({
         item_type: log.waste_type === 'ingredient' ? 'raw' : 'material',

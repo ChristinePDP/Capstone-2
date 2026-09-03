@@ -32,7 +32,6 @@ function formatDateForDB(dateObj) {
 async function getKpiByTimeframe(timeframe) {
   try {
     const { startDate, endDate } = getDateRange(timeframe);
-
     const start = new Date(startDate);
     const end = new Date(endDate);
     const duration = end.getTime() - start.getTime(); 
