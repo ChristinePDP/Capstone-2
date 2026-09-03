@@ -3,7 +3,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
 import { BundleModel } from '../model/bundle.model.js';
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
-import { AiCacheModel } from '../model/aiCache.model.js'; 
+import { AiCacheModel } from '../model/AiCache.model.js'; 
 
 // ============================================================
 // PRODUCT CRUD SERVICES
