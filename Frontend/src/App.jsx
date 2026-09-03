@@ -1,20 +1,20 @@
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import * as authService from './services/authService';
+import * as authService from './services/authService.js';
 
-import LoginPage from './pages/LoginPage';
-import InventoryPage from './pages/InventoryPage';
-import AnalyticsPage from './pages/analyticsPage';
-import OnlineOrderingPage from './pages/onlineOrderingPage';
-import AllOrdersPage from './pages/AllOrdersPage'; // <-- ADDED
-import EventAdsModal from './components/onlineOrdering/eventAdsModal';
+import LoginPage from './pages/LoginPage.jsx';
+import InventoryPage from './pages/InventoryPage.jsx';
+import AnalyticsPage from './pages/analyticsPage.jsx';
+import OnlineOrderingPage from './pages/onlineOrderingPage.jsx';
+import AllOrdersPage from './pages/allorderspage.jsx';
+import EventAdsModal from './components/onlineOrdering/eventAdsModal.jsx';
 
-import ProductAndEventPage from './pages/productAndEventPage';
-import PosPage from './pages/posPage';
-import SettingsPage from './pages/settingsPage'; // <-- ADDED
+import ProductAndEventPage from './pages/productAndEventPage.jsx';
+import PosPage from './pages/posPage.jsx';
+import SettingsPage from './pages/settingsPage.jsx'; // <-- ADDED
 
-import { ToastProvider } from './components/ui/index';
-import { Layout } from './components/Sidebar';
-import { AppProvider } from './context/AppContext';
+import { ToastProvider } from './components/ui/index.jsx';
+import { Layout } from './components/Sidebar.jsx';
+import { AppProvider } from './context/AppContext.jsx';
 
 function ProtectedAdminRoute({ children }) {
   // Tinitingnan lang natin ang UI flag, ang tunay na auth validation ay sa backend na mangyayari
