@@ -1,4 +1,5 @@
 # Dependencies - Dambuhalang folder ng mga installed packages (Bawal i-upload!)
+dist
 node_modules/
 
 # Testing - Mga reports na nilalabas ni Vitest tuwing nagpapatakbo ka ng unit tests
