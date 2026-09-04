@@ -23,7 +23,10 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'https://capstone-frontend-lake.vercel.app'
+    'https://capstone-frontend-lake.vercel.app',
+    "https://aileencakemax.tech",
+    "https://www.aileencakemax.tech"
+
   ],
   credentials: true // kailangan ito dahil gumagamit ka ng withCredentials sa axios
 }));
