@@ -16,12 +16,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
   // State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
 
-  // This modal is only ever mounted while it's open (parent renders it
-  // conditionally via `{slipModalItem && <OrderSlip .../>}`). It's portaled
-  // straight to <body> below (see the `createPortal` call), matching the
-  // pattern already used for the other POS modals — that way a plain
-  // <body>/<html> scroll lock is guaranteed to work, regardless of whatever
-  // scroll container the surrounding POS page/layout happens to use.
+  
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
     const previousHtmlOverflow = document.documentElement.style.overflow;
