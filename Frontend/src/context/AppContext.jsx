@@ -38,6 +38,26 @@ const getErrMsg = (err, fallback) =>
 // modification — iyon mismo ang inaasahang shape.
 
 export function AppProvider({ children }) {
+  // ── Auth state ──
+  // FIX: dating one-time localStorage.getItem() check lang ito sa loob ng
+  // isang useEffect na may empty `[]` dependency array. Ang AppProvider ay
+  // naka-mount na noon pa man bago pa mag-login ang user (dahil naka-wrap
+  // ito sa buong app kasama ang Login page), kaya sa unang mount, wala pang
+  // "isLoggedIn" sa localStorage — hindi tumatawag ng fetchAll(). Pagkatapos
+  // mag-login, client-side lang ang navigation papunta sa ibang page (hal.
+  // All Orders) — hindi na nare-remount ang AppProvider — kaya hindi na rin
+  // uulit yung effect (wala nang bagong "mount"). Kaya blangko ang datos
+  // hanggang sa mag full-page-refresh (doon lang ulit siya nare-remount).
+  //
+  // Ginawa nating REACTIVE STATE na ang pagkakalogin (isAuthed) sa halip na
+  // isang beses lang basahin sa mount. Ang `login()` function sa ibaba ang
+  // dapat tawagin mula sa Login page pagka-success ng login — ito na ang
+  // magse-set ng flag AT magpapa-trigger ng fetch, nang hindi na
+  // aasa/naghihintay pa ng page refresh.
+  const [isAuthed, setIsAuthed] = useState(
+    () => localStorage.getItem('isLoggedIn') === 'true'
+  );
+
   // ── State ──
   const [ingredients,    setIngredients]    = useState([]);
   const [materials,      setMaterials]      = useState([]);
@@ -45,13 +65,13 @@ export function AppProvider({ children }) {
   const [productionLogs, setProductionLogs] = useState([]);
   const [wasteLogs,      setWasteLogs]      = useState([]);
   const [products,       setProducts]       = useState([]);
-  const [orders,         setOrders]         = useState([]); // <-- FIXED: may setter na
+  const [orders,         setOrders]         = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
 
   // ── Network Fetch Loaders ──
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
 
     try {
@@ -73,7 +93,7 @@ export function AppProvider({ children }) {
         safeFetch('/production'),
         safeFetch('/waste'),
         safeFetch('/products'),
-        safeFetch(ORDERS_API_URL), // <-- ADDED (absolute URL — /api/allOrders, hindi /inventory/orders)
+        safeFetch(ORDERS_API_URL), // /api/allOrders, hindi /inventory/orders
       ]);
 
       const normalizedIngredients = (ing.data || []).map(item => ({
@@ -141,7 +161,7 @@ export function AppProvider({ children }) {
         recipeId: log.recipe_id,
         productId: log.product_id,
         notes: log.notes || '',
-        
+
       }));
 
       setIngredients(normalizedIngredients);
@@ -149,7 +169,7 @@ export function AppProvider({ children }) {
       setRecipes(normalizedRecipes);
       setProductionLogs(normalizedProductionLogs);
       setProducts(normalizedProducts);
-      setOrders(ord.data || []); // <-- ADDED (raw shape — tugma sa AllOrdersPage.jsx)
+      setOrders(ord.data || []);
 
       // Mapping para sa Waste
       setWasteLogs((wst.data || []).map(w => ({
@@ -167,13 +187,40 @@ export function AppProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  // FIX: nakadepende na ang effect sa `isAuthed` STATE (hindi sa isang
+  // beses-lang-na-check sa mount). Kaya sa sandaling magbago ang isAuthed
+  // (mula false -> true, via login() sa ibaba), agad itong magra-refire at
+  // magfe-fetch — kahit walang page refresh/remount.
   useEffect(() => {
-    if (localStorage.getItem('isLoggedIn') === 'true') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isAuthed) {
       fetchAll();
     }
+  }, [isAuthed, fetchAll]);
+
+  // ── Auth actions ──
+  // I-tawag ito sa Login page/handler pagka-SUCCESS ng login, sa halip na
+  // direktang `localStorage.setItem('isLoggedIn', 'true')` lang doon.
+  // Ito na ang bahalang mag-set ng flag AT agad na mag-trigger ng fetchAll()
+  // sa parehong render pass — kaya walang refresh na kailangan.
+  const login = useCallback(() => {
+    localStorage.setItem('isLoggedIn', 'true');
+    setIsAuthed(true); // triggers useEffect above -> fetchAll()
+  }, []);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem('isLoggedIn');
+    setIsAuthed(false);
+    // Linisin din ang datos para walang stale info na makikita ng susunod
+    // na maglo-login sa parehong browser/tab.
+    setIngredients([]);
+    setMaterials([]);
+    setRecipes([]);
+    setProductionLogs([]);
+    setWasteLogs([]);
+    setProducts([]);
+    setOrders([]);
   }, []);
 
   // ── Orders (All Orders page) ────
@@ -391,8 +438,9 @@ export function AppProvider({ children }) {
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     loading, error,
+    isAuthed, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,
-    fetchOrders, fetchOrderById, updateOrderStatus, // <-- ADDED / WIRED
+    fetchOrders, fetchOrderById, updateOrderStatus,
     addProduct, updateProduct, deleteProduct, uploadProductImage,
     addOrder, addOnlineOrder,
     addIngredient, updateIngredient, deleteIngredient, restockIngredient,
