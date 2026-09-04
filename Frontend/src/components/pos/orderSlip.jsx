@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
@@ -14,6 +15,23 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
   
   // State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
+
+  // This modal is only ever mounted while it's open (parent renders it
+  // conditionally via `{slipModalItem && <OrderSlip .../>}`). It's portaled
+  // straight to <body> below (see the `createPortal` call), matching the
+  // pattern already used for the other POS modals — that way a plain
+  // <body>/<html> scroll lock is guaranteed to work, regardless of whatever
+  // scroll container the surrounding POS page/layout happens to use.
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
 
   const handleImagePick = (file) => {
     if (!file) {
@@ -115,7 +133,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
     });
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
       <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[620px] rounded-2xl max-h-[90vh] flex flex-col shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
 
@@ -285,6 +303,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

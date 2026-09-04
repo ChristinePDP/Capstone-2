@@ -481,7 +481,7 @@ export default function Home() {
       <main>
         {/* 1. Hero Section */}
         <section className="w-full bg-[#FCFAF9] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
-          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 lg:-translate-y-4">
+          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 lg:px-16 w-full relative z-10 lg:-translate-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.92fr] gap-10 sm:gap-14 lg:gap-10 items-center">
               <div className="w-full mt-2 lg:mt-0 relative z-20 text-center lg:text-left">
                 <span className="inline-flex items-center gap-2 -rotate-2 border border-dashed border-[#3B1F0A]/25 rounded-full px-3.5 py-1.5 mb-5 sm:mb-7 lg:mb-8 bg-[#FCFAF9]">
@@ -492,8 +492,8 @@ export default function Home() {
                 </span>
 
                 <h1 className="text-[32px] leading-[1.15] sm:text-5xl lg:text-[52px] xl:text-[60px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight">
-                  Cakes we'd be proud
-                  <br className="hidden sm:block" /> to serve at <span className="italic text-[#B4813F]">our own</span> table.
+                  Cakes made with love,
+                  <br className="hidden sm:block" /> baked <span className="italic text-[#B4813F]">just for you</span>.
                 </h1>
                 <div className="mt-6 sm:mt-8 lg:mt-10 flex justify-center lg:justify-start">
                   <button
@@ -508,7 +508,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="relative w-full lg:w-[90%] lg:ml-auto mt-6 lg:mt-0">
+              <div className="relative w-full lg:w-[76%] lg:ml-auto mt-6 lg:mt-0">
                 <div className="relative aspect-[5/6] sm:aspect-square w-[62%] sm:w-full max-w-[220px] sm:max-w-[420px] mx-auto lg:mx-0 lg:ml-auto rotate-[-2deg]">
                   <div className="absolute inset-0 rounded-[14px] sm:rounded-[20px] overflow-hidden shadow-[0_18px_35px_-16px_rgba(59,31,10,0.4)] sm:shadow-[0_25px_50px_-20px_rgba(59,31,10,0.45)] border-[4px] sm:border-[6px] border-white">
                     <img
@@ -520,16 +520,6 @@ export default function Home() {
 
                   {/* washi tape holding the photo down */}
                   <div className="absolute -top-2 sm:-top-3 left-1/2 -translate-x-1/2 -rotate-3 w-9 h-4 sm:w-16 sm:h-7 bg-[#D4A87A]/70 shadow-sm" />
-
-                  {/* taped order-ticket tag, tucked inside the photo's own corner so it never bleeds past the screen */}
-                  <div
-                    className="absolute top-2 right-2 sm:-top-7 sm:-right-9 bg-[#FFFDF8] px-1.5 py-1.5 sm:px-5 sm:py-3.5 shadow-[0_8px_16px_-8px_rgba(59,31,10,0.35)] sm:shadow-[0_12px_24px_-10px_rgba(59,31,10,0.35)] border border-[#EAE4E0] rotate-[4deg] sm:rotate-[5deg] max-w-[64px] sm:max-w-[180px]"
-                    style={{ clipPath: 'polygon(6% 0%, 94% 0%, 100% 22%, 100% 100%, 0% 100%, 0% 22%)' }}
-                  >
-                    <p className="font-serif italic text-[7px] sm:text-lg text-[#3B1F0A] leading-[1.15]">
-                      made to order, just for you
-                    </p>
-                  </div>
                 </div>
               </div>
             </div>
@@ -554,21 +544,12 @@ export default function Home() {
           <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
 
             <div className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col justify-center text-center lg:text-left">
-              <div className="inline-flex items-center justify-center lg:justify-start gap-2 mb-4 lg:mb-6">
-                <div className="p-2 rounded-full bg-white/50 backdrop-blur-sm shadow-sm border border-white/40 text-[#3B1F0A]">
-                  <ShoppingBasket size={18} className="opacity-80" />
-                </div>
-                <span className="font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.3em] font-bold text-[#3B1F0A]">
-                  Promo Bundles
-                </span>
-              </div>
-              
               <h2 className="text-[32px] leading-[1.1] sm:text-5xl lg:text-6xl xl:text-[68px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight drop-shadow-sm">
                 Bundle up & Save.
               </h2>
               
               <p className="text-sm sm:text-lg lg:text-xl text-[#796860] mb-6 sm:mb-8 lg:mb-10 leading-relaxed max-w-lg mx-auto lg:mx-0 font-light">
-                Mix and match our favorites — save more when you order them together.
+                Save more when you order them together.
               </p>
               
               <button

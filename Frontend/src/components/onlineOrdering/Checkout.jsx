@@ -173,6 +173,19 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showTimeDropdown]);
 
+  // Prevent the background page from scrolling while the Order Summary modal
+  // (a `fixed inset-0` overlay) is open. `fixed` overlays don't block scroll
+  // on their own — the page behind it stays scrollable unless we explicitly
+  // lock <body> here, and unlock/restore it again on close or unmount.
+  useEffect(() => {
+    if (!showSummaryModal) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showSummaryModal]);
+
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const halfAmount = totalAmount / 2;
 
@@ -715,11 +728,25 @@ if (data.success && data.checkoutUrl) {
               <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
             </div>
 
-            {/* Layout Container */}
-            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+            {/* Scrollable Body: Order Details + Items.
+                FIX (mobile): dati, ang Payment + Action Buttons ay NASA
+                LOOB ng Right Column (kasama ng Items), at ang Left Column
+                (Order Details) ay flex-shrink-0 — kumukuha ng buong
+                natural height niya. Sa mobile (naka-stack ang columns
+                pababa), kapag mahaba ang Order Details + Items, wala nang
+                natitirang space ang buttons sa ilalim ng flex-1 na Right
+                Column — at dahil overflow-hidden ang parent, basta
+                NAWAWALA na lang sila (hindi man lang ma-scroll papuntang
+                doon). Ginawa na lang natin ITONG buong Order Details +
+                Items na IISANG unified scroll area (may sariling scroll
+                pa rin bawat column sa md+/desktop), at inilabas natin ang
+                Payment + Buttons bilang hiwalay, laging-nakikitang footer
+                sa ibaba (see closing tags) — kaya garantisadong visible
+                na ito lagi, kahit gaano pa kahaba ang laman sa itaas. */}
+            <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden scrollbar-thin">
               
               {/* Left Column: Customer & Pickup Details */}
-              <div className="w-full md:w-[300px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 overflow-y-auto scrollbar-thin">
+              <div className="w-full md:w-[300px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 md:overflow-y-auto scrollbar-thin">
                 <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
                 <div className="flex flex-col gap-2.5 text-xs">
                   <div className="flex flex-col gap-0.5">
@@ -741,10 +768,12 @@ if (data.success && data.checkoutUrl) {
                     </div>
                   )}
 
-                  <span className="text-[#8A7264]">Date & Time</span>
-                  <span className="text-[#3B1F0A] font-semibold text-right truncate">
-                    {form.pickupDate || '—'} {form.pickupTime && `• ${getSlotLabel(form.pickupTime)}`}
-                  </span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-[#B7A99F]">Date & Time</span>
+                    <span className="text-[#3B1F0A] font-semibold">
+                      {form.pickupDate || '—'} {form.pickupTime && `• ${getSlotLabel(form.pickupTime)}`}
+                    </span>
+                  </div>
 
                   {form.instructions && (
                     <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl">
@@ -755,11 +784,8 @@ if (data.success && data.checkoutUrl) {
                 </div>
               </div>
 
-              {/* Right Column: Items & Payment */}
-              <div className="flex-1 flex flex-col min-w-0 bg-white">
-                
-                {/* Scrollable Items List */}
-                <div className="flex-1 p-4 sm:p-5 overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
+              {/* Right Column: Items */}
+              <div className="flex-1 min-w-0 bg-white p-4 sm:p-5 md:overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
                   <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
                   
                   {cart.map((item, i) => {
@@ -834,59 +860,63 @@ if (data.success && data.checkoutUrl) {
                       </div>
                     );
                   })}
-                </div>
-
-                {/* Fixed Payment Section */}
-                <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
-                  <div className="mb-4">
-                    {paymentType === 'half' ? (
-                      <>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                          <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
-                        </div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                          <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
-                        </div>
-                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                          <span className="text-xs text-[#8A7264] font-medium">₱{totalAmount.toLocaleString()}</span>
-                        </div>
-                        <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                      </>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                      <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
-                    </div>
-                  </div>
-                  
-                  {/* Action Buttons side by side */}
-                  <div className="flex gap-2.5">
-                    <button
-                      onClick={() => setShowSummaryModal(false)}
-                      disabled={isProcessing}
-                      className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handlePlaceOrder}
-                      disabled={isProcessing}
-                      className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {isProcessing ? 'Processing...' : 'Place Order'}
-                    </button>
-                  </div>
-                </div>
-
               </div>
             </div>
+            {/* End of scrollable body (Order Details + Items) */}
+
+            {/* Fixed Payment Section — BAGONG LOKASYON: hiwalay na footer ng
+                buong modal (sibling ng scrollable body sa itaas), hindi na
+                nested sa loob ng Right Column. `shrink-0` ito kaya hindi ito
+                sinisiksik/nawawala kahit gaano pa kahaba ang Order Details
+                o Items list — palaging bisible ang Back/Place Order. */}
+            <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
+              <div className="mb-4">
+                {paymentType === 'half' ? (
+                  <>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
+                      <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                      <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
+                    </div>
+                    <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-[#8A7264]">To Pay Now</span>
+                      <span className="text-xs text-[#8A7264] font-medium">₱{totalAmount.toLocaleString()}</span>
+                    </div>
+                    <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                  </>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
+                  <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Action Buttons side by side */}
+              <div className="flex gap-2.5">
+                <button
+                  onClick={() => setShowSummaryModal(false)}
+                  disabled={isProcessing}
+                  className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handlePlaceOrder}
+                  disabled={isProcessing}
+                  className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isProcessing ? 'Processing...' : 'Place Order'}
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

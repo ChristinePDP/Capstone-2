@@ -237,6 +237,45 @@ export function AppProvider({ children }) {
     }
   }, []);
 
+  // FIX: BAGONG ORDERS = walang paraan noon ang frontend na malaman na
+  // may bagong order na pumasok sa backend/DB habang naka-login/naka-
+  // bukas lang ang page — isang beses lang tumatakbo ang fetch (sa
+  // login), kaya kailangan pang mag-refresh ng buong page para makita
+  // ang bago. Dalawang bagay ang ginawa dito para maayos ito:
+  //   1) POLLING — tahimik na tumatawag ng fetchOrders() bawat ilang
+  //      segundo habang naka-login (isAuthed), kaya kahit walang ginawa
+  //      ang user, lumalabas din agad ang bagong orders.
+  //   2) REFETCH-ON-FOCUS — sa sandaling bumalik ang user sa tab/window
+  //      na ito (hal. galing ibang tab, o galing ibang app sa phone),
+  //      agad ding nagre-refresh — para hindi na kailangang hintayin pa
+  //      ang susunod na poll interval.
+  // Ginamit ang `fetchOrders()` dito (hindi `fetchAll()`) dahil mas
+  // magaan ito — orders lang ang kinukuha nito, hindi lahat ng
+  // ingredients/materials/products/atbp.
+  useEffect(() => {
+    if (!isAuthed) return;
+
+    const POLL_INTERVAL_MS = 15000; // 15 seconds — pwede mong i-adjust
+
+    const safePoll = () => {
+      fetchOrders().catch((err) => console.error('Order polling failed:', err));
+    };
+
+    const intervalId = setInterval(safePoll, POLL_INTERVAL_MS);
+
+    const handleFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') safePoll();
+    };
+    document.addEventListener('visibilitychange', handleFocusOrVisible);
+    window.addEventListener('focus', safePoll);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleFocusOrVisible);
+      window.removeEventListener('focus', safePoll);
+    };
+  }, [isAuthed, fetchOrders]);
+
   // Kinukuha ang isang order (with items + customer) — useful sa modal/detail view
   const fetchOrderById = useCallback(async (id) => {
     try {

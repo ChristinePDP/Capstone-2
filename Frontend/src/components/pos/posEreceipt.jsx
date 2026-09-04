@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 
@@ -45,6 +45,17 @@ export default function PosEReceipt({
 }) {
   const receiptRef = useRef(null);
   const now = new Date();
+
+  // This modal is only ever mounted while it's open (parent renders it
+  // conditionally via `{ereceiptData && <PosEReceipt .../>}`), so lock the
+  // background page's scroll on mount and restore it on unmount/close.
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   const halfAmount = totalAmount / 2;
   const amountPaid = paymentType === 'half' ? halfAmount : totalAmount;
