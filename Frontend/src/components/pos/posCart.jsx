@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, User, 
-  Calendar as CalendarIcon, AlertCircle, ChevronLeft, ChevronRight, Tag, Receipt, Lock, X
+  Calendar as CalendarIcon, AlertCircle, ChevronLeft, ChevronRight, Tag, Receipt, Lock, X, Clock, Check
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 
@@ -177,6 +177,19 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     };
   }, []);
 
+  // Prevent the background POS screen from scrolling while the Order
+  // Summary modal (a `fixed inset-0` overlay) is open. `fixed` overlays
+  // don't block scroll on their own, so we explicitly lock <body> here
+  // and restore its previous value on close or unmount.
+  useEffect(() => {
+    if (!showSummaryModal) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showSummaryModal]);
+
   // Kapag pinapataas ang quantity (delta > 0) ng isang tracked item
   // (may daily_limit o stock_quantity), i-block bago pa lumagpas sa
   // available limit — kasama ang ibang cart lines ng parehong product id.
@@ -241,6 +254,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const calendarTriggerRef = useRef(null);
   const calendarPortalRef = useRef(null);
 
+  // Custom Pick-up Time dropdown — parehong component/markup gaya ng
+  // ginagamit sa Checkout.jsx (Online Ordering), kapalit ng dating plain
+  // <select> para magkatugma ang look ng dalawa.
+  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  const timeDropdownRef = useRef(null);
+
   const openCalendar = () => {
     if (calendarTriggerRef.current) {
       const rect = calendarTriggerRef.current.getBoundingClientRect();
@@ -278,6 +297,18 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       window.removeEventListener('resize', handleScroll);
     };
   }, [showCalendar]);
+
+  // Close the custom time dropdown when clicking outside of it.
+  useEffect(() => {
+    if (!showTimeDropdown) return;
+    const handleClickOutside = (e) => {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
+        setShowTimeDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTimeDropdown]);
 
   useEffect(() => {
     if (orderType === 'Buy Now') {
@@ -545,12 +576,19 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         />
       )}
 
-      {/* Binago ang outermost wrapper: Dinagdagan ng Off-canvas behaviors para sa mobile */}
+      {/* Binago ang outermost wrapper: Dinagdagan ng Off-canvas behaviors para sa mobile.
+          FIX: dati'y `h-full` (= 100%) ang gamit dito habang `fixed` ang position — sa
+          ibang mobile browsers (lalo na kapag nagbabago ang laki ng address bar), mali
+          ang nako-compute na height nito kaya lumalabas ng screen ang footer/Review Order
+          button (parang "na-stretch"/nasa labas ng view). Ginamit natin ang `100dvh`
+          (dynamic viewport height) na sumusunod sa TALAGANG visible na height ng device,
+          plus `max-h-[100dvh]` bilang safety net para hindi na kailanman lumabas ng frame
+          ang panel kahit anong mobile device/browser chrome behavior. */}
       <div className={`
-        fixed inset-y-0 right-0 z-[1010] w-[85%] max-w-[400px] sm:w-[400px] bg-white shadow-2xl flex flex-col shrink-0 h-full overflow-hidden 
+        fixed inset-y-0 right-0 z-[1010] w-[85%] max-w-[400px] sm:w-[400px] bg-white shadow-2xl flex flex-col shrink-0 h-[100dvh] max-h-[100dvh] overflow-hidden 
         transform transition-transform duration-300 ease-in-out will-change-transform
         ${isCartOpen ? 'translate-x-0' : 'translate-x-full'}
-        lg:static lg:translate-x-0 lg:w-[400px] lg:min-w-[400px] lg:max-w-[400px] lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:z-auto lg:h-full
+        lg:static lg:translate-x-0 lg:w-[400px] lg:min-w-[400px] lg:max-w-[400px] lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:z-auto lg:h-full lg:max-h-full
       `}>
         
         {/* Header Title & Close Button (Exclusive for Mobile) */}
@@ -591,7 +629,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
             <button 
               onClick={handleToggleDetails}
@@ -685,22 +723,58 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                     )}
                   </div>
                   
-                  <div className="relative">
-                    <div className="relative">
-                      <select
-                        value={form.pickupTime}
-                        onChange={(e) => setForm(f => ({ ...f, pickupTime: e.target.value }))}
-                        className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white appearance-none pr-8 ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
-                      >
-                        <option value="" disabled>Pick-up Time *</option>
-                        {TIME_SLOTS.map(slot => (
-                          <option key={slot.value} value={slot.value} disabled={isSlotDisabled(slot)}>
-                            {slot.label}{isSlotDisabled(slot) ? ' (Past)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={14} className="text-[#8A7264] shrink-0 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
+                  <div className="relative" ref={timeDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowTimeDropdown(s => !s)}
+                      className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        <Clock size={13} className="text-[#8A7264] shrink-0" />
+                        <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : 'Pick-up Time *'}</span>
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        className={`text-[#8A7264] shrink-0 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+
+                    {showTimeDropdown && (
+                      <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden">
+                        <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                          {TIME_SLOTS.map(slot => {
+                            const disabled = isSlotDisabled(slot);
+                            const selected = form.pickupTime === slot.value;
+                            return (
+                              <li key={slot.value}>
+                                <button
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => {
+                                    setForm(f => ({ ...f, pickupTime: slot.value }));
+                                    setShowTimeDropdown(false);
+                                  }}
+                                  className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                                    disabled
+                                      ? 'text-[#C9BEB6] cursor-not-allowed'
+                                      : selected
+                                      ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
+                                      : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
+                                  }`}
+                                >
+                                  <span>{slot.label}</span>
+                                  {disabled ? (
+                                    <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
+                                  ) : selected ? (
+                                    <Check size={13} className="text-[#5A453C] shrink-0" />
+                                  ) : null}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -899,8 +973,21 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                 <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
               </div>
 
-              <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-                <div className="w-full md:w-[260px] flex-shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 overflow-y-auto scrollbar-thin">
+              {/* Scrollable Body: Order Details + Items.
+                  FIX (mobile): dati, ang Payment + Action Buttons ay NASA LOOB ng Right
+                  Column (kasama ng Items), at ang Left Column (Order Details) ay may
+                  sarili ring `overflow-y-auto`. Sa mobile (naka-stack ang mga columns
+                  pababa dahil `flex-col`), kapag mahaba ang Order Details + Items, wala
+                  nang natitirang space ang Place Order/Back buttons sa ilalim ng flex-1
+                  na Right Column — at dahil `overflow-hidden` ang parent, basta NAWAWALA
+                  na lang sila (hindi man lang ma-scroll papunta doon). Ginawa na lang
+                  natin itong buong Order Details + Items na IISANG unified scroll area sa
+                  mobile (may sarili pa ring per-column scroll sa md+/desktop), at inilabas
+                  natin ang Payment + Buttons bilang hiwalay, laging-nakikitang footer sa
+                  ibaba (see closing tags) — kaya garantisadong visible na ito lagi, kahit
+                  gaano pa kahaba ang laman sa itaas. Parehong pattern gaya ng Checkout.jsx. */}
+              <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden overscroll-contain scrollbar-thin">
+                <div className="w-full md:w-[260px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 md:overflow-y-auto scrollbar-thin">
                   <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
                   <div className="flex flex-col gap-2.5 text-xs">
                     <div className="flex flex-col gap-0.5">
@@ -931,8 +1018,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                   </div>
                 </div>
 
-                <div className="flex-1 flex flex-col min-w-0 bg-white">
-                  <div className="flex-1 p-4 sm:p-5 overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
+                <div className="flex-1 min-w-0 bg-white p-4 sm:p-5 md:overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
                     <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
 
                     {cart.map((item, i) => (
@@ -988,73 +1074,78 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                         </div>
                       </div>
                     ))}
-                  </div>
+                </div>
+              </div>
+              {/* End of scrollable body (Order Details + Items) */}
 
-                  <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
-                    <div className="mb-4">
-                      {discountAmount > 0 && (
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-[#8A7264]">Subtotal</span>
-                          <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {discountAmount > 0 && (
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
-                          <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {chargeAmount > 0 && (
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-red-500">Additional Charge</span>
-                          <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
-                        </div>
-                      )}
+              {/* Fixed Payment Section — hiwalay na footer ng buong modal (sibling ng
+                  scrollable body sa itaas), hindi na nested sa loob ng Right Column.
+                  `shrink-0` ito kaya hindi ito sinisiksik/nawawala kahit gaano pa
+                  kahaba ang Order Details o Items list — palaging visible ang
+                  Back/Place Order. */}
+              <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
+                <div className="mb-4">
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-[#8A7264]">Subtotal</span>
+                      <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
+                      <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {chargeAmount > 0 && (
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-red-500">Additional Charge</span>
+                      <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
+                    </div>
+                  )}
 
-                      {paymentMode === '50% Deposit' ? (
-                        <>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                            <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
-                          </div>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                            <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
-                          </div>
-                          <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                            <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
-                          </div>
-                          <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                        </>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                        <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+                  {paymentMode === '50% Deposit' ? (
+                    <>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
                       </div>
-                    </div>
-
-                    <div className="flex gap-2.5">
-                      <button
-                        onClick={() => setShowSummaryModal(false)}
-                        disabled={isProcessing}
-                        className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
-                      >
-                        Back
-                      </button>
-                      <button
-                        onClick={handlePlaceOrder}
-                        disabled={isProcessing}
-                        className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
-                      >
-                        {isProcessing ? 'Processing...' : 'Place Order'}
-                      </button>
-                    </div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
+                      </div>
+                      <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-[#8A7264]">To Pay Now</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+                      </div>
+                      <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
+                    </>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
+                    <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
                   </div>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => setShowSummaryModal(false)}
+                    disabled={isProcessing}
+                    className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={handlePlaceOrder}
+                    disabled={isProcessing}
+                    className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isProcessing ? 'Processing...' : 'Place Order'}
+                  </button>
                 </div>
               </div>
             </div>
