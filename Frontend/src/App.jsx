@@ -14,7 +14,7 @@ import SettingsPage from './pages/settingsPage.jsx'; // <-- ADDED
 
 import { ToastProvider } from './components/ui/index.jsx';
 import { Layout } from './components/Sidebar.jsx';
-import { AppProvider } from './context/AppContext.jsx';
+import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
 
 function ProtectedAdminRoute({ children }) {
   const isAuthenticated = !!localStorage.getItem('isLoggedIn'); 
@@ -35,6 +35,34 @@ function ProtectedAdminRoute({ children }) {
   return <Layout onLogout={handleLogout}>{children}</Layout>;
 }
 
+// ── LOGIN ROUTE (BAGO) ──────────────────────────────────────────
+// FIX: Dating `<LoginPage onLogin={() => navigate('/inventory')} />`
+// lang ang route element — `navigate()` lang, walang nagsa-sync sa
+// AppContext. Dahil sinusulat ang <AppProvider> mismo sa loob ng App()
+// component, hindi pwedeng direktang gumamit ng useApp() doon (wala
+// pang access ang App() sa sarili niyang context — descendants lang
+// nito ang may access).
+//
+// Ang LoginRoute na ito ay isang bagong component na naka-render
+// bilang isang Route ELEMENT — ibig sabihin, DESCENDANT na siya ng
+// <AppProvider> sa tree, kaya wastong-wasto na dito gamitin ang
+// useApp(). Pagka-success ng login, tinatawag muna natin ang context's
+// login() (nagse-set ng isAuthed state -> agad na-trigger ang
+// fetchAll() sa AppContext) BAGO mag-navigate — kaya may laman na agad
+// ang orders/products/etc. pagdating sa Inventory o All Orders, kahit
+// walang refresh.
+function LoginRoute() {
+  const navigate = useNavigate();
+  const { login } = useApp();
+
+  const handleLogin = () => {
+    login();               // i-sync ang AppContext (triggers fetchAll)
+    navigate('/inventory');
+  };
+
+  return <LoginPage onLogin={handleLogin} />;
+}
+
 // ── 404 Page ──
 function NotFound() {
   return (
@@ -53,8 +81,6 @@ function NotFound() {
 }
 
 export default function App() {
-  const navigate = useNavigate();
-
   return (
     <AppProvider>
       <ToastProvider>
@@ -63,7 +89,7 @@ export default function App() {
           <Route path="/" element={<Navigate to={'/login'} replace />} />
 
           {/* ── AUTHENTICATION ── */}
-          <Route path="/login" element={<LoginPage onLogin={() => navigate('/inventory')} />} />
+          <Route path="/login" element={<LoginRoute />} />
 
           {/* ── INVENTORY (Private) ── */}
           <Route path="/inventory" element={<ProtectedAdminRoute><InventoryPage /></ProtectedAdminRoute>} />
