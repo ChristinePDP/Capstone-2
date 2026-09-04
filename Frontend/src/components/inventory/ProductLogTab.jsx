@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Search, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Table, Tr, Td, Card, Pagination, CardSkeleton, TableSkeleton } from '../../components/ui/index';
+import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
 
@@ -24,6 +25,7 @@ export default function ProductLogTab() {
   const productionLogs = context.productionLogs || [];
   const isLoading = !!context.loading;
 
+  const [containerRef, isCompact] = useIsCompact();
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
   const [filterDate, setFilterDate] = useState('All');
@@ -96,7 +98,7 @@ export default function ProductLogTab() {
         </div>
 
         {/* ─── RESPONSIVE CONTENT ─── */}
-        <div className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="px-4 pb-4 mt-4">
           {/* LOADING STATE — habang kinukuha pa ang data mula sa backend.
               Para hindi agad lumabas ang "Wala pang production record"
               kahit hindi pa talaga tapos ang fetch. */}
@@ -109,23 +111,24 @@ export default function ProductLogTab() {
 
           {!isLoading && (
             <>
-              {/* MOBILE CARDS VIEW */}
-              <div className="block md:hidden space-y-2">
-                {paged.map(pl => (
-                  <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center shadow-sm">
-                    <div>
-                      <h4 className="font-bold text-brand-900 text-sm">{pl.product}</h4>
-                      <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
+              {isCompact ? (
+                /* CARDS VIEW — used whenever the container itself is narrow,
+                   regardless of the browser's own width (e.g. sidebar open) */
+                <div className="space-y-2">
+                  {paged.map(pl => (
+                    <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center shadow-sm">
+                      <div>
+                        <h4 className="font-bold text-brand-900 text-sm">{pl.product}</h4>
+                        <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
+                      </div>
+                      <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
+                        +{pl.produced} {pl.yieldUnit}
+                      </span>
                     </div>
-                    <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
-                      +{pl.produced} {pl.yieldUnit}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* DESKTOP TABLE VIEW */}
-              <div className="hidden md:block">
+                  ))}
+                </div>
+              ) : (
+                /* TABLE VIEW */
                 <Table columns={[
                   { label: 'Date & Time' },
                   { label: 'Product' },
@@ -144,7 +147,7 @@ export default function ProductLogTab() {
                     </Tr>
                   ))}
                 </Table>
-              </div>
+              )}
 
               {!filtered.length && (
                 <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl">

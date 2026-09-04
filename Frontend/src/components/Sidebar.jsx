@@ -26,16 +26,43 @@ const NAV = [
   },
   {
     section: 'OVERVIEW',
-    items: [{ label: 'Analytics', icon: LineChart, to: '/analytics' }],
+    items: [
+      { label: 'Analytics', icon: LineChart, to: '/analytics' },
+    ],
+  },
+  {
+    section: '', // no header label — rendered as a divided, separate group at the bottom
+    items: [
+      { label: 'Settings', icon: Settings, to: '/settings' },
+    ],
   }
 ];
 
-// Sidebar widths — desktop switches between these two; mobile always uses the expanded width.
-const SIDEBAR_WIDTH_EXPANDED = 220;
-const SIDEBAR_WIDTH_COLLAPSED = 76;
+// Note: sidebar width is now responsive (184px on md-only tablets, 220px at lg+,
+// 76px collapsed) so it's set directly in the className strings below rather
+// than as single constants.
 
 // ─── Sidebar (internal nav panel) ─────────────────────────────
-function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
+// Pulls the logged-in admin's name/email straight from localStorage — same
+// source and shape Header.jsx reads, so both stay in sync automatically.
+const getStoredUser = () => {
+  try {
+    const stored = localStorage.getItem('admin') || localStorage.getItem('user');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return { name: parsed.name || 'Admin', email: parsed.email || '' };
+    }
+  } catch (e) {
+    console.error('Failed to parse user data from storage', e);
+  }
+  return { name: 'Admin', email: '' };
+};
+
+function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) {
+  // Only the name is still used (logout button tooltip when collapsed) —
+  // avatar/email were dropped from the sidebar since Header.jsx already shows them.
+  const [{ name: adminName }] = useState(getStoredUser);
+
   // Small helper so we don't repeat this fade+shrink treatment on every label.
   // Below `md`, these classes have no `md:` prefix so they never apply — mobile
   // drawer always shows full labels regardless of the desktop collapsed state.
@@ -61,7 +88,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
           `md:translate-x-0 ` +
           (open ? 'translate-x-0' : '-translate-x-full') +
           ` w-[220px] ` +
-          (collapsed ? 'md:w-[76px]' : 'md:w-[220px]')
+          (collapsed ? 'md:w-[76px]' : 'md:w-[184px] xl:w-[220px]')
         }
       >
 
@@ -77,17 +104,35 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
           <X size={18} />
         </button>
 
-        {/* Logo Section */}
-        <div className={`flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0 ${collapsed ? 'md:px-1' : ''}`}>
+        {/* Collapse/Expand toggle — desktop only. Centered at the top when the
+            sidebar is narrow (collapsed), upper-right corner when it's wide
+            (expanded). Plain icon button, no circle background. */}
+        <button
+          onClick={onToggleCollapse}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={
+            `hidden md:flex items-center justify-center absolute top-2.5 rounded-lg ` +
+            `w-8 h-8 xl:w-9 xl:h-9 text-white/80 hover:text-white hover:bg-white/10 active:scale-90 ` +
+            `transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] z-20 ` +
+            (collapsed ? 'left-1/2 -translate-x-1/2' : 'right-2.5')
+          }
+        >
+          {collapsed ? <PanelLeftOpen size={18} strokeWidth={2.2} /> : <PanelLeftClose size={18} strokeWidth={2.2} />}
+        </button>
+
+        {/* Logo Section — hidden when collapsed (icon-only rail); the padding-top
+            still reserves clearance for the toggle button above. Sized down a
+            notch on tablet-range (md-only) screens, full size at lg+. */}
+        <div className={`flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0 ${collapsed ? 'md:pt-14 md:pb-2 md:px-1' : ''}`}>
           <img
             src={brandLogo}
             alt="Logo"
-            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${
-              collapsed ? 'w-[88px] md:w-11' : 'w-[88px]'
+            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] w-[88px] ${
+              collapsed ? 'md:hidden' : 'md:w-[68px] xl:w-[88px]'
             }`}
           />
-          <div className={labelClass}>
-            <h2 className="font-serif text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5 px-2">
+          <div className={`${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
+            <h2 className="font-serif text-[18px] md:text-[15px] xl:text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5 px-2">
               Aileen Cake Max
             </h2>
             <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium text-center">Bake Shop</p>
@@ -98,26 +143,22 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
         <nav
           className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
-          {/* Collapse/Expand toggle — desktop only, sits above OPERATIONS */}
-          <button
-            onClick={onToggleCollapse}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className={
-              `hidden md:flex items-center gap-3 px-3 py-2.5 mb-4 rounded-lg text-[13px] font-medium ` +
-              `text-white/40 hover:bg-white/5 hover:text-white/70 active:scale-95 ` +
-              `transition-[background-color,color,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] border border-white/5 w-full ` +
-              (collapsed ? 'md:justify-center md:px-0' : '')
-            }
-          >
-            {collapsed ? <PanelLeftOpen size={16} strokeWidth={2.2} /> : <PanelLeftClose size={16} strokeWidth={2.2} />}
-            <span className={labelClass}>Collapse</span>
-          </button>
-
           {NAV.map((group, idx) => (
-            <div key={group.section} className={idx !== 0 ? "mt-6" : ""}>
-              <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2 ${labelClass}`}>
-                {group.section}
-              </p>
+            <div
+              key={group.section || 'settings-group'}
+              className={
+                idx === 0
+                  ? ''
+                  : group.section
+                    ? `mt-6 ${collapsed ? 'md:mt-2' : ''}`
+                    : `mt-4 pt-4 border-t border-white/10 ${collapsed ? 'md:mt-2 md:pt-2' : ''}`
+              }
+            >
+              {group.section && (
+                <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2 ${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
+                  {group.section}
+                </p>
+              )}
               <div className="flex flex-col gap-1">
                 {group.items.map(item => (
                   <NavLink
@@ -127,7 +168,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
                     onClick={onClose}
                     title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold ` +
+                      `flex items-center gap-2.5 xl:gap-3 px-2.5 xl:px-3 py-2 xl:py-2.5 rounded-lg text-[12.5px] xl:text-[13px] font-semibold ` +
                       `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
                       (collapsed ? 'md:justify-center md:px-0 ' : '') +
                       (isActive
@@ -135,7 +176,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
                         : 'text-white/90 hover:bg-white/10 hover:text-white')
                     }
                   >
-                    <item.icon size={16} strokeWidth={2.2} className="shrink-0" />
+                    <item.icon size={18} strokeWidth={2} className="shrink-0" />
                     <span className={labelClass}>{item.label}</span>
                   </NavLink>
                 ))}
@@ -144,26 +185,21 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse }) {
           ))}
         </nav>
 
-        {/* Footer - Settings */}
-        <div className="px-3 pb-5 pt-2 shrink-0">
-          <div className="border-t border-white/10 pt-3">
-            <NavLink
-              to="/settings"
-              onClick={onClose}
-              title={collapsed ? 'Settings' : undefined}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold ` +
-                `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
-                (collapsed ? 'md:justify-center md:px-0 ' : '') +
-                (isActive
-                  ? 'bg-white/20 text-white shadow-sm'
-                  : 'text-white/90 hover:bg-white/10 hover:text-white')
-              }
-            >
-              <Settings size={16} strokeWidth={2.2} className="shrink-0" />
-              <span className={labelClass}>Settings</span>
-            </NavLink>
-          </div>
+        {/* Footer - Logout only. Name/avatar removed — already shown in Header,
+            so this stays a single, uncluttered row (icon-only when collapsed). */}
+        <div className="px-3 pb-5 pt-3 shrink-0 border-t border-white/10">
+          <button
+            onClick={onLogoutClick}
+            title={collapsed ? `Log out (${adminName})` : undefined}
+            className={
+              `flex items-center justify-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold w-full ` +
+              `text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+              (collapsed ? 'md:w-9 md:h-9 md:p-0 md:mx-auto md:rounded-full' : '')
+            }
+          >
+            <LogOut size={20} strokeWidth={2} className="shrink-0" />
+            <span className={labelClass}>Log out</span>
+          </button>
         </div>
       </aside>
     </>
@@ -206,11 +242,12 @@ export function Layout({ children, onLogout }) {
         onClose={() => setSidebarOpen(false)}
         collapsed={collapsed}
         onToggleCollapse={toggleCollapsed}
+        onLogoutClick={() => setLogoutOpen(true)}
       />
       <div
         className={
           `flex-1 flex flex-col min-h-screen min-w-0 transition-[margin-left] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
-          (collapsed ? 'md:ml-[76px]' : 'md:ml-[220px]')
+          (collapsed ? 'md:ml-[76px]' : 'md:ml-[184px] xl:ml-[220px]')
         }
       >
         <Header onMenuClick={() => setSidebarOpen(true)} onLogoutClick={() => setLogoutOpen(true)} />

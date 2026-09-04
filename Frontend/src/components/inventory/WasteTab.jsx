@@ -3,6 +3,7 @@ import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X } from 'l
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
+import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
 
@@ -36,6 +37,7 @@ export default function WasteTab() {
   } = useApp() || {};
 
   const { show: showToast } = useToast();
+  const [containerRef, isCompact] = useIsCompact();
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -371,10 +373,11 @@ export default function WasteTab() {
         )}
 
         {/* CONTENT AREA */}
-        <div className="p-4">
+        <div ref={containerRef} className="p-4">
           
-          {/* MOBILE CARDS WITH RED HIGHLIGHT ON SELECTION */}
-          <div className="block md:hidden space-y-3">
+          {isCompact ? (
+          /* CARDS WITH RED HIGHLIGHT ON SELECTION */
+          <div className="space-y-3">
             {pagedLogs.map(log => {
               const isSelected = selectionMode && selectedIds.has(log.id);
               return (
@@ -432,9 +435,9 @@ export default function WasteTab() {
               );
             })}
           </div>
-
-          {/* DESKTOP TABLE WITH RED HIGHLIGHT ON SELECTION */}
-          <div className="hidden md:block overflow-x-auto">
+          ) : (
+          /* TABLE WITH RED HIGHLIGHT ON SELECTION */
+          <div className="overflow-x-auto">
             <Table columns={[
               ...(selectionMode ? [{
                 label: (
@@ -488,6 +491,7 @@ export default function WasteTab() {
               })}
             </Table>
           </div>
+          )}
 
           {!filteredLogs.length && !loading && (
             <div className="text-center text-gray-400 py-10 text-sm">

@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
+import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PAGE_SIZE = 8;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -97,6 +98,7 @@ export default function RecipeTab() {
   const [quotas, setQuotas] = useState({});
   const [localStocks, setLocalStocks] = useState({});
   const [confirmingIds, setConfirmingIds] = useState({});
+  const [containerRef, isCompact] = useIsCompact();
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -504,7 +506,7 @@ export default function RecipeTab() {
           </div>
         </div>
 
-        <div className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="px-4 pb-4 mt-4">
           {isLoading && (
             <>
               <CardSkeleton count={3} />
@@ -514,8 +516,9 @@ export default function RecipeTab() {
 
           {!isLoading && (
           <>
-          {/* Mobile View */}
-          <div className="block md:hidden space-y-4">
+          {isCompact ? (
+          /* Compact (cards) View */
+          <div className="space-y-4">
             {paged.map(r => {
               const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
               const quota = quotas[r.id] || '';
@@ -573,10 +576,9 @@ export default function RecipeTab() {
               );
             })}
           </div>
-
-          {/* Desktop View */}
-          <div className="hidden md:block">
-            <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Stock Capacity' }, { label: 'Production Target' }, { label: 'Finished Production' }, { label: 'Actions', align: 'right' }]}>
+          ) : (
+          /* Table View */
+          <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Stock Capacity' }, { label: 'Production Target' }, { label: 'Finished Production' }, { label: 'Actions', align: 'right' }]}>
               {paged.map(r => {
                 const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
                 const quota = quotas[r.id] || '';
@@ -625,8 +627,8 @@ export default function RecipeTab() {
                   </Tr>
                 );
               })}
-            </Table>
-          </div>
+          </Table>
+          )}
 
           {!paged.length && <div className="text-center py-8 text-brand-300">Walang recipe na nahanap.</div>}
           </>

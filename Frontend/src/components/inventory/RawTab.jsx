@@ -7,6 +7,7 @@ import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLiv
 import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
 
@@ -17,6 +18,7 @@ export default function IngredientsTab() {
   const isLoading = !!context.loading;
 
   const { show: showToast } = useToast();
+  const [containerRef, isCompact] = useIsCompact();
   const [page, setPage]             = useState(1);
   const [search, setSearch]         = useState('');
   const [modalOpen, setModalOpen]   = useState(false);
@@ -98,7 +100,7 @@ export default function IngredientsTab() {
           </div>
         </div>
 
-        <div className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="px-4 pb-4 mt-4">
           {isLoading && (
             <>
               <CardSkeleton count={3} />
@@ -108,33 +110,33 @@ export default function IngredientsTab() {
 
           {!isLoading && (
             <>
-              <div className="block md:hidden space-y-3">
-                {paged.map(ing => {
-                  const st = ingStatus(ing.stock, ing.min);
-                  return (
-                    <div key={ing.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <h4 className="font-bold text-brand-800 text-sm">{ing.name}</h4>
-                          <p className="text-xs text-brand-500 mt-0.5">
-                            Stock: <span className="font-bold text-brand-700">{ing.stock} {ing.unit}</span>
-                          </p>
+              {isCompact ? (
+                <div className="space-y-3">
+                  {paged.map(ing => {
+                    const st = ingStatus(ing.stock, ing.min);
+                    return (
+                      <div key={ing.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <h4 className="font-bold text-brand-800 text-sm">{ing.name}</h4>
+                            <p className="text-xs text-brand-500 mt-0.5">
+                              Stock: <span className="font-bold text-brand-700">{ing.stock} {ing.unit}</span>
+                            </p>
+                          </div>
+                          <Badge variant={st.cls}>{st.label}</Badge>
                         </div>
-                        <Badge variant={st.cls}>{st.label}</Badge>
+                        <div className="my-3">
+                          <LevelBar stock={ing.stock} min={ing.min} />
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
+                          <Button size="sm" variant="secondary" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
+                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(ing)}>Delete</Button>
+                        </div>
                       </div>
-                      <div className="my-3">
-                        <LevelBar stock={ing.stock} min={ing.min} />
-                      </div>
-                      <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
-                        <Button size="sm" variant="secondary" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
-                        <Button size="sm" variant="danger" onClick={() => setDeleteTarget(ing)}>Delete</Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="hidden md:block">
+                    );
+                  })}
+                </div>
+              ) : (
                 <Table columns={[
                   { label: 'Ingredient Name' },
                   { label: 'Current Stock' },
@@ -160,7 +162,7 @@ export default function IngredientsTab() {
                     );
                   })}
                 </Table>
-              </div>
+              )}
 
               {!paged.length && (
                 <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
