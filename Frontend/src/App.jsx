@@ -17,7 +17,6 @@ import { Layout } from './components/Sidebar.jsx';
 import { AppProvider } from './context/AppContext.jsx';
 
 function ProtectedAdminRoute({ children }) {
-  // Tinitingnan lang natin ang UI flag, ang tunay na auth validation ay sa backend na mangyayari
   const isAuthenticated = !!localStorage.getItem('isLoggedIn'); 
   const navigate = useNavigate();
 

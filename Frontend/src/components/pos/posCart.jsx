@@ -442,7 +442,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     try {
       const token = localStorage.getItem('token'); 
-      const response = await fetch('http://localhost:3000/api/pos/order', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/pos/order`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

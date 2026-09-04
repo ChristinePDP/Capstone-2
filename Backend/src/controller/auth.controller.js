@@ -11,8 +11,8 @@ const AuthController = {
 
       res.cookie('token', result.token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        secure: true,           
+        sameSite: 'none',      
         maxAge: 8 * 60 * 60 * 1000
       });
 
