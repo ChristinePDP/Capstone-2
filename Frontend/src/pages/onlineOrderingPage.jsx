@@ -10,11 +10,6 @@ import Header from '../components/onlineOrdering/Header';
 const CART_STORAGE_KEY = 'aileen_cake_max_cart';
 
 export default function OnlineOrderingPage() {
-  // Cart state, naka-persist sa localStorage kaya nananatili ang laman
-  // nito kahit mag-refresh o bumalik ang customer gamit ang browser back
-  // button. Note: hindi kasama ang `inspiration_image` (File object) sa
-  // na-save, dahil hindi ito JSON-serializable — kailangang i-reattach
-  // ulit ng customer ang image kapag talagang na-refresh habang naka-set ito.
   const [cart, setCart] = useState(() => {
     try {
       const saved = localStorage.getItem(CART_STORAGE_KEY);

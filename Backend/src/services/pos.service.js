@@ -9,7 +9,7 @@ import { CustomersModel } from '../model/customers.model.js';
 // nagpapasa rin ng order_slip_details / selected_price_options / customer_reference_url
 // papunta sa bawat resolved row — dating wala nito ang POS, kaya nawawala
 // ang order slip answers pagdating sa DB.
-import { resolveOrderItems } from './onlineOrdering.services.js';
+import { resolveOrderItems } from './onlineOrdering.service.js';
 
 // BAGO: ginagamit para gumawa ng token na naka-encode sa QR ng e-receipt.
 // Ito ang isu-scan ng owner sa pickup counter para i-verify/complete ang order.

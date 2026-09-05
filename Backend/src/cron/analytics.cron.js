@@ -7,7 +7,7 @@ import {
 } from '../services/aiAnalytics.service.js';
 
 import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js';
-import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.services.js';
+import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.service.js';
 
 // Bumalik tayo sa Option A: cron logic na tumatakbo sa loob mismo ng Express app.
 // Walang extra Render service, walang dagdag na $1/month.

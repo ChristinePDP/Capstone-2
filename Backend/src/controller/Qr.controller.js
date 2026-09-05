@@ -1,5 +1,5 @@
 import { scanOrderByNumber, updateOrderStatus } from '../services/Qr.service.js';
-import { completeOrderAndDeductStock } from '../services/onlineOrdering.services.js';
+import { completeOrderAndDeductStock } from '../services/onlineOrdering.service.js';
 import { supabase } from '../config/supabase.js';
 
 export const handleScanQR = async (req, res) => {

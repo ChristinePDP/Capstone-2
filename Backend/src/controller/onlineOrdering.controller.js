@@ -7,7 +7,7 @@ import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder,
   createPendingOrder,
   attachCheckoutSessionToPendingOrder,
   getPendingOrder,
-  markPendingOrderPaid } from '../services/onlineOrdering.services.js';
+  markPendingOrderPaid } from '../services/onlineOrdering.service.js';
 import { supabase } from '../config/supabase.js'; 
 
 export const getPublicConfig = async (req, res) => {

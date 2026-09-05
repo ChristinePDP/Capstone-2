@@ -1,6 +1,6 @@
 import { OrdersModel } from '../model/orders.model.js';
 // I-import yung ginawa mong function na nagbabawas ng stock
-import { completeOrderAndDeductStock } from './onlineOrdering.services.js'; 
+import { completeOrderAndDeductStock } from './onlineOrdering.service.js'; 
 
 export const scanOrderByNumber = async (orderNumber) => {
   try {
