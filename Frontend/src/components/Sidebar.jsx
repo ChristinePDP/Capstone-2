@@ -19,13 +19,13 @@ const NAV = [
     ],
   },
   {
-    section: 'CATALOG',
+    section: 'STOCK',
     items: [
       { label: 'Inventory', icon: Warehouse, to: '/inventory' },
     ],
   },
   {
-    section: 'OVERVIEW',
+    section: 'INSIGHTS',
     items: [
       { label: 'Analytics', icon: LineChart, to: '/analytics' },
     ],
@@ -141,7 +141,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
 
         {/* Navigation */}
         <nav
-          className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.15)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/15 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-white/25"
         >
           {NAV.map((group, idx) => (
             <div

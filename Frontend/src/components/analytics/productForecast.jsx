@@ -1,41 +1,5 @@
 import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
 
-const FORECAST_DATA = {
-  '7d': {
-    label: 'Next 7 Days',
-    growth: [
-      { name: 'Chocolate Fudge Cake', pct: 24, diff: 8, forecast: 42 },
-      { name: 'Classic Vanilla Cake', pct: 21, diff: 5, forecast: 29 },
-    ],
-    risk: [
-      { name: 'Strawberry Cupcakes', pct: -25, diff: -6, forecast: 18 },
-      { name: 'Birthday Package A', pct: -20, diff: -4, forecast: 16 },
-    ]
-  },
-  '30d': {
-    label: 'Next 30 Days',
-    growth: [
-      { name: 'Chocolate Fudge Cake', pct: 18, diff: 15, forecast: 98 },
-      { name: 'Classic Vanilla Cake', pct: 16, diff: 10, forecast: 72 },
-    ],
-    risk: [
-      { name: 'Strawberry Cupcakes', pct: -18, diff: -12, forecast: 54 },
-      { name: 'Birthday Package A', pct: -15, diff: -8, forecast: 45 },
-    ]
-  },
-  '60d': {
-    label: 'Next 60 Days',
-    growth: [
-      { name: 'Chocolate Fudge Cake', pct: 12, diff: 25, forecast: 230 },
-      { name: 'Classic Vanilla Cake', pct: 11, diff: 18, forecast: 180 },
-    ],
-    risk: [
-      { name: 'Strawberry Cupcakes', pct: -14, diff: -22, forecast: 135 },
-      { name: 'Birthday Package A', pct: -12, diff: -15, forecast: 110 },
-    ]
-  }
-};
-
 const EmptyRow = ({ text }) => (
   <div role="status" className="flex items-center justify-center flex-1 py-4 text-center">
     <p className="text-[12px] text-[#9a8b7a] italic">{text}</p>
@@ -46,29 +10,12 @@ export default function ProductForecasting({ data, view = '30d' }) {
   const insufficientData = data?.insufficientData || false;
   const message = data?.message || '';
 
-  const hasRealData = data && (Array.isArray(data.growth) || Array.isArray(data.risk));
-
-  const rawData = hasRealData && !insufficientData
-    ? {
-        label: data.label || FORECAST_DATA[view]?.label || FORECAST_DATA['30d'].label,
-        growth: data.growth || [],
-        risk: data.risk || [],
-      }
-    : (insufficientData ? { label: '', growth: [], risk: [] } : (FORECAST_DATA[view] || FORECAST_DATA['30d']));
-
-  let growthList = rawData.growth;
-  let riskList = rawData.risk;
-
-  if (growthList.length + riskList.length > 6) {
-    if (growthList.length <= 3) {
-      riskList = riskList.slice(0, 6 - growthList.length);
-    } else if (riskList.length <= 3) {
-      growthList = growthList.slice(0, 6 - riskList.length);
-    } else {
-      growthList = growthList.slice(0, 3);
-      riskList = riskList.slice(0, 3);
-    }
-  }
+  // Wala nang mock/fallback data. Kung walang totoong data na dumating,
+  // mananatiling walang laman (empty arrays) ang growth/risk lists.
+  // Striktong 2 lang ang kukunin per list — 2 fast moving, 2 at risk.
+  const MAX_ITEMS_PER_LIST = 2;
+  const growthList = (Array.isArray(data?.growth) ? data.growth : []).slice(0, MAX_ITEMS_PER_LIST);
+  const riskList = (Array.isArray(data?.risk) ? data.risk : []).slice(0, MAX_ITEMS_PER_LIST);
 
   const renderMiniSparkline = (trend) => {
     const isUp = trend === 'up';

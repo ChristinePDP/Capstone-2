@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Calendar } from 'lucide-react';
 import { Badge, Button, Table, Tr, Td, Pagination, SearchBar } from '../ui';
 import QrScanner from './QrScanner';
@@ -101,6 +101,11 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
     return statusOk && searchOk;
   });
 
+  const maxPage = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  useEffect(() => {
+    if (page > maxPage) setPage(maxPage);
+  }, [maxPage, page]);
+
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   return (
@@ -143,9 +148,9 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
           ito kung ipipilit — mas maganda pa ring cards ang lumabas doon.
           Totoong desktop-width (1024px+) na lang talaga dapat lumabas
           ang table view. */}
-      <div className="lg:hidden bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+      <div className="lg:hidden">
         {loading ? (
-          <p className="text-center py-16 text-slate-400 font-medium">Loading orders…</p>
+          <p className="text-center py-16 text-slate-400 font-medium bg-white rounded-xl border border-slate-200 shadow-sm">Loading orders…</p>
         ) : paged.length ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {paged.map(order => {
@@ -205,9 +210,11 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
             })}
           </div>
         ) : (
-          <p className="text-center text-slate-500 font-medium py-16 text-sm">No orders found.</p>
+          <p className="text-center text-slate-500 font-medium py-16 text-sm bg-white rounded-xl border border-slate-200 shadow-sm">No orders found.</p>
         )}
-        <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mt-4">
+          <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+        </div>
       </div>
 
       {/* Desktop — table. Lumalabas lang mula lg (1024px) pataas, para

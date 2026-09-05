@@ -51,7 +51,9 @@ export default function Footer() {
             </p>
             <div className="flex items-center gap-3 mt-1">
               <a
-                href="#"
+                href="https://www.facebook.com/cakebymax"
+                target="_blank"
+                rel="noopener noreferrer"
                 aria-label="Facebook"
                 className="w-7 h-7 sm:w-8 sm:h-8 rounded-full border border-white/15 flex items-center justify-center text-white/70 hover:text-[#3B1F0A] hover:bg-[#D4A87A] hover:border-[#D4A87A] transition-colors"
               >
@@ -74,7 +76,7 @@ export default function Footer() {
               </li>
               <li className="flex items-start gap-2">
                 <MapPin size={12} className="text-[#D4A87A] shrink-0 mt-0.5" />
-                <span className="leading-tight">123 Bakery Lane, Your City</span>
+                <span className="leading-tight">Poblacion 4, Calaca City, Batangas</span>
               </li>
             </ul>
           </div>

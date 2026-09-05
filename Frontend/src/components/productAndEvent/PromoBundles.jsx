@@ -99,7 +99,31 @@ function SearchBar({ value, onChange, placeholder, className = '' }) {
   );
 }
 
+// Locks background page scroll while a modal is open. Without this, scrolling
+// inside the modal (or over the backdrop) also scrolls the page behind it —
+// the overlay alone doesn't stop that. Restores the exact scroll position on
+// close so the page doesn't jump.
+function useLockBodyScroll(isOpen) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const scrollY = window.scrollY;
+    const { overflow, position, top, width } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.position = position;
+      document.body.style.top = top;
+      document.body.style.width = width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen]);
+}
+
 function Modal({ isOpen, onClose, title, footer, children }) {
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
@@ -118,6 +142,7 @@ function Modal({ isOpen, onClose, title, footer, children }) {
 }
 
 function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Confirm' }) {
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
@@ -151,7 +176,7 @@ function CategoryTabs({ options, activeItem, onCategoryClick }) {
           <button
             key={opt}
             onClick={() => { if (opt !== activeItem) onCategoryClick(opt); }}
-            className={`relative pb-2.5 text-xs sm:text-sm font-bold tracking-wide whitespace-nowrap transition-colors ${
+            className={`relative pb-2.5 text-xs sm:text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
               active ? 'text-[#3B1F0A]' : 'text-[#8A7264] hover:text-[#3B1F0A]'
             }`}
           >

@@ -98,6 +98,29 @@ function CustomDropdown({ value, options, onChange, openUpwards = false }) {
   );
 }
 
+// Locks background page scroll while a modal is open. Without this, scrolling
+// inside the modal (or over the backdrop) also scrolls the page behind it —
+// the overlay alone doesn't stop that. Restores the exact scroll position on
+// close so the page doesn't jump.
+function useLockBodyScroll(isOpen) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const scrollY = window.scrollY;
+    const { overflow, position, top, width } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.position = position;
+      document.body.style.top = top;
+      document.body.style.width = width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen]);
+}
+
 function EventModal({ 
   isOpen = true, 
   onClose, 
@@ -105,6 +128,7 @@ function EventModal({
   initialData, 
   onSave
 }) {
+  useLockBodyScroll(isOpen);
   const [form, setForm] = useState({
     event_name: '',
     event_tag: '',
@@ -475,7 +499,7 @@ export default function EventManager() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[#3B1F0A]">Event Manager</h1>
-          <p className="text-xs text-[#8A7264] mt-1">Manage seasonal events and AI product recommendations</p>
+          <p className="text-xs sm:text-sm text-[#8A7264] mt-1">Manage seasonal events and AI product recommendations</p>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -563,7 +587,7 @@ export default function EventManager() {
                 className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-sm font-bold text-[#3B1F0A] leading-snug break-words">
+                  <h3 className="text-xs sm:text-sm font-bold text-[#3B1F0A] leading-snug break-words">
                     {event.event_name}
                   </h3>
                   <span

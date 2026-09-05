@@ -222,6 +222,13 @@ export const editBundle = async (req, res) => {
 
     const updatedBundle = await updateBundle(id, bundleData);
 
+    if (!updatedBundle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Bundle not found. Baka na-delete na ito o mali ang id.'
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Bundle updated successfully',
@@ -241,6 +248,19 @@ export const removeBundle = async (req, res) => {
   try {
     const { id } = req.params;
     const deletedBundle = await deleteBundle(id);
+
+    if (!deletedBundle) {
+      // Wala nang row na ma-delete — ibig sabihin nadelete na ito dati
+      // (o mali ang id). Itreat na lang natin bilang success dahil ang
+      // end state naman na gusto ng user ("wala na yung bundle na 'to")
+      // ay nangyari na. Iniiwasan din nito yung infinite retry loop sa
+      // frontend na dulot ng generic 500 error.
+      return res.status(200).json({
+        success: true,
+        message: 'Bundle already deleted.',
+        data: null
+      });
+    }
 
     res.status(200).json({
       success: true,

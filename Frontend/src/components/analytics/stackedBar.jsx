@@ -12,48 +12,14 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const hasFetchedButEmpty = Array.isArray(propData) && (
-    propData.length === 0 || 
+  const hasFetchedButEmpty = !Array.isArray(propData) || propData.length === 0 || (
     propData.every(d => Number(d.Sales || 0) === 0 && Number(d.Expenses || 0) === 0)
   );
 
+  // Wala nang mock/random data generator. Gagamitin lang ang totoong propData;
+  // kung wala, mananatiling walang laman (empty chart / empty state).
   const chartData = useMemo(() => {
-    let data = [];
-    
-    if (propData && propData.length > 0) {
-      data = propData;
-    } else {
-      const today = new Date();
-      if (period === 'Today' || period === 'Yesterday' || period.includes(' - ')) {
-        const hours = [6, 8, 10, 12, 14, 16, 18, 20];
-        hours.forEach(h => {
-          const label = h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
-          data.push({ label, Sales: 2000 + Math.random() * 3000, Expenses: 1000 + Math.random() * 1500 });
-        });
-      } else if (period === 'Last 7 Days') {
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(today.getDate() - i);
-          const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
-          const dateNum = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          data.push({ label: `${dayName} (${dateNum})`, Sales: 15000 + Math.random() * 15000, Expenses: 8000 + Math.random() * 6000 });
-        }
-      } else if (period === 'This Year') {
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        months.forEach(m => {
-          data.push({ label: m, Sales: 400000 + Math.random() * 200000, Expenses: 200000 + Math.random() * 100000 });
-        });
-      } else if (period === 'Last Month' || period === 'This Month') {
-        const limit = period === 'This Month' ? today.getDate() : new Date(today.getFullYear(), today.getMonth(), 0).getDate();
-        const monthOffset = period === 'This Month' ? 0 : -1;
-        const refDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
-        
-        for (let i = 1; i <= limit; i++) {
-          const d = new Date(refDate.getFullYear(), refDate.getMonth(), i);
-          data.push({ label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), Sales: 15000 + Math.random() * 8000, Expenses: 8000 + Math.random() * 4000 });
-        }
-      }
-    }
+    const data = Array.isArray(propData) ? propData : [];
 
     return data.map(d => {
       const Sales = Number(d.Sales || 0);
@@ -69,7 +35,7 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
         VisProfit: Profit > 0 ? Profit : null, 
       };
     });
-  }, [period, propData]);
+  }, [propData]);
 
   const tickInterval = useMemo(() => {
     const len = chartData.length;
@@ -109,7 +75,6 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
       </div>
 
       {hasFetchedButEmpty ? (
-        // INAYOS: Pinalitan ang min-h-[200px] ng min-h-[240px]
         <div role="status" className="flex-1 flex items-center justify-center text-sm text-brand-400 border border-dashed border-brand-200 rounded-lg text-center px-6 min-h-[240px]">
           No performance trend data available for this timeframe
         </div>

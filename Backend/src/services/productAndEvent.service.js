@@ -314,6 +314,12 @@ export const updateBundle = async (id, bundleData) => {
   try {
     const response = await BundleModel.update(id, bundleToUpdate);
     if (response.error) throw new Error(response.error.message);
+
+    // Walang na-match na row (nadelete na, mali ang id, atbp.) — hindi ito
+    // dapat maging generic 500, kundi malinaw na "not found" signal papunta
+    // sa controller.
+    if (response.notFound) return null;
+
     return enrichBundleWithPricing(response.data);
   } catch (error) {
     throw new Error(`Service Error (updateBundle): ${error.message}`);
@@ -324,6 +330,11 @@ export const deleteBundle = async (id) => {
   try {
     const response = await BundleModel.delete(id);
     if (response.error) throw new Error(response.error.message);
+
+    // Ganoon din dito: kapag wala nang row na na-delete (idempotent retry,
+    // stale UI, atbp.), ibalik na lang ang null imbes na mag-throw.
+    if (response.notFound) return null;
+
     return response.data;
   } catch (error) {
     throw new Error(`Service Error (deleteBundle): ${error.message}`);

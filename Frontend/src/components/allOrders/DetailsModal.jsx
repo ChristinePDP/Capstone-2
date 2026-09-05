@@ -196,14 +196,37 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
 
   const items = order ? (order.items || order.order_items || []) : [];
   const hasOrderSlipCheck = items.some(item => parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails));
+  const hasReferenceImageCheck = !!(
+    order?.customerReference ||
+    order?.customer_reference_url ||
+    items.find(i => i.customer_reference_url)?.customer_reference_url ||
+    items.find(i => i.customerReference)?.customerReference
+  );
 
-  // Guard against the modal being reused for a different order that has no
-  // order slip while it was left sitting on the Order Slip tab.
+  // Guard against the modal being reused for a different order that has
+  // neither slip data nor a reference image while it was left sitting on
+  // the Order Slip tab.
   useEffect(() => {
-    if (activeTab === 'slip' && !hasOrderSlipCheck) {
+    if (activeTab === 'slip' && !hasOrderSlipCheck && !hasReferenceImageCheck) {
       setActiveTab('customer');
     }
-  }, [order?.id, hasOrderSlipCheck, activeTab]);
+  }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
+
+  // Lock background scroll while the modal is open, and let Escape close
+  // it — previously the page behind the modal kept scrolling.
+  useEffect(() => {
+    if (!isOpen || !order) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, order, onClose]);
 
   if (!isOpen || !order) return null;
 
@@ -271,6 +294,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     return cards;
   })();
   const hasOrderSlip = orderSlipCards.length > 0;
+  // The tab itself should appear whenever there's EITHER slip data OR a
+  // reference image to show — previously it was gated on slip data alone,
+  // which meant an order with only a reference photo (no filled-in
+  // customization fields) never got a tab and the photo was unreachable.
+  const showSlipTab = hasOrderSlip || !!referenceImage;
 
   const nextStatus = { Confirmed: 'Ready', Ready: 'Completed' };
 
@@ -323,22 +351,31 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   const TABS = [
     { id: 'customer', label: 'Customer Details', icon: User },
     { id: 'order', label: 'Order Details', icon: ReceiptText },
-    ...(hasOrderSlip ? [{ id: 'slip', label: 'Order Slip', icon: FileText }] : []),
+    ...(showSlipTab ? [{ id: 'slip', label: 'Order Slip', icon: FileText }] : []),
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
+    <div
+      className="fixed inset-0 z-50 flex overflow-y-auto bg-[#1F1108]/60 backdrop-blur-sm p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="order-details-heading"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90dvh] m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
+        onClick={(e) => e.stopPropagation()}
+      >
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 sm:px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-bold text-[#3B1F0A]">Order #{orderNumber}</h2>
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
+          <div className="flex items-center gap-3 flex-wrap min-w-0">
+            <h2 id="order-details-heading" className="text-lg sm:text-2xl font-bold text-[#3B1F0A] truncate">Order #{orderNumber}</h2>
             <StatusBadge status={order.status} />
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors shrink-0"
           >
             <X size={18} />
           </button>
@@ -392,7 +429,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         </div>
 
         {/* Body */}
-        <div className="px-4 sm:px-7 py-6 overflow-y-auto flex-1">
+        <div className="px-4 sm:px-7 py-6 overflow-y-auto overscroll-contain flex-1">
 
           {activeTab === 'customer' && (
             <div className="flex flex-col gap-5">
@@ -485,14 +522,17 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             </div>
           )}
 
-          {activeTab === 'slip' && hasOrderSlip && (
+          {activeTab === 'slip' && showSlipTab && (
             <div className="flex flex-col gap-5">
 
               {/* Order Slip — one card per bundle (or per standalone
                   product); when a bundle has more than one product with
                   slip details, each product gets its own clearly labeled
-                  section inside instead of merging them together. */}
-              {orderSlipCards.map((card, idx) => (
+                  section inside instead of merging them together. Only
+                  rendered when there's actual slip data — an order with
+                  just a reference image and no slip fields still gets
+                  this tab, just without these cards. */}
+              {hasOrderSlip && orderSlipCards.map((card, idx) => (
                 <div key={idx} className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
                   <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
                     <FileText size={14} className="text-[#8A7264]" />

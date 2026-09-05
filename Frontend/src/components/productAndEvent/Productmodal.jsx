@@ -54,7 +54,31 @@ async function fetchEventTagsFromApi() {
   return tagsCachePromise;
 }
 
+// Locks background page scroll while a modal is open. Without this, scrolling
+// inside the modal (or over the backdrop) also scrolls the page behind it —
+// the overlay alone doesn't stop that. Restores the exact scroll position on
+// close so the page doesn't jump.
+function useLockBodyScroll(isOpen) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const scrollY = window.scrollY;
+    const { overflow, position, top, width } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    return () => {
+      document.body.style.overflow = overflow;
+      document.body.style.position = position;
+      document.body.style.top = top;
+      document.body.style.width = width;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isOpen]);
+}
+
 function Modal({ isOpen = true, onClose, title, children, footer, size = 'md' }) {
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
   const sizeClass = size === 'xl' ? 'max-w-5xl' : size === 'lg' ? 'max-w-3xl' : 'max-w-lg';
   

@@ -23,74 +23,117 @@ const GALLERY_FILES = [
 
 function CreationsCarousel({ items, className = '' }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
   const total = items.length;
+  const touchStartX = useRef(null);
+  const touchDeltaX = useRef(0);
 
-  const goTo = (idx) => setActiveIndex(((idx % total) + total) % total);
+  const goTo = (idx) => {
+    setZoomed(false);
+    setActiveIndex(((idx % total) + total) % total);
+  };
   const prev = () => goTo(activeIndex - 1);
   const next = () => goTo(activeIndex + 1);
 
+  const handleCardTap = (i, isActive) => {
+    if (isActive) {
+      setZoomed((z) => !z);
+    } else {
+      goTo(i);
+    }
+  };
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchDeltaX.current = 0;
+  };
+  const handleTouchMove = (e) => {
+    if (touchStartX.current === null) return;
+    touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+  };
+  const handleTouchEnd = () => {
+    const SWIPE_THRESHOLD = 35;
+    if (touchDeltaX.current > SWIPE_THRESHOLD) prev();
+    else if (touchDeltaX.current < -SWIPE_THRESHOLD) next();
+    touchStartX.current = null;
+    touchDeltaX.current = 0;
+  };
+
   return (
-    <div className={`relative w-full flex items-center justify-center ${className}`}>
-      <button
-        onClick={prev}
-        aria-label="Previous creations"
-        className="flex absolute left-0 sm:left-1 lg:left-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
-      >
-        <ChevronLeft size={14} className="sm:w-[18px] sm:h-[18px]" />
-      </button>
+    <div className={`relative w-full flex flex-col items-center justify-center ${className}`}>
+      <div className="relative w-full sm:max-w-[680px] lg:max-w-[820px] mx-auto flex-1 flex items-center justify-center">
+        <button
+          onClick={prev}
+          aria-label="Previous creations"
+          className="hidden sm:flex absolute left-0 lg:left-1 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
+        >
+          <ChevronLeft size={18} />
+        </button>
 
-      <div className="relative w-full h-full flex items-center justify-center overflow-hidden px-8 sm:px-12 lg:px-14 py-5 sm:py-7 lg:py-9">
-        {items.map((src, i) => {
-          let offset = i - activeIndex;
-          if (offset > total / 2) offset -= total;
-          if (offset < -total / 2) offset += total;
+        <div
+          className="relative w-full h-full flex items-center justify-center overflow-hidden px-2 sm:px-12 lg:px-14 py-5 sm:py-7 lg:py-9 touch-pan-y select-none"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {items.map((src, i) => {
+            let offset = i - activeIndex;
+            if (offset > total / 2) offset -= total;
+            if (offset < -total / 2) offset += total;
 
-          const abs = Math.abs(offset);
-          if (abs > 2) return null;
+            const abs = Math.abs(offset);
+            if (abs > 2) return null;
 
-          const isActive = offset === 0;
-          const translatePct = offset * 58;
-          const scale = isActive ? 1 : abs === 1 ? 0.78 : 0.62;
-          const opacity = isActive ? 1 : abs === 1 ? 0.55 : 0.28;
-          const blurPx = isActive ? 0 : abs === 1 ? 2.5 : 5;
+            const isActive = offset === 0;
+            const translatePct = offset * 58;
+            const baseScale = isActive ? 1 : abs === 1 ? 0.78 : 0.62;
+            const scale = isActive && zoomed ? baseScale * 1.18 : baseScale;
+            const opacity = isActive ? 1 : abs === 1 ? 0.55 : 0.28;
+            const blurPx = isActive ? 0 : abs === 1 ? 2.5 : 5;
 
-          return (
-            <div
-              key={i}
-              onClick={() => !isActive && goTo(i)}
-              className={`group absolute w-[110px] sm:w-[195px] lg:w-[220px] h-[150px] sm:h-[250px] lg:h-[285px] transition-all duration-500 ease-out ${abs === 2 ? 'hidden sm:block' : ''} ${isActive ? 'cursor-default' : 'cursor-pointer'}`}
-              style={{
-                transform: `translateX(${translatePct}%) scale(${scale})`,
-                filter: `blur(${blurPx}px)`,
-                opacity,
-                zIndex: isActive ? 20 : 10 - abs,
-              }}
-            >
+            return (
               <div
-                className={`w-full h-full bg-white p-1.5 sm:p-2 rounded-t-[999px] rounded-b-2xl border border-[#DED4CC] shadow-md overflow-hidden transition-all duration-300 ${
-                  isActive ? 'group-hover:scale-[1.035] group-hover:shadow-2xl group-hover:border-[#D4A87A]' : ''
-                }`}
+                key={i}
+                onClick={() => handleCardTap(i, isActive)}
+                className={`group absolute w-[168px] sm:w-[195px] lg:w-[220px] h-[218px] sm:h-[250px] lg:h-[285px] transition-all duration-500 ease-out touch-manipulation ${abs === 2 ? 'hidden sm:block' : ''} ${isActive ? 'cursor-zoom-in' : 'cursor-pointer'}`}
+                style={{
+                  transform: `translateX(${translatePct}%) scale(${scale})`,
+                  filter: `blur(${blurPx}px)`,
+                  opacity,
+                  zIndex: isActive && zoomed ? 25 : isActive ? 20 : 10 - abs,
+                }}
               >
-                <div className="w-full h-full rounded-t-[999px] rounded-b-xl overflow-hidden">
-                  <img
-                    src={src}
-                    alt={`Past order ${i + 1}`}
-                    className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
-                  />
+                <div
+                  className={`w-full h-full bg-white p-1.5 sm:p-2 rounded-t-[999px] rounded-b-2xl border border-[#DED4CC] shadow-md overflow-hidden transition-all duration-300 ${
+                    isActive ? 'group-hover:scale-[1.035] group-hover:shadow-2xl group-hover:border-[#D4A87A]' : ''
+                  } ${isActive && zoomed ? 'shadow-2xl border-[#D4A87A]' : ''}`}
+                >
+                  <div className="w-full h-full rounded-t-[999px] rounded-b-xl overflow-hidden">
+                    <img
+                      src={src}
+                      alt={`Past order ${i + 1}`}
+                      className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+                      draggable={false}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        <button
+          onClick={next}
+          aria-label="Next creations"
+          className="hidden sm:flex absolute right-0 lg:right-1 top-1/2 -translate-y-1/2 z-30 w-11 h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
+        >
+          <ChevronRight size={18} />
+        </button>
       </div>
 
-      <button
-        onClick={next}
-        aria-label="Next creations"
-        className="flex absolute right-0 sm:right-1 lg:right-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 sm:w-11 sm:h-11 rounded-full bg-[#3B1F0A] text-white items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all"
-      >
-        <ChevronRight size={14} className="sm:w-[18px] sm:h-[18px]" />
-      </button>
+      <p className="sm:hidden mt-3 text-[10px] tracking-wide text-[#8A7264]">
+        Swipe to browse · Tap to zoom
+      </p>
     </div>
   );
 }
@@ -294,15 +337,11 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
   let displayBundles = [];
+  const hasNoBundles = !isLoading && bundles.length === 0;
   if (isLoading) {
     displayBundles = [
       { id: 'load-1', isLoading: true },
       { id: 'load-2', isLoading: true }
-    ];
-  } else if (bundles.length === 0) {
-    displayBundles = [
-      { id: 'dummy-1', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] },
-      { id: 'dummy-2', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] }
     ];
   } else if (bundles.length === 1) {
     displayBundles = [
@@ -336,6 +375,11 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
     const step = card.getBoundingClientRect().width + gap;
     el.scrollBy({ left: dir * step, behavior: 'smooth' });
   };
+
+  // No bundles available — render nothing (Home already hides the whole
+  // section in this case; this guard just protects against reuse elsewhere).
+  // Placed after all hooks above so it never breaks the Rules of Hooks.
+  if (hasNoBundles) return null;
 
   return (
     <div className="relative w-full">
@@ -480,11 +524,11 @@ export default function Home() {
 
       <main>
         {/* 1. Hero Section */}
-        <section className="w-full bg-[#FCFAF9] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
+        <section className="w-full bg-[#E8E6E2] relative overflow-hidden min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center py-6 lg:py-0">
           <div className="max-w-[1300px] mx-auto px-5 sm:px-8 lg:px-16 w-full relative z-10 lg:-translate-y-4">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_0.92fr] gap-10 sm:gap-14 lg:gap-10 items-center">
               <div className="w-full mt-2 lg:mt-0 relative z-20 text-center lg:text-left">
-                <span className="inline-flex items-center gap-2 -rotate-2 border border-dashed border-[#3B1F0A]/25 rounded-full px-3.5 py-1.5 mb-5 sm:mb-7 lg:mb-8 bg-[#FCFAF9]">
+                <span className="inline-flex items-center gap-2 -rotate-2 border border-dashed border-[#3B1F0A]/25 rounded-full px-3.5 py-1.5 mb-5 sm:mb-7 lg:mb-8 bg-[#E8E6E2]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#D4A87A] shrink-0" />
                   <span className="font-serif italic text-[12px] sm:text-sm text-[#5A453C]">
                     a small family bakery, made by hand
@@ -524,51 +568,40 @@ export default function Home() {
               </div>
             </div>
           </div>
-
-          {/* scalloped edge, like a cake board, cutting into the section below */}
-          <svg
-            className="absolute bottom-0 left-0 w-full h-[16px] sm:h-[24px] text-[#F5EFEB] pointer-events-none"
-            preserveAspectRatio="none"
-            viewBox="0 0 200 10"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M0,10 L0,4 Q5,10 10,4 Q15,10 20,4 Q25,10 30,4 Q35,10 40,4 Q45,10 50,4 Q55,10 60,4 Q65,10 70,4 Q75,10 80,4 Q85,10 90,4 Q95,10 100,4 Q105,10 110,4 Q115,10 120,4 Q125,10 130,4 Q135,10 140,4 Q145,10 150,4 Q155,10 160,4 Q165,10 170,4 Q175,10 180,4 Q185,10 190,4 Q195,10 200,4 L200,10 Z"
-              fill="currentColor"
-            />
-          </svg>
         </section>
 
-        {/* 2. Promo Bundles Section */}
-        <section className="w-full bg-[#F5EFEB] py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center">
-          <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
+        {/* 2. Promo Bundles Section — hidden entirely once loading finishes if there are 0 available bundles */}
+        {(isLoadingBundles || bundles.length > 0) && (
+          <section className="w-full bg-[#F5EFEB] py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center">
+            <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">
 
-            <div className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col justify-center text-center lg:text-left">
-              <h2 className="text-[32px] leading-[1.1] sm:text-5xl lg:text-6xl xl:text-[68px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight drop-shadow-sm">
-                Bundle up & Save.
-              </h2>
-              
-              <p className="text-sm sm:text-lg lg:text-xl text-[#796860] mb-6 sm:mb-8 lg:mb-10 leading-relaxed max-w-lg mx-auto lg:mx-0 font-light">
-                Save more when you order them together.
-              </p>
-              
-              <button
-                onClick={() => navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
-                className="inline-flex items-center justify-center lg:justify-start gap-2 text-[#3B1F0A] font-bold text-xs sm:text-sm hover:opacity-70 transition-opacity uppercase tracking-widest group"
-              >
-                View promo bundles
-                <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
-                  <ArrowRight size={14} />
-                </span>
-              </button>
+              <div className="w-full lg:w-[420px] xl:w-[480px] shrink-0 flex flex-col justify-center text-center lg:text-left">
+                <h2 className="text-[32px] leading-[1.1] sm:text-5xl lg:text-6xl xl:text-[68px] font-serif text-[#3B1F0A] mb-4 lg:mb-6 tracking-tight drop-shadow-sm">
+                  Bundle up & Save.
+                </h2>
+                
+                <p className="text-sm sm:text-lg lg:text-xl text-[#796860] mb-6 sm:mb-8 lg:mb-10 leading-relaxed max-w-lg mx-auto lg:mx-0 font-light">
+                  Save more when you order them together.
+                </p>
+                
+                <button
+                  onClick={() => navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
+                  className="inline-flex items-center justify-center lg:justify-start gap-2 text-[#3B1F0A] font-bold text-xs sm:text-sm hover:opacity-70 transition-opacity uppercase tracking-widest group"
+                >
+                  View promo bundles
+                  <span className="bg-white/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm group-hover:translate-x-1 transition-transform border border-white/50">
+                    <ArrowRight size={14} />
+                  </span>
+                </button>
+              </div>
+
+              <div className="flex-1 w-full min-w-0">
+                <BundleCarousel bundles={bundles} isLoading={isLoadingBundles} navigate={navigate} />
+              </div>
+
             </div>
-
-            <div className="flex-1 w-full min-w-0">
-              <BundleCarousel bundles={bundles} isLoading={isLoadingBundles} navigate={navigate} />
-            </div>
-
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* 3. How to order */}
         <section className="w-full bg-[#FCFAF9] min-h-[calc(100svh-76px)] lg:h-[calc(100vh-76px)] flex flex-col justify-center py-10 sm:py-16">
@@ -605,7 +638,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="h-[220px] sm:h-auto lg:flex-1 w-full lg:min-h-0">
+            <div className="h-[300px] sm:h-auto lg:flex-1 w-full lg:min-h-0">
               <CreationsCarousel items={GALLERY} className="h-full" />
             </div>
           </div>

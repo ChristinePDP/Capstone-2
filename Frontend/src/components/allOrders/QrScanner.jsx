@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { QrCode, Search } from 'lucide-react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Badge, Button, Modal, Input, useToast } from '../ui';
@@ -20,6 +20,18 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
   const [manualOrderId, setManualOrderId] = useState('');
   const [resultOpen, setResultOpen]       = useState(false);
   const [resultOrder, setResultOrder]     = useState(null);
+
+  // Lock background scroll while either modal is open — otherwise, on
+  // mobile, scrolling inside the modal (e.g. the items list) chains up
+  // and moves the page underneath it instead of staying inside the modal.
+  useEffect(() => {
+    if (!scannerOpen && !resultOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [scannerOpen, resultOpen]);
 
   const processOrderSearch = (scannedId) => {
     let foundOrder = null;
@@ -109,7 +121,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
               <p className="text-[10px] font-black uppercase tracking-widest text-brand-600 mb-2">Order Details</p>
               <p className="text-[10px] font-black text-brand-950 mb-2">#{orderNumber}</p>
               <p className="text-[15px] font-bold text-brand-900 mb-3">{(order.customer || order.customers)?.name || 'Walk-in'}</p>
-              <div className="bg-white rounded-lg p-3 max-h-[120px] overflow-y-auto">
+              <div className="bg-white rounded-lg p-3 max-h-[120px] overflow-y-auto overscroll-contain">
                 <table className="w-full text-xs">
                   <tbody className="divide-y divide-slate-200">
                     {items.map((item, i) => (
