@@ -12,6 +12,7 @@ import posRoutes from './routes/pos.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
+import cronRoutes from './routes/cron.routes.js';
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 import { handlePaymongoWebhook } from './controller/onlineOrdering.controller.js';
@@ -63,6 +64,7 @@ app.use('/api/pos', posRoutes);
 app.use('/api/Qr', qrScaner);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/online-ordering/products', productAndEventRoutes);
+app.use('/api/cron', cronRoutes);
 
 app.use(errorHandler);
 
