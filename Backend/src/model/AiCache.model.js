@@ -15,11 +15,12 @@ const AiCacheModel = {
   },
 
   upsert: async (cacheKey, payload, ttlMs) => {
+    const generated_at = new Date().toISOString();
     const expires_at = new Date(Date.now() + ttlMs).toISOString();
 
     const { error } = await supabase
       .from(TABLE)
-      .upsert({ cache_key: cacheKey, payload, expires_at }, { onConflict: 'cache_key' });
+      .upsert({ cache_key: cacheKey, payload, generated_at, expires_at }, { onConflict: 'cache_key' });
 
     if (error) throw error;
   },
