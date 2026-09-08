@@ -33,6 +33,21 @@ export async function logout() {
   }
 }
 
+// Send the logged-in user's current and new passwords to the protected backend endpoint.
+export async function changePassword(currentPassword, newPassword) {
+  try {
+    const res = await axios.post(`${API_BASE}/change-password`, {
+      currentPassword,
+      newPassword,
+    }, {
+      withCredentials: true,
+    });
+    return res.data;
+  } catch (err) {
+    throw new Error(err.response?.data?.message || 'Failed to change password', { cause: err });
+  }
+}
+
 export async function requestPasswordReset(email) {
   try {
     const res = await axios.post(`${API_BASE}/forgot-password`, { email });

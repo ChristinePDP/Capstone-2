@@ -9,6 +9,9 @@ router.post('/login', AuthController.login);
 router.post('/logout', authMiddlewareJwt, AuthController.logout);
 router.get('/me', authMiddlewareJwt, AuthController.me);
 
+// Require the existing login session before allowing a password change.
+router.post('/change-password', authMiddlewareJwt, AuthController.changePassword);
+
 // NEW: forgot password flow
 router.post('/forgot-password', AuthController.requestReset);
 

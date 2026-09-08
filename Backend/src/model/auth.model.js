@@ -5,6 +5,14 @@ const AuthModel = {
   signIn: (email, password) =>
     supabase.auth.signInWithPassword({ email, password }),
 
+  // Verify the current password and establish the Supabase user session needed for the update call.
+  signInWithPassword: (email, password) =>
+    supabase.auth.signInWithPassword({ email, password }),
+
+  // Change the password for the user established by the verification call above.
+  updatePassword: (newPassword) =>
+    supabase.auth.updateUser({ password: newPassword }),
+
   getAdminById: (userId) =>
     supabase
       .from('admins')

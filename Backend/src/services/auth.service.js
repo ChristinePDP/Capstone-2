@@ -35,6 +35,32 @@ async function getProfile(adminId) {
   return data;
 }
 
+// Verify the logged-in user's current password before changing it, and stop before the update if verification fails.
+async function changePassword(adminId, currentPassword, newPassword) {
+  const { data: admin, error: adminError } = await AuthModel.getAdminById(adminId);
+  if (adminError || !admin) {
+    const err = new Error('Admin account not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const { error: signInError } = await AuthModel.signInWithPassword(admin.email, currentPassword);
+  if (signInError) {
+    const err = new Error('Current password is incorrect');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const { error: updateError } = await AuthModel.updatePassword(newPassword);
+  if (updateError) {
+    const err = new Error('Failed to update password');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  return { message: 'Password updated successfully' };
+}
+
 // hakbang 1 — magpadala ng OTP sa email
 async function requestPasswordReset(email) {
   const { error } = await AuthModel.requestPasswordReset(email);
@@ -79,6 +105,6 @@ async function verifyResetOtp(email, otp, newPassword) {
   return { message: 'Password updated successfully' };
 }
 
-const AuthService = { login, getProfile, requestPasswordReset, verifyOtpOnly, verifyResetOtp };
+const AuthService = { login, getProfile, changePassword, requestPasswordReset, verifyOtpOnly, verifyResetOtp };
 
-export { login, getProfile, requestPasswordReset, verifyOtpOnly, verifyResetOtp, AuthService };
+export { login, getProfile, changePassword, requestPasswordReset, verifyOtpOnly, verifyResetOtp, AuthService };

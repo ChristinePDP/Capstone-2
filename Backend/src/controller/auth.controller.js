@@ -1,6 +1,7 @@
 import { AuthService } from '../services/auth.service.js';
 import { ok, fail } from '../utils/response.js';
-import { LoginSchema, RequestOtpSchema, VerifyOtpSchema, VerifyOtpOnlySchema } from '../schemas/index.js';
+// Import the schema used to validate the new authenticated password-change request.
+import { LoginSchema, ChangePasswordSchema, RequestOtpSchema, VerifyOtpSchema, VerifyOtpOnlySchema } from '../schemas/index.js';
 
 const AuthController = {
 
@@ -40,6 +41,19 @@ const AuthController = {
     try {
       const admin = await AuthService.getProfile(req.admin.id);
       ok(res, admin);
+    } catch (err) { next(err); }
+  },
+
+  // Parse the authenticated user's password-change request and return the standard success response.
+  changePassword: async (req, res, next) => {
+    try {
+      const body = ChangePasswordSchema.parse(req.body);
+      const result = await AuthService.changePassword(
+        req.admin.id,
+        body.currentPassword,
+        body.newPassword
+      );
+      ok(res, result, 'Password updated successfully');
     } catch (err) { next(err); }
   },
 

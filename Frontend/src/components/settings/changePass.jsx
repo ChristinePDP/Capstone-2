@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle } from 'lucide-react';
+// Use the existing frontend auth service so this form sends credentials consistently with login and recovery.
+import * as authService from '../../services/authService';
 
-// ─── Password strength helper ──────────────────────────────────
-// Purely visual/UX feedback for now — no backend to validate against yet.
+// Calculate a visual strength score while the user creates a password that meets the backend rules.
 function getStrength(pw) {
   if (!pw) return { label: '', pct: 0, color: 'bg-brand-200' };
   let score = 0;
@@ -64,6 +65,7 @@ export default function ChangePass() {
 
   const strength = getStrength(newPassword);
 
+  // Validate all three fields locally so avoidable requests never reach the backend.
   const validate = () => {
     const next = {};
     if (!currentPassword) next.currentPassword = 'Enter your current password.';
@@ -71,6 +73,12 @@ export default function ChangePass() {
       next.newPassword = 'Enter a new password.';
     } else if (newPassword.length < 8) {
       next.newPassword = 'Password must be at least 8 characters.';
+    } else if (!/[A-Z]/.test(newPassword)) {
+      next.newPassword = 'Password must include at least one uppercase letter.';
+    } else if (!/[a-z]/.test(newPassword)) {
+      next.newPassword = 'Password must include at least one lowercase letter.';
+    } else if (!/[0-9]/.test(newPassword)) {
+      next.newPassword = 'Password must include at least one number.';
     }
     if (currentPassword && newPassword && currentPassword === newPassword) {
       next.newPassword = 'New password must be different from the current one.';
@@ -90,16 +98,19 @@ export default function ChangePass() {
     if (!validate()) return;
 
     setSubmitting(true);
-    // TODO: walang backend pa — palitan ito ng tunay na API call
-    // (hal. authService.changePassword({ currentPassword, newPassword }))
-    await new Promise((res) => setTimeout(res, 900));
-    setSubmitting(false);
-
-    setSuccessMsg('Password updated successfully.');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setErrors({});
+    // Call the backend only after client validation, then clear the form only after Supabase confirms the update.
+    try {
+      await authService.changePassword(currentPassword, newPassword);
+      setSuccessMsg('Password updated successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setErrors({});
+    } catch (err) {
+      setErrors({ form: err.message || 'Unable to change password. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -163,10 +174,11 @@ export default function ChangePass() {
           </div>
         )}
 
+        {/* Show either the backend error or the field-validation summary when submission cannot complete. */}
         {!successMsg && Object.keys(errors).length > 0 && (
           <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-[13px] font-semibold rounded-xl px-3.5 py-2.5">
             <AlertCircle size={16} />
-            Please fix the errors above.
+            {errors.form || 'Please fix the errors above.'}
           </div>
         )}
 
