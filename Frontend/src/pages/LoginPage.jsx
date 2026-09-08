@@ -492,7 +492,8 @@ export default function LoginPage({ onLogin }) {
       fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
       WebkitFontSmoothing: 'antialiased',
       position: 'relative',
-      overflow: 'hidden',
+      overflowY: 'auto',
+      overflowX: 'hidden',
     },
     gridBg: {
       position: 'fixed', inset: 0,
@@ -557,15 +558,17 @@ export default function LoginPage({ onLogin }) {
         .panel-sub   { font-size: clamp(13px, 1.4vw, 14px); margin: 0 0 20px; }
 
         /* ── RESPONSIVE CLASSES ──
-           Ginagamit ang % / clamp() sa halip na fixed px, para hindi biglaan
-           (sudden jump) ang sukat sa pagitan ng mobile at desktop breakpoint —
-           dahan-dahan itong lumiliit/lumalaki habang nag-re-resize ang window,
-           kaya walang "sandwiched"/hindi-pantay na sukat sa mga in-between
-           (tablet-width) na screens. */
+           Ang height ng card ay naka-clamp sa pagitan ng minimum, ng
+           available viewport height (100vh minus margins), at ng maximum
+           700px — kaya awtomatikong bumabagay ito sa aktwal na taas ng
+           screen sa halip na palaging mag-700px na fixed. Dahil dito,
+           laging sakto sa gitna ng screen ang card sa anumang taas ng
+           viewport (laptop, tablet landscape/portrait, atbp.) nang walang
+           excess na space sa ibaba at walang kailangang mag-scroll. */
         .responsive-card {
           display: flex;
           flex-direction: row;
-          min-height: 700px;
+          height: clamp(420px, calc(100vh - 48px), 700px);
           margin: 24px 16px;
         }
         .responsive-brand {
@@ -587,16 +590,15 @@ export default function LoginPage({ onLogin }) {
           min-width: 0;
           padding: clamp(20px, 4vw, 48px) clamp(18px, 4vw, 44px);
           box-sizing: border-box;
+          overflow-y: auto; /* Safety net kung sobrang liit ng clamped height para sa laman */
         }
 
         /* ── SA MOBILE, NAGIGING STACKED (column) na layout ── */
         @media (max-width: 900px) {
           .responsive-card {
             flex-direction: column;
-            min-height: auto;
-            max-height: calc(100vh - 32px); /* Tinitiyak na hindi lalampas sa screen height */
-            overflow-y: auto; /* Magkakaroon ng scrollbar ang loob kapag sobrang liit ng phone */
-            margin: 16px; /* Binawasan ang margin para mas lumaki ang space sa loob */
+            height: auto; /* Sumusunod na lang sa laki ng laman kapag naka-stack */
+            margin: 16px;
           }
           .responsive-brand {
             width: 100%;
