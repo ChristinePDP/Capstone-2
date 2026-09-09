@@ -28,11 +28,17 @@ const AuthController = {
     }
   },
 
+  // FIX: dapat eksaktong tumugma ang `secure` at `sameSite` dito sa options
+  // na ginamit sa res.cookie() sa login. Dati: secure: (NODE_ENV === 'production')
+  // at sameSite: 'strict' — hindi tugma sa login's secure: true / sameSite: 'none',
+  // kaya hindi talaga nabubura ng browser ang cookie kahit successful ang request.
+  // Dahil dito, nag-i-stay ang JWT sa browser at magagamit pa rin sa ibang
+  // protected endpoints kahit "naka-logout" na ang user.
   logout: (_req, res) => {
     res.clearCookie('token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      secure: true,
+      sameSite: 'none',
     });
     ok(res, null, 'Logged out');
   },

@@ -28,11 +28,29 @@ function ProtectedAdminRoute({ children }) {
     try {
       await authService.logout(); // Hindi na kailangang ipasa ang getToken()
     } finally {
+      localStorage.removeItem('isLoggedIn'); // matiks palaging ma-clear kahit mag-fail ang API call
+      localStorage.removeItem('admin');
       navigate('/login', { replace: true });
     }
   };
 
   return <Layout onLogout={handleLogout}>{children}</Layout>;
+}
+
+// ── GUEST ROUTE (BAGO) ──────────────────────────────────────────
+// Kabaligtaran ng ProtectedAdminRoute: kung may session ka na (naka-login),
+// hindi ka na dapat makarating sa /login page — kailangan agad kang
+// ma-redirect papalayo, katulad ng Facebook (inaccessible ang login page
+// kapag may active session ka na). Kung wala namang session, ipapasa lang
+// natin ang children (yung LoginRoute) nang normal.
+function GuestRoute({ children }) {
+  const isAuthenticated = !!localStorage.getItem('isLoggedIn');
+
+  if (isAuthenticated) {
+    return <Navigate to="/analytics" replace />;
+  }
+
+  return children;
 }
 
 // ── LOGIN ROUTE (BAGO) ──────────────────────────────────────────
@@ -51,13 +69,15 @@ function ProtectedAdminRoute({ children }) {
 // fetchAll() sa AppContext) BAGO mag-navigate — kaya may laman na agad
 // ang orders/products/etc. pagdating sa Inventory o All Orders, kahit
 // walang refresh.
+//
+// Destination pagkatapos mag-login: /analytics (hindi na /inventory).
 function LoginRoute() {
   const navigate = useNavigate();
   const { login } = useApp();
 
   const handleLogin = () => {
     login();               // i-sync ang AppContext (triggers fetchAll)
-    navigate('/inventory');
+    navigate('/analytics');
   };
 
   return <LoginPage onLogin={handleLogin} />;
@@ -85,11 +105,14 @@ export default function App() {
     <AppProvider>
       <ToastProvider>
         <Routes>
-          {/* ── ROOT: papuntang login o inventory depende sa session ── */}
+          {/* ── ROOT: papuntang login o analytics depende sa session ── */}
+          {/* Kung naka-login, dadaan sa /login pero agad ding ire-redirect */}
+          {/* ng GuestRoute papuntang /analytics — walang extra logic dito. */}
           <Route path="/" element={<Navigate to={'/login'} replace />} />
 
           {/* ── AUTHENTICATION ── */}
-          <Route path="/login" element={<LoginRoute />} />
+          {/* GuestRoute: kung may session ka na, hindi ka makakarating dito */}
+          <Route path="/login" element={<GuestRoute><LoginRoute /></GuestRoute>} />
 
           {/* ── INVENTORY (Private) ── */}
           <Route path="/inventory" element={<ProtectedAdminRoute><InventoryPage /></ProtectedAdminRoute>} />
