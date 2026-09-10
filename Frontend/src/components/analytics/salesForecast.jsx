@@ -80,7 +80,7 @@ export default function SalesForecast({
   const hasFetchedButEmpty = Array.isArray(propData) && propData.length === 0;
 
   const chartData = useMemo(() => {
-    const daysMap = { '7d': 7, '30d': 30, '60d': 60 };
+    const daysMap = { '7d': 7, '30d': 30 };
     const totalPoints = daysMap[view] || 30;
     
     const today = new Date();
@@ -100,8 +100,8 @@ export default function SalesForecast({
     });
   }, [view, propData, hasFetchedButEmpty, insufficientData]);
 
-  const periodText = view === '7d' ? '7-Day' : view === '60d' ? '60-Day' : '30-Day';
-  const tickStep = view === '7d' ? 1 : view === '30d' ? 5 : 10;
+  const periodText = view === '7d' ? '7-Day' : '30-Day';
+  const tickStep = view === '7d' ? 1 : 5;
 
   return (
     <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full min-h-[350px]">

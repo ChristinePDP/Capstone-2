@@ -8,7 +8,56 @@ import { RecipeModel } from "../model/recipe.model.js";
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { getLookbackDateRange } from "../utils/analytics/ForecastTimeframe.utils.js";
 
-const TIMEFRAME_DAYS = { "7d": 7, "30d": 30, "60d": 60 };
+const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
+
+// ==========================================
+// SHARED: PRE-GEMINI DATA SUFFICIENCY GATE
+// ==========================================
+// Applies to Actionable Recommendations, Product Forecast, and Sales
+// Forecast only (NOT the Performance Summary — that runs daily on its
+// own 7-day comparison logic regardless of long-term history).
+//
+// Rule: before any of those three services calls Gemini or writes to
+// the AI cache, the database must actually contain sales history going
+// back at least this many calendar days from "now" — not just this
+// many days' worth of transactions, but real elapsed days.
+//   - "7d" forecasts require at least 60 days (2 months) of history.
+//   - "30d" forecasts require at least 180 days (6 months) of history.
+// If the requirement isn't met, the caller must skip Gemini entirely,
+// skip the cache write entirely, and effectively no-op the cron run.
+const REQUIRED_HISTORY_DAYS = { "7d": 60, "30d": 180 };
+
+async function hasSufficientHistory(requiredDays) {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - requiredDays);
+
+  // "Since forever" lower bound — we just need to know whether AT LEAST
+  // ONE order exists on or before the cutoff date, which proves the
+  // business has real sales data going back that far.
+  const sinceForever = new Date(0).toISOString();
+
+  const priorOrders = await OrdersModel.getByDateRange(sinceForever, cutoff.toISOString(), {
+    columns: "created_at",
+    excludeCancelled: true,
+  });
+
+  return Array.isArray(priorOrders) && priorOrders.length > 0;
+}
+
+async function checkForecastDataSufficiency(timeframe) {
+  const requiredDays = REQUIRED_HISTORY_DAYS[timeframe] || REQUIRED_HISTORY_DAYS["30d"];
+  const label = timeframe === "7d" ? "7-day" : "30-day";
+  const sufficient = await hasSufficientHistory(requiredDays);
+
+  return {
+    sufficient,
+    requiredDays,
+    message: sufficient
+      ? null
+      : `Not enough historical data yet — a ${label} forecast requires at least ${requiredDays} days of past sales data.`,
+  };
+}
 
 function buildDateSequenceSafe(startDate, endDate) {
   const dates = [];
@@ -28,12 +77,15 @@ function buildDateSequenceSafe(startDate, endDate) {
 }
 
 // ==========================================
-// 1. ACTIONABLE RECOMMENDATIONS SERVICE (MASTER CACHE)
+// 1. ACTIONABLE RECOMMENDATIONS SERVICE (PER-TIMEFRAME CACHE)
 // ==========================================
 const AR_CACHE_TTL_MS = 24 * 60 * 60 * 1000; 
 const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
-const AR_TIMEFRAMES = ["7d", "30d", "60d"];
-const AR_MASTER_CACHE_KEY = "actionable_recommendations_master_v3";
+const AR_TIMEFRAMES = ["7d", "30d"];
+
+function buildActionableCacheKey(timeframe) {
+  return `actionable_recommendations_v4:${timeframe}`;
+}
 
 async function getRecentSalesTrend(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
@@ -93,22 +145,41 @@ async function getProductGrowthAndRisk(days) {
   return { topGrowthProducts, topRiskProducts };
 }
 
-async function getSalesForecastSnippet(timeframe) {
-  const keys = [`sales_forecast:${timeframe}`, "sales_forecast:60d", "sales_forecast:30d", "sales_forecast:7d"];
-  for (const key of keys) {
-    const cached = await AiCacheModel.getByKey(key);
-    if (cached?.payload?.chartData?.length) {
-      return cached.payload.chartData.slice(0, 14);
-    }
-  }
-  return [];
+// The actionable recommendations are a downstream consumer of the Sales
+// Forecast and Product Forecast services — they must NOT be generated
+// from a stale/fallback forecast or when no forecast exists yet. This
+// reads the actual forecast caches for this exact timeframe and only
+// reports "ready" when BOTH forecasts successfully completed
+// (insufficientData === false). No fallback to a different timeframe's
+// cache, and no silent proceeding with an empty forecast.
+async function getForecastDependency(timeframe) {
+  const salesCacheKey = `sales_forecast:${timeframe}`;
+  const productCacheKey = `product_forecast:${timeframe}`;
+
+  const [salesCached, productCached] = await Promise.all([
+    AiCacheModel.getByKey(salesCacheKey),
+    AiCacheModel.getByKey(productCacheKey),
+  ]);
+
+  const salesPayload = salesCached?.payload;
+  const productPayload = productCached?.payload;
+
+  const salesReady = !!(salesPayload && salesPayload.insufficientData === false && salesPayload.chartData?.length);
+  const productReady = !!(productPayload && productPayload.insufficientData === false);
+
+  return {
+    ready: salesReady && productReady,
+    salesForecastSnippet: salesReady ? salesPayload.chartData.slice(0, 14) : [],
+    productForecast: productReady
+      ? { growth: productPayload.growth || [], risk: productPayload.risk || [] }
+      : { growth: [], risk: [] },
+  };
 }
 
-async function getSalesGrowthContext(timeframe, days) {
-  const [recentSalesTrend, growthAndRisk, forecastSnippet] = await Promise.all([
+async function getSalesGrowthContext(days, forecastSnippet) {
+  const [recentSalesTrend, growthAndRisk] = await Promise.all([
     getRecentSalesTrend(days),
     getProductGrowthAndRisk(days),
-    getSalesForecastSnippet(timeframe),
   ]);
 
   return {
@@ -218,73 +289,76 @@ async function getBundleOpportunityContext(days) {
   return { bestSellers, slowMovers };
 }
 
-async function getRecommendationContext() {
-  const ingredientToProducts = await buildIngredientToProductsMap();
+// Pulls the last cached recommendation titles (if any) so the prompt can
+// steer Gemini away from repeating the exact same advice on the next
+// refresh. This does not block generation if nothing is cached yet.
+async function getPreviousRecommendationTitles(cacheKey) {
+  const cached = await AiCacheModel.getByKey(cacheKey);
+  const payload = cached?.payload;
+  if (!payload) return [];
 
-  const entries = await Promise.all(
-    AR_TIMEFRAMES.map(async (timeframe) => {
-      const days = TIMEFRAME_DAYS[timeframe];
-      const [salesGrowthContext, expiryContext, bundleContext] = await Promise.all([
-        getSalesGrowthContext(timeframe, days),
-        getExpiryAdvisoryContext(days, ingredientToProducts),
-        getBundleOpportunityContext(days),
-      ]);
-      return [timeframe, { salesGrowthContext, expiryContext, bundleContext }];
-    })
-  );
+  const titles = [
+    ...(payload.salesOptimization || []),
+    ...(payload.wasteReduction || []),
+    ...(payload.bundlePromotions || []),
+  ].map((r) => r?.title).filter(Boolean);
 
-  return Object.fromEntries(entries);
+  return titles;
 }
 
-function buildActionablePrompt(context) {
+async function getRecommendationContext(timeframe, ingredientToProducts, forecastDependency) {
+  const days = TIMEFRAME_DAYS[timeframe];
+  const [salesGrowthContext, expiryContext, bundleContext] = await Promise.all([
+    getSalesGrowthContext(days, forecastDependency.salesForecastSnippet),
+    getExpiryAdvisoryContext(days, ingredientToProducts),
+    getBundleOpportunityContext(days),
+  ]);
+  return {
+    salesGrowthContext,
+    expiryContext,
+    bundleContext,
+    productForecast: forecastDependency.productForecast,
+  };
+}
+
+function buildActionablePrompt(timeframe, context, previousTitles = []) {
   const todayDate = new Date().toLocaleString("en-US", { timeZone: "Asia/Manila", month: "long", day: "numeric", year: "numeric" });
+  const days = TIMEFRAME_DAYS[timeframe];
+  const horizonLabel = timeframe === "7d" ? "next 7 days" : "next 30 days";
 
-  const systemPrompt = `You are a sophisticated Decision Support System (DSS) advisor for Cakelytics, specifically analyzing "Aileen and Cake Max," a local cake and bake shop business located in the Philippines.
-Today's date is ${todayDate}.
+  const avoidRepeatBlock = previousTitles.length
+    ? `\nAVOID REPEATING YOURSELF: here are the recommendation titles you gave last time for this exact window: ${JSON.stringify(previousTitles)}. The underlying data may look similar again, but do not reuse these titles or restate them with only minor wording changes. Find a different specific angle in the current data (a different product, a different number, a different combination) — if the data genuinely supports the same core idea, at least ground it in a new specific detail so it doesn't read as a copy-paste.\n`
+    : "";
 
-The input context is organized by THREE TIMEFRAMES — "7d" (next 7 days), "30d" (next 30 days), "60d" (next 60 days) — and each timeframe's data was queried over that SAME window (e.g. the "7d" entry's sales trend covers only the last 7 days; the "60d" entry covers the last 60 days). Treat each timeframe independently: do not copy or paraphrase the same recommendation across timeframes, since the underlying data itself is different per timeframe.
+  const systemPrompt = `You are a Decision Support System (DSS) advisor for Cakelytics, analyzing "Aileen and Cake Max," a local cake and bake shop in the Philippines. Today's date is ${todayDate}.
 
-For EACH of the three timeframes, produce THREE distinct categories of decision-support recommendations, each with its own analytical job. Do not blend the categories together, and do not repeat the same recommendation across categories.
+The context below (sales trend, near-expiring items, slow/best sellers) was all queried over the SAME ${days}-day window (the ${horizonLabel}).
 
-1. "salesOptimization" (Sales Growth Strategy):
-   - Analyze that timeframe's salesGrowthContext: the ACTUAL sales performance over the window (recentSalesTrend), product-level growth/risk trends (topGrowthProducts / topRiskProducts), and — if present — a preview of the existing sales forecast (forecastSnippet).
-   - You MUST factor in local Philippine realities based on today's date: determine the current season (Tag-init/Summer, Habagat/Typhoon season, or 'Ber' months/Christmas season) and its effect on foot traffic and sales, and consider Filipino payday buying patterns (15th and 30th).
-   - Strategies MUST stay within pick-up, advance pre-order, and on-site upselling only (never delivery). When a seasonal factor REDUCES walk-in traffic (e.g. heavy rain during Habagat), do NOT recommend urging customers to physically come in despite the bad weather — instead, shift the strategy toward advance pre-orders with a flexible pick-up window (order now, pick up once weather clears), confirming orders ahead of time by phone/online, or bundling around occasions less sensitive to weather (e.g. birthdays booked days ahead). The recommendation must never contradict the seasonal condition it's based on.
-   - HONESTY: if sales are flat or declining, say so directly and give mitigation strategies (e.g. trimming raw material orders, timed flash sales, adjusted promos for store pick-up) instead of inventing a fake "peak season."
-   - Give 2-4 recommendations.
+BUSINESS CONSTRAINTS (these are real operational facts, not style preferences — never violate them):
+- Pick-up only. No delivery, no third-party logistics (Grab/Foodpanda). Strategies work through walk-ins, advance pre-orders for pick-up, and on-site upselling.
+- No dine-in / hospitality angle — this is a retail cake shop, not a café.
+- Stay within the bakery/celebration product line (cakes, pastries, celebration add-ons like candles/tarpaulins). Don't suggest unrelated items (drinks, meals) or generic promos that don't fit a bakeshop (e.g. "back to school").
+- Every recommendation must be internally consistent: if a seasonal or weather factor reduces walk-in traffic, don't still push an immediate walk-in campaign — shift to pre-order/flexible pick-up mechanics instead.
+- Ground every recommendation in the actual numbers, product names, and items present in the context — never invent data.
+${avoidRepeatBlock}
+Produce THREE categories, each doing a distinct analytical job — don't blend them or duplicate the same insight across categories. Give 2-4 recommendations per category.
 
-2. "wasteReduction" (Expiry Advisory):
-   - Analyze that timeframe's expiryContext.nearExpiringItems: each entry is an ingredient batch expiring within THAT timeframe's window, with an estimated remaining quantity and, when a recipe match was found, a list of possibleProducts that use that ingredient.
-   - For each near-expiring ingredient that has possibleProducts, recommend making/pushing that specific product, propose a REASONABLE discount percentage or price, briefly explain WHY that discount level is reasonable (e.g. weighed against the cost of the ingredient vs. the loss if it expires unused), and state the expected return of doing this (e.g. recovering partial revenue vs. a total write-off).
-   - If nearExpiringItems is EMPTY for that timeframe, do NOT invent expiring items. Instead, give general inventory-improvement recommendations based on that timeframe's expiryContext.inventoryActivitySummary and expiryContext.recentWaste (e.g. adjusting restock frequency/quantity for items with a high waste rate, improving stock rotation / FIFO practices).
-   - Give 2-4 recommendations.
+1. "salesOptimization" (Sales Growth Strategy) — read salesGrowthContext (recentSalesTrend, topGrowthProducts/topRiskProducts are PAST performance; forecastSnippet is the FORWARD-LOOKING sales forecast for this window). Also read productForecast.growth / productForecast.risk — the forward-looking, per-product trend forecast for this same window — and use it to say what's *expected* to happen, not just what already happened. Factor in the current PH season (summer / habagat-typhoon / 'Ber' months-Christmas) based on today's date, and Filipino payday timing (15th/30th), when it's actually relevant to the data. If sales are flat or declining (past or forecasted), say so plainly and give real mitigation strategies rather than dressing it up as a peak season.
 
-3. "bundlePromotions" (Bundle Opportunities):
-   - Analyze that timeframe's bundleContext.slowMovers (low/no-movement products) against bundleContext.bestSellers (top sellers), both measured over that same window.
-   - Recommend specific bundle pairings: name a specific slow-moving product paired with a specific best-selling product, explain the promo mechanic (e.g. discounted bundle price, "add-on" pricing, small freebie with purchase), and why the pairing makes sense for a bakery/celebration business.
-   - Give 2-4 recommendations.
+2. "wasteReduction" (Expiry Advisory) — read expiryContext.nearExpiringItems (each with a possibleProducts match when a recipe link exists). For items with a possibleProducts match, recommend pushing that product with a reasoned discount and expected return vs. a full write-off. If nearExpiringItems is empty, base this instead on expiryContext.inventoryActivitySummary and recentWaste — e.g. restock frequency/quantity adjustments or FIFO improvements for high-waste items.
 
-CRITICAL RULES (apply to ALL timeframes and ALL three categories):
-- BUSINESS NATURE & OPERATIONS: The business offers package cakes, customized cakes, common Filipino pastry products, and celebration materials (like candles and tarpaulins). 
-  * STRICT PICK-UP ONLY POLICY: The bakeshop strictly does NOT offer delivery. NEVER suggest delivery services, delivery-based promos, or third-party logistics (like Grab or Foodpanda). Focus entirely on strategies that drive walk-ins, advanced pre-orders for store pick-up, and on-site upselling.
-  * STRICT NO HOSPITALITY/DINE-IN: This is purely a retail cake shop. NEVER suggest dine-in promotions, table reservations, or hospitality-associated services.
-  * RELEVANT OFFERINGS ONLY: Any product/promo suggestion MUST strictly align with the bakery/celebration context. Do NOT suggest irrelevant items like drinks (e.g., iced tea) or unrelated meals. Strictly do NOT suggest school-related promos (like "back to school").
-- LOGICAL CONSISTENCY: Never produce a recommendation whose premise contradicts its own conclusion (e.g. citing bad weather as a reason customers won't go out, then still recommending an immediate walk-in push). If the pick-up-only constraint makes an insight unusable as-is, do not force it — instead reframe it using pre-order/advance-booking mechanics, or pick a different angle from the same data.
-- Do NOT invent numbers, products, or ingredients that are not present in the given context.
-- LANGUAGE: Strictly use HUMANISED, CONVERSATIONAL TAGLISH. Sound like an experienced Filipino business consultant talking straightforwardly to the owner.
+3. "bundlePromotions" (Bundle Opportunities) — pair a specific slow mover from bundleContext.slowMovers with a specific best seller from bundleContext.bestSellers, with a concrete promo mechanic (bundle discount, add-on pricing, small freebie) and why the pairing fits a bakery/celebration business. Prioritize slow movers that also appear in productForecast.risk (forecasted to keep declining) — bundling is more urgent for those than for a slow mover with no forecasted decline.
 
-Respond with ONLY valid JSON strictly following this format:
+LANGUAGE & TONE: Humanized, conversational Taglish — like an experienced Filipino business consultant talking straight to the owner. Vary your phrasing and sentence openers between recommendations; avoid falling into the same boilerplate structure for every item.
+
+Respond with ONLY valid JSON strictly following this exact shape:
 {
-  "7d": {
-    "salesOptimization": [ { "title": "...", "desc": "...", "type": "success" | "warning" | "danger" | "info" | "neutral" } ],
-    "wasteReduction": [ { "title": "...", "desc": "...", "type": "..." } ],
-    "bundlePromotions": [ { "title": "...", "desc": "...", "type": "..." } ]
-  },
-  "30d": { "salesOptimization": [...], "wasteReduction": [...], "bundlePromotions": [...] },
-  "60d": { "salesOptimization": [...], "wasteReduction": [...], "bundlePromotions": [...] }
+  "salesOptimization": [ { "title": "...", "desc": "...", "type": "success" | "warning" | "danger" | "info" | "neutral" } ],
+  "wasteReduction": [ { "title": "...", "desc": "...", "type": "..." } ],
+  "bundlePromotions": [ { "title": "...", "desc": "...", "type": "..." } ]
 }`;
 
-  const userPrompt = `Business context, organized by timeframe (JSON): ${JSON.stringify(context)}`;
+  const userPrompt = `Business context for the ${horizonLabel} window (JSON): ${JSON.stringify(context)}`;
   return { systemPrompt, userPrompt };
 }
 
@@ -298,25 +372,15 @@ function normalizeActionablePayload(aiResult) {
     }));
   };
 
-  const normalizeTimeframe = (tf) => ({
-    salesOptimization: normalizeArray(tf?.salesOptimization),
-    wasteReduction: normalizeArray(tf?.wasteReduction),
-    bundlePromotions: normalizeArray(tf?.bundlePromotions),
-  });
-
   return {
-    "7d": normalizeTimeframe(aiResult?.["7d"]),
-    "30d": normalizeTimeframe(aiResult?.["30d"]),
-    "60d": normalizeTimeframe(aiResult?.["60d"]),
+    salesOptimization: normalizeArray(aiResult?.salesOptimization),
+    wasteReduction: normalizeArray(aiResult?.wasteReduction),
+    bundlePromotions: normalizeArray(aiResult?.bundlePromotions),
   };
 }
 
-function emptyActionableTimeframe() {
-  return { salesOptimization: [], wasteReduction: [], bundlePromotions: [] };
-}
-
 function emptyActionablePayload() {
-  return { "7d": emptyActionableTimeframe(), "30d": emptyActionableTimeframe(), "60d": emptyActionableTimeframe() };
+  return { salesOptimization: [], wasteReduction: [], bundlePromotions: [] };
 }
 
 const ActionableRecommendationService = {
@@ -327,35 +391,69 @@ const ActionableRecommendationService = {
     }
 
     const validTimeframe = AR_TIMEFRAMES.includes(timeframe) ? timeframe : "30d";
+    const cacheKey = buildActionableCacheKey(validTimeframe);
 
     if (!forceRefresh) {
-      const cached = await AiCacheModel.getByKey(AR_MASTER_CACHE_KEY);
+      const cached = await AiCacheModel.getByKey(cacheKey);
       if (cached && cached.payload) {
-        return { recommendations: cached.payload[validTimeframe] || emptyActionableTimeframe() };
+        return { recommendations: cached.payload, insufficientData: false };
       }
-      return { recommendations: emptyActionableTimeframe() };
+      return {
+        recommendations: emptyActionablePayload(),
+        insufficientData: true,
+        message: "No cached recommendations available. Awaiting Cron execution.",
+      };
+    }
+
+    // GATE 1: skip Gemini entirely and skip the cache write entirely when
+    // the DB doesn't have enough calendar-day history for this timeframe.
+    const { sufficient, message } = await checkForecastDataSufficiency(validTimeframe);
+    if (!sufficient) {
+      return { recommendations: emptyActionablePayload(), insufficientData: true, message };
+    }
+
+    // GATE 2: recommendations are a downstream consumer of the Sales
+    // Forecast AND Product Forecast for this same timeframe. If either
+    // one hasn't successfully run yet (no cache, or cached as
+    // insufficientData), there is no forecasted data to reason over —
+    // so recommendations must no-op too, not fall back to past-data-only.
+    const forecastDependency = await getForecastDependency(validTimeframe);
+    if (!forecastDependency.ready) {
+      return {
+        recommendations: emptyActionablePayload(),
+        insufficientData: true,
+        message: "Waiting for the sales and product forecast to finish generating for this timeframe before recommendations can be produced.",
+      };
     }
 
     try {
-      const context = await getRecommendationContext();
-      const { systemPrompt, userPrompt } = buildActionablePrompt(context);
-      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt });
+      const [ingredientToProducts, previousTitles] = await Promise.all([
+        buildIngredientToProductsMap(),
+        getPreviousRecommendationTitles(cacheKey),
+      ]);
+      const context = await getRecommendationContext(validTimeframe, ingredientToProducts, forecastDependency);
+      const { systemPrompt, userPrompt } = buildActionablePrompt(validTimeframe, context, previousTitles);
+      // Slightly higher than default: this call generates business advice,
+      // not a deterministic forecast, so some creative variance between
+      // refreshes is desirable (paired with the anti-repeat instruction
+      // above, which keeps it from just being noise).
+      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.7 });
       const payload = normalizeActionablePayload(aiResult);
 
-      await AiCacheModel.upsert(AR_MASTER_CACHE_KEY, payload, AR_CACHE_TTL_MS);
-      return { recommendations: payload[validTimeframe] || emptyActionableTimeframe() };
+      await AiCacheModel.upsert(cacheKey, payload, AR_CACHE_TTL_MS);
+      return { recommendations: payload, insufficientData: false };
     } catch (err) {
       console.error("[ActionableRecommendationService] Gemini recommendation failed:", err.message);
-      return { recommendations: emptyActionableTimeframe() };
+      return { recommendations: emptyActionablePayload(), insufficientData: true };
     }
   },
 };
 
 // ==========================================
-// 2. PRODUCT FORECAST SERVICE (MASTER CACHE SCALING)
+// 2. PRODUCT FORECAST SERVICE (PER-TIMEFRAME, GATED BY HISTORY)
 // ==========================================
 const PF_CACHE_TTL_MS = 24 * 60 * 60 * 1000; 
-const PF_TIMEFRAME_LABELS = { "7d": "Next 7 Days", "30d": "Next 30 Days", "60d": "Next 60 Days" };
+const PF_TIMEFRAME_LABELS = { "7d": "Next 7 Days", "30d": "Next 30 Days" };
 
 function buildProductCacheKey(timeframe) {
   return `product_forecast:${timeframe}`;
@@ -451,99 +549,48 @@ const ProductForecastService = {
       timeframe = '30d';
     }
 
-    const requestedDays = TIMEFRAME_DAYS[timeframe] || 30;
+    const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
+    const cacheKey = buildProductCacheKey(validTimeframe);
 
     if (!forceRefresh) {
-      const possibleMasterKeys = ["product_forecast:60d", "product_forecast:30d", "product_forecast:7d"];
-      let cached = null;
-      let matchedKey = null;
-
-      for (const key of possibleMasterKeys) {
-        const item = await AiCacheModel.getByKey(key);
-        if (item && item.payload && !item.payload.insufficientData) {
-          cached = item;
-          matchedKey = key;
-          break;
-        }
+      const cached = await AiCacheModel.getByKey(cacheKey);
+      if (cached && cached.payload && !cached.payload.insufficientData) {
+        return { ...cached.payload, insufficientData: false };
       }
-
-      if (!cached || !cached.payload || !matchedKey) {
-        return { ...emptyProductPayload(timeframe), insufficientData: true, message: "No cached forecast available. Awaiting Cron execution." };
-      }
-
-      const payload = cached.payload;
-      const supportedDays = TIMEFRAME_DAYS[matchedKey.split(":")[1]] || 30;
-
-      if (requestedDays > supportedDays) {
-        return { ...emptyProductPayload(timeframe), insufficientData: true, message: "Insufficient historical data for this forecast horizon." };
-      }
-
-      const actualPastHistory = await getRawProductSalesHistory(requestedDays);
-      const getPastQty = (name) => {
-        const product = actualPastHistory.find(p => p.productName === name);
-        return product ? product.dailyQty.reduce((sum, qty) => sum + qty, 0) : 0;
-      };
-
-      const projectArray = (arr) => arr.map(item => {
-        const pastQty = getPastQty(item.name);
-        const trendPct = item.pct || 0;
-        const projectedDiff = Math.round(pastQty * (trendPct / 100));
-        const projectedForecast = Math.max(0, pastQty + projectedDiff);
-        
-        return {
-          name: item.name,
-          pct: trendPct,
-          diff: projectedForecast - pastQty, 
-          forecast: projectedForecast
-        };
-      });
-
       return {
-        label: PF_TIMEFRAME_LABELS[timeframe],
-        growth: projectArray(payload.growth || []),
-        risk: projectArray(payload.risk || []),
-        insufficientData: false
+        ...emptyProductPayload(validTimeframe),
+        insufficientData: true,
+        message: "No cached forecast available. Awaiting Cron execution.",
       };
     }
 
-    const rawHistory = await getRawProductSalesHistory(65);
-    const hasSales = rawHistory.some(p => p.dailyQty.some(q => q > 0));
-
-    const tempSalesHistory = await getRawSalesHistory(65);
-    const firstSaleIndex = tempSalesHistory.findIndex(d => (d.totalSales || 0) > 0);
-    const actualDaysOfData = firstSaleIndex === -1 ? 0 : tempSalesHistory.length - firstSaleIndex;
-
-    let masterTimeframe = null;
-    let historyToUse = 0;
-
-    if (actualDaysOfData >= 60) {
-      masterTimeframe = "60d"; historyToUse = 60;
-    } else if (actualDaysOfData >= 30) {
-      masterTimeframe = "30d"; historyToUse = 30;
-    } else if (actualDaysOfData >= 20) {
-      masterTimeframe = "7d"; historyToUse = 20;
+    // GATE: skip Gemini entirely and skip the cache write entirely when
+    // the DB doesn't have enough calendar-day history for this timeframe.
+    const { sufficient, requiredDays, message } = await checkForecastDataSufficiency(validTimeframe);
+    if (!sufficient) {
+      return { ...emptyProductPayload(validTimeframe), insufficientData: true, message };
     }
 
-    if (!masterTimeframe || !hasSales) {
-      return { ...emptyProductPayload(timeframe), insufficientData: true };
-    }
+    const productSalesHistory = await getRawProductSalesHistory(requiredDays);
+    const hasSales = productSalesHistory.some(p => p.dailyQty.some(q => q > 0));
 
-    const masterCacheKey = buildProductCacheKey(masterTimeframe);
+    if (!hasSales) {
+      return { ...emptyProductPayload(validTimeframe), insufficientData: true, message: "No product sales activity found in the historical window." };
+    }
 
     try {
-      const productSalesHistory = await getRawProductSalesHistory(historyToUse);
-      const { systemPrompt, userPrompt } = buildProductPrompt(masterTimeframe, productSalesHistory);
+      const { systemPrompt, userPrompt } = buildProductPrompt(validTimeframe, productSalesHistory);
       // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
       // randomness and make output more reproducible given the same data.
       const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
-      const payload = normalizeProductPayload(aiResult, masterTimeframe);
+      const payload = normalizeProductPayload(aiResult, validTimeframe);
 
       const finalPayload = { ...payload, insufficientData: false };
-      await AiCacheModel.upsert(masterCacheKey, finalPayload, PF_CACHE_TTL_MS);
+      await AiCacheModel.upsert(cacheKey, finalPayload, PF_CACHE_TTL_MS);
       return finalPayload;
     } catch (err) {
       console.error("[ProductForecastService] Gemini forecast failed:", err.message);
-      return { ...emptyProductPayload(timeframe), insufficientData: true };
+      return { ...emptyProductPayload(validTimeframe), insufficientData: true };
     }
   },
 };
@@ -660,69 +707,40 @@ const SalesForecastService = {
       timeframe = '30d';
     }
 
-    const requestedDays = TIMEFRAME_DAYS[timeframe] || 30;
+    const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
+    const cacheKey = buildSalesCacheKey(validTimeframe);
+    const requestedDays = TIMEFRAME_DAYS[validTimeframe];
 
     if (!forceRefresh) {
-      const possibleMasterKeys = ["sales_forecast:60d", "sales_forecast:30d", "sales_forecast:7d"];
-      let cached = null;
-      let matchedKey = null; 
-
-      for (const key of possibleMasterKeys) {
-        const item = await AiCacheModel.getByKey(key);
-        if (item && item.payload && !item.payload.insufficientData) {
-          cached = item;
-          matchedKey = key;
-          break;
-        }
+      const cached = await AiCacheModel.getByKey(cacheKey);
+      if (cached && cached.payload && !cached.payload.insufficientData && cached.payload.chartData?.length) {
+        return { chartData: cached.payload.chartData, insufficientData: false };
       }
-
-      if (!cached || !cached.payload || !matchedKey) {
-        return { chartData: [], insufficientData: true, message: "No cached forecast available. Awaiting Cron execution." };
-      }
-
-      const supportedDays = TIMEFRAME_DAYS[matchedKey.split(":")[1]] || 30;
-      
-      if (requestedDays > supportedDays) {
-        return { chartData: [], insufficientData: true, message: "Insufficient historical data for this forecast horizon." };
-      }
-
-      const slicedChartData = (cached.payload.chartData || []).slice(0, requestedDays);
-      return { chartData: slicedChartData, insufficientData: false };
+      return {
+        chartData: [],
+        insufficientData: true,
+        message: "No cached forecast available. Awaiting Cron execution.",
+      };
     }
 
-    const tempHistory = await getRawSalesHistory(65);
-    const firstSaleIndex = tempHistory.findIndex(d => (d.totalSales || 0) > 0);
-    const actualDaysOfData = firstSaleIndex === -1 ? 0 : tempHistory.length - firstSaleIndex;
-
-    let masterTimeframe = null;
-    let historyToUse = 0;
-
-    if (actualDaysOfData >= 60) {
-      masterTimeframe = "60d"; historyToUse = 60;
-    } else if (actualDaysOfData >= 30) {
-      masterTimeframe = "30d"; historyToUse = 30;
-    } else if (actualDaysOfData >= 20) {
-      masterTimeframe = "7d"; historyToUse = 20; 
+    // GATE: skip Gemini entirely and skip the cache write entirely when
+    // the DB doesn't have enough calendar-day history for this timeframe.
+    const { sufficient, requiredDays, message } = await checkForecastDataSufficiency(validTimeframe);
+    if (!sufficient) {
+      return { chartData: [], insufficientData: true, message };
     }
-
-    if (!masterTimeframe) {
-      return { chartData: [], insufficientData: true, message: "Insufficient historical data for this forecast." };
-    }
-
-    const masterCacheKey = buildSalesCacheKey(masterTimeframe);
-    const supportedDays = TIMEFRAME_DAYS[masterTimeframe] || 30; 
 
     try {
-      const historicalSales = await getRawSalesHistory(historyToUse);
-      const { systemPrompt, userPrompt } = buildSalesPrompt(masterTimeframe, historicalSales);
-      
+      const historicalSales = await getRawSalesHistory(requiredDays);
+      const { systemPrompt, userPrompt } = buildSalesPrompt(validTimeframe, historicalSales);
+
       // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
       // randomness and make output more reproducible given the same data.
       const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
-      const payload = normalizeSalesPayload(aiResult, supportedDays);
+      const payload = normalizeSalesPayload(aiResult, requestedDays);
 
       const finalPayload = { ...payload, insufficientData: false };
-      await AiCacheModel.upsert(masterCacheKey, finalPayload, SF_CACHE_TTL_MS);
+      await AiCacheModel.upsert(cacheKey, finalPayload, SF_CACHE_TTL_MS);
       return finalPayload;
     } catch (err) {
       console.error("[SalesForecastService] Gemini forecast failed:", err.message);

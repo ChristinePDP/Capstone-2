@@ -32,7 +32,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
     );
   };
 
-  const periodText = view === '7d' ? '7-Day' : view === '60d' ? '60-Day' : '30-Day';
+  const periodText = view === '7d' ? '7-Day' : '30-Day';
 
   return (
     <div className="w-full bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col p-4 sm:p-5 h-full min-h-[350px]">

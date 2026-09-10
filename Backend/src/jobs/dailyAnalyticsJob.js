@@ -10,12 +10,25 @@ import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.service.
 export const runDailyAnalyticsJob = async () => {
   console.log('--- Daily Analytics Job Started ---');
 
-  await ActionableRecommendationService.getActionableRecommendations(true);
+  // Forecasting only supports these two windows now (60d was removed).
+  const timeframes = ['7d', '30d'];
 
-  const timeframes = ['7d', '30d', '60d'];
+  // STEP 1: Forecasts must run FIRST. Actionable Recommendations reads
+  // their cached output for this same run — if it ran before this, it
+  // would see yesterday's forecast (or none at all on a first-ever run).
+  console.log('Generating Product & Sales Forecasts...');
   for (const t of timeframes) {
     await ProductForecastService.getProductTrendsByTimeframe(t, true);
     await SalesForecastService.getSalesTrendsByTimeframe(t, true);
+  }
+
+  // STEP 2: Actionable Recommendations — only after the forecasts above
+  // have completed. Each call must pass (timeframe, forceRefresh) in
+  // that order — not a single `true`, which used to be misread as the
+  // timeframe itself.
+  console.log('Generating Actionable Recommendations...');
+  for (const t of timeframes) {
+    await ActionableRecommendationService.getActionableRecommendations(t, true);
   }
 
   await PerformanceSummaryService.getPerformanceSummary(true);

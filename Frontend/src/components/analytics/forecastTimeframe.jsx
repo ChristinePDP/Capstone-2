@@ -3,7 +3,6 @@ import { useState } from 'react';
 const RANGES = [
   { key: '7d', label: 'Next 7 Days', days: 7 },
   { key: '30d', label: 'Next 30 Days', days: 30 },
-  { key: '60d', label: 'Next 60 Days', days: 60 },
 ];
 
 export default function ForecastTimeframe({

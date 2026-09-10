@@ -1,4 +1,4 @@
-const TIMEFRAME_DAYS = { "7d": 7, "30d": 30, "60d": 60 };
+const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 const DEFAULT_TIMEFRAME = "30d";
 
 function getDaysFromTimeframe(timeframe) {
