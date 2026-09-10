@@ -108,7 +108,7 @@ export default function App() {
           {/* ── ROOT: papuntang login o analytics depende sa session ── */}
           {/* Kung naka-login, dadaan sa /login pero agad ding ire-redirect */}
           {/* ng GuestRoute papuntang /analytics — walang extra logic dito. */}
-          <Route path="/" element={<Navigate to={'/login'} replace />} />
+          <Route path="/" element={<Navigate to={'/onlineOrdering/home'} replace />} />
 
           {/* ── AUTHENTICATION ── */}
           {/* GuestRoute: kung may session ka na, hindi ka makakarating dito */}
