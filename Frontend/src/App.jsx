@@ -21,7 +21,10 @@ function ProtectedAdminRoute({ children }) {
   const navigate = useNavigate();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // BAGO: kapag diretsong tinype ang isang protected route (hal. "/inventory")
+    // nang hindi pa naka-login, "/unauthorized" na ang lalabas, hindi na
+    // deretsong "/login" — para malinaw sa user na bawal siyang pumunta doon.
+    return <Navigate to="/unauthorized" replace />;
   }
 
   const handleLogout = async () => {
@@ -83,19 +86,74 @@ function LoginRoute() {
   return <LoginPage onLogin={handleLogin} />;
 }
 
+// ── Shared cake-slice icon para sa 401/404 states ──
+function CakeSliceIcon({ className }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M8 50 L32 14 L56 50 Z"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+      />
+      <path d="M8 50 L56 50" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M17 50 L32 26 L47 50" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" opacity="0.45" />
+      <circle cx="32" cy="9" r="2.5" fill="currentColor" />
+      <path d="M32 14 L32 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// ── 401 Page (BAGO) ──
+// Lalabas ito kapag sinubukang i-type/i-access diretso ang isang
+// protected route (hal. "/inventory") nang hindi pa naka-login.
+function Unauthorized() {
+  const navigate = useNavigate();
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#FBF6EF] px-6">
+      <div className="w-full max-w-sm text-center">
+        <CakeSliceIcon className="mx-auto mb-6 h-14 w-14 text-brand-600" />
+        <p className="mb-1 text-sm tracking-wide text-stone-400">Error 401</p>
+        <h1 className="mb-3 text-2xl font-semibold text-stone-800">
+          This part of the kitchen is RESTRICTED
+        </h1>
+        <p className="mb-8 text-stone-500">
+          Sign in with your admin account to reach this page.
+        </p>
+        <button
+          onClick={() => navigate('/login', { replace: true })}
+          className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white transition-colors hover:bg-brand-700"
+        >
+          Sign in
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── 404 Page ──
 function NotFound() {
+  const navigate = useNavigate();
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen text-center bg-stone-50">
-      <h1 className="text-4xl font-bold text-red-500 mb-2">404</h1>
-      <h2 className="text-2xl font-semibold text-stone-800 mb-4">Page Not Found</h2>
-      <p className="text-stone-500 mb-6">Sorry, the page you are looking for does not exist.</p>
-      <button
-        onClick={() => window.location.href = '/'}
-        className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 font-bold"
-      >
-        Go Back Home
-      </button>
+    <div className="flex min-h-screen items-center justify-center bg-[#FBF6EF] px-6">
+      <div className="w-full max-w-sm text-center">
+        <CakeSliceIcon className="mx-auto mb-6 h-14 w-14 rotate-12 text-brand-600" />
+        <p className="mb-1 text-sm tracking-wide text-stone-400">Error 404</p>
+        <h1 className="mb-3 text-2xl font-semibold text-stone-800">
+          This page isn't on the menu
+        </h1>
+        <p className="mb-8 text-stone-500">
+          The page you're looking for has been moved or doesn't exist.
+        </p>
+        <button
+          onClick={() => navigate('/onlineOrdering/home', { replace: true })}
+          className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white transition-colors hover:bg-brand-700"
+        >
+          Back to shop
+        </button>
+      </div>
     </div>
   );
 }
@@ -105,9 +163,8 @@ export default function App() {
     <AppProvider>
       <ToastProvider>
         <Routes>
-          {/* ── ROOT: papuntang login o analytics depende sa session ── */}
-          {/* Kung naka-login, dadaan sa /login pero agad ding ire-redirect */}
-          {/* ng GuestRoute papuntang /analytics — walang extra logic dito. */}
+          {/* ── ROOT: default papuntang online ordering home ── */}
+          {/* Ito na ang isesend natin sa customers, hindi na /login. */}
           <Route path="/" element={<Navigate to={'/onlineOrdering/home'} replace />} />
 
           {/* ── AUTHENTICATION ── */}
@@ -140,6 +197,9 @@ export default function App() {
           <Route path="/onlineOrdering/*" element={<OnlineOrderingPage />} />
 
            <Route path="/eventads" element={<EventAdsModal />} />
+
+          {/* ── 401 (BAGO) ── */}
+          <Route path="/unauthorized" element={<Unauthorized />} />
 
           {/* ── 404 ── */}
           <Route path="*" element={<NotFound />} />
