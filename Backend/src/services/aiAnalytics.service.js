@@ -349,7 +349,7 @@ Produce THREE categories, each doing a distinct analytical job — don't blend t
 
 3. "bundlePromotions" (Bundle Opportunities) — pair a specific slow mover from bundleContext.slowMovers with a specific best seller from bundleContext.bestSellers, with a concrete promo mechanic (bundle discount, add-on pricing, small freebie) and why the pairing fits a bakery/celebration business. Prioritize slow movers that also appear in productForecast.risk (forecasted to keep declining) — bundling is more urgent for those than for a slow mover with no forecasted decline.
 
-LANGUAGE & TONE: Humanized, conversational Taglish — like an experienced Filipino business consultant talking straight to the owner. Vary your phrasing and sentence openers between recommendations; avoid falling into the same boilerplate structure for every item.
+LANGUAGE & TONE: Write in clear, simple, friendly English — like an experienced business consultant talking directly to the shop owner. Keep sentences easy to read and avoid technical jargon. Vary your phrasing and sentence openers between recommendations; avoid falling into the same boilerplate structure for every item.
 
 Respond with ONLY valid JSON strictly following this exact shape:
 {
@@ -608,14 +608,14 @@ async function getRawSalesHistory(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
 
   const orders = await OrdersModel.getByDateRange(startDate, endDate, {
-    columns: "grand_total, created_at", // Pinalitan ng created_at
+    columns: "grand_total, created_at", // Now using created_at
     excludeCancelled: true,
     ascending: true,
   });
 
   const totalsByDate = {};
   for (const order of orders) {
-    const day = order.created_at.slice(0, 10); // Pinalitan ng created_at
+    const day = order.created_at.slice(0, 10); // Now using created_at
     totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.grand_total || 0);
   }
 
@@ -803,7 +803,7 @@ async function getSummaryContext() {
   const currentMetrics = sumSalesAndExpenses(currentOrders, currentInventoryLogs);
   const priorMetrics = sumSalesAndExpenses(priorOrders, priorInventoryLogs);
 
-  // Updated: Inalis na ang computation ng "deltas" kineme, para natural ang comparison ng AI
+  // Updated: Removed the old "deltas" calculation so the AI comparison reads more naturally
   return {
     periodInfo: "Comparing the current 7-day period (the last 7 days including today) against the prior 7-day period (the 7 days before that).",
     current: currentMetrics,
@@ -817,8 +817,8 @@ function buildSummaryPrompt(context) {
 You are given ALREADY-COMPUTED figures comparing the business's current 7-day performance (the last 7 days including today) against the prior 7-day period (the 7 days before that).
 
 CRITICAL RULES:
-1. Write a 2 to 3 sentence executive summary in humanized, conversational Taglish describing the performance.
-2. Explicitly compare the current 7 days against the previous 7 days. State clearly if the performance improved or declined based on the provided current vs prior metrics. (e.g. "Tumaas ang ating benta mula ₱4,000 noong nakaraang linggo tungong ₱5,000 ngayon...").
+1. Write a 2 to 3 sentence executive summary in clear, simple, friendly English describing the performance.
+2. Explicitly compare the current 7 days against the previous 7 days. State clearly if the performance improved or declined based on the provided current vs prior metrics. (e.g. "Sales went up from ₱4,000 last week to ₱5,000 this week...").
 3. Incorporate the computed Total Sales, Gross Profit, and Total Expenses. Format currency correctly (e.g. ₱5,000). You do not need to list exact percentage formulas unless it makes the narrative sound natural, but focus on comparing the real monetary values.
 4. HIGHLIGHT key figures by wrapping them in double asterisks so they become bold (e.g. **₱5,000**).
 5. Do NOT alter any numeric value.
