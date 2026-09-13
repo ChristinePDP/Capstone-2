@@ -428,6 +428,104 @@ function resolveHistoricalLookbackDays(forecastAvailability) {
   return forecastAvailability.horizon30Ready ? REQUIRED_HISTORY_DAYS["30d"] : REQUIRED_HISTORY_DAYS["7d"];
 }
 
+// ==========================================
+// SIGNAL RECONCILIATION (FORECAST-ANCHORED)
+// ==========================================
+// Cross-references the historical growth/risk lists (computed straight
+// from past orders, via getProductGrowthAndRisk) against the ACTUAL
+// forecasted growth/risk lists for whichever horizon this run selected,
+// so the prompt no longer has to hope Gemini notices when they agree —
+// that reconciliation is now done deterministically in code.
+//
+// Per product, this sorts into:
+//   - "confirmed"     — appears in BOTH the historical list and the
+//                       forecast list (same direction). Highest
+//                       confidence: history and forecast agree.
+//   - "forecastOnly"  — appears ONLY in the forecast list, not yet in
+//                       the historical growth/risk list. A leading
+//                       indicator — real, but should be described as
+//                       forward-looking, not "already happening."
+// A product that only shows up in the HISTORICAL list (not forecasted to
+// keep moving that way) is deliberately left out of the reconciled set —
+// that's exactly the "re-deriving a purely historical trend" pattern
+// this reconciliation exists to close off. The raw historical lists are
+// still available in context.salesGrowthContext for narrative color,
+// but the prompt is instructed to build recommendations from this
+// reconciled set instead.
+function reconcileDirectionalSignals(historicalList, forecastList) {
+  const confirmed = [];
+  const forecastOnly = [];
+
+  for (const f of forecastList || []) {
+    const match = (historicalList || []).find((h) => h.name === f.name);
+    if (match) {
+      confirmed.push({
+        name: f.name,
+        historicalDiff: match.diff,
+        historicalPct: match.pct,
+        forecastPct: f.pct,
+        forecastDiff: f.diff,
+        forecastQty: f.forecast,
+      });
+    } else {
+      forecastOnly.push({
+        name: f.name,
+        forecastPct: f.pct,
+        forecastDiff: f.diff,
+        forecastQty: f.forecast,
+      });
+    }
+  }
+
+  return { confirmed, forecastOnly };
+}
+
+// Picks whichever forecast horizon this run's historicalWindowDays
+// actually corresponds to (mirrors resolveHistoricalLookbackDays) and
+// reconciles against ONLY that horizon's product forecast — never mixes
+// the 7-day and 30-day horizons together.
+function reconcileGrowthAndRisk(growthAndRisk, forecastAvailability) {
+  const activeForecast = forecastAvailability.horizon30Ready
+    ? forecastAvailability.thirtyDay
+    : forecastAvailability.sevenDay;
+
+  if (!activeForecast) {
+    // Defensive fallback only — the anyReady gate upstream should always
+    // guarantee at least one horizon is present by the time this runs.
+    return {
+      growth: { confirmed: [], forecastOnly: [] },
+      risk: { confirmed: [], forecastOnly: [] },
+    };
+  }
+
+  return {
+    growth: reconcileDirectionalSignals(growthAndRisk.topGrowthProducts, activeForecast.productForecast.growth),
+    risk: reconcileDirectionalSignals(growthAndRisk.topRiskProducts, activeForecast.productForecast.risk),
+  };
+}
+
+// Same idea, applied to the slow-mover/bundle pairing job (1b in the
+// prompt): a slow mover is a much more urgent bundle candidate when the
+// forecast ALSO expects it to keep declining, vs. one that's merely slow
+// historically with no forecasted continuation. Splits bundleContext's
+// slowMovers into that priority order instead of leaving the "check if
+// this also shows up in the forecast" cross-reference to the prompt.
+function reconcileSlowMovers(bundleContext, forecastAvailability) {
+  const activeForecast = forecastAvailability.horizon30Ready
+    ? forecastAvailability.thirtyDay
+    : forecastAvailability.sevenDay;
+
+  const forecastRiskNames = new Set(
+    (activeForecast?.productForecast?.risk || []).map((f) => f.name)
+  );
+
+  const slowMovers = bundleContext.slowMovers || [];
+  const confirmedDecline = slowMovers.filter((s) => forecastRiskNames.has(s.name));
+  const otherSlowMovers = slowMovers.filter((s) => !forecastRiskNames.has(s.name));
+
+  return { confirmedDecline, otherSlowMovers };
+}
+
 async function getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability) {
   const [recentSalesTrend, growthAndRisk, expiryContext, bundleContext] = await Promise.all([
     getRecentSalesTrend(historicalWindowDays),
@@ -445,10 +543,18 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
 
   return {
     historicalWindowDays,
+    // NOTE: kept for narrative color only (e.g. describing the overall
+    // sales trend in plain language) — the prompt is instructed NOT to
+    // use this as the basis for picking which products to recommend.
+    // reconciledSignals below is the forecast-anchored basis for that.
     salesGrowthContext: {
       recentSalesTrend,
       topGrowthProducts: growthAndRisk.topGrowthProducts,
       topRiskProducts: growthAndRisk.topRiskProducts,
+    },
+    reconciledSignals: {
+      ...reconcileGrowthAndRisk(growthAndRisk, forecastAvailability),
+      slowMovers: reconcileSlowMovers(bundleContext, forecastAvailability),
     },
     forecast: {
       sevenDay: forecastAvailability.sevenDay,
@@ -479,6 +585,13 @@ function buildActionablePrompt(context, previousTitles = []) {
 
 This analysis is NOT tied to a single timeframe route. It looks at ${context.historicalWindowDays} days of historical data (salesGrowthContext, bundleContext, expiryContext / stockContext) plus whichever forecast horizon(s) are currently ready: the ${horizonsAvailable} forecast(s), found in "forecast". When both horizons are present, treat a signal that shows up in both as higher-confidence; when they disagree, say so and favor the nearer-term (7-day) signal for anything time-sensitive.
 
+FORECAST IS THE AUTHORITATIVE BASIS — READ THIS CAREFULLY:
+"reconciledSignals" has already cross-checked the historical growth/risk data against the actual forecast for you, so you do not have to (and should not try to) re-derive that comparison yourself:
+- "reconciledSignals.growth.confirmed" / "reconciledSignals.risk.confirmed" — products where BOTH the historical trend AND the forecast agree on the direction. These are your highest-confidence, first-choice picks.
+- "reconciledSignals.growth.forecastOnly" / "reconciledSignals.risk.forecastOnly" — products the forecast expects to move, even if the historical window hasn't clearly shown it yet. Use these when there is nothing in "confirmed", and describe them as forward-looking ("expected to..." / "forecast points to..."), not as something already observed.
+- "reconciledSignals.slowMovers.confirmedDecline" — slow movers that the forecast ALSO expects to keep declining. Prefer these over "reconciledSignals.slowMovers.otherSlowMovers" for the bundle/pairing job below.
+"salesGrowthContext.topGrowthProducts" and "salesGrowthContext.topRiskProducts" are included ONLY as background — to help you describe HOW a confirmed or forecastOnly signal got there in plain language. Do NOT pick a product for a recommendation because it appears in salesGrowthContext alone; if a product isn't in "reconciledSignals" in some form, it is not a forecast-backed signal, and should not anchor a recommendation. Only fall back to salesGrowthContext as a last resort if reconciledSignals is empty for a whole category, and clearly describe it as a historical-only observation with no forecast confirmation.
+
 BUSINESS CONSTRAINTS (these are real operational facts, not style preferences — never violate them):
 - Pick-up only. No delivery, no third-party logistics (Grab/Foodpanda). Strategies work through walk-ins, advance pre-orders for pick-up, and on-site upselling.
 - No dine-in / hospitality angle — this is a retail cake shop, not a café.
@@ -491,8 +604,8 @@ ${avoidRepeatBlock}
 Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 most important and most immediately attainable for that category, ranked by how noticeable/urgent the underlying signal is. Never return 0, 1, 3, or 4 for a category unless the underlying context for that entire category is truly empty (in which case return as many as the data honestly supports, but do not fabricate to hit 2).
 
 1. "salesOptimization" (Sales Optimization) — cover BOTH of these jobs across the 2 recommendations (they don't need to be split 1-and-1, but both angles should be represented across your two picks unless the data for one is clearly stronger):
-   a. A sales-growth or sales-risk strategy tied to a REAL forecasted or historical surge/dip — especially one lining up with an upcoming noticeable date (Filipino payday 15th/30th, or a PH seasonal window like summer / habagat-typhoon season / 'Ber' months-Christmas) if the data actually shows that pattern. If sales are flat or declining (past or forecasted), say so plainly and give a real mitigation strategy instead of dressing it up as growth.
-   b. Identify a genuinely slow-moving product from bundleContext.slowMovers — prioritize one that ALSO shows up in forecast.*.productForecast.risk (forecasted to keep declining), since that's more urgent than a slow mover with no forecasted decline — and pair it with a genuinely fast-moving product from bundleContext.bestSellers in a specific bundle/add-on/discount mechanic, explaining why the pairing fits a bakery/celebration business.
+   a. A sales-growth or sales-risk strategy anchored primarily in the forecast (forecast.*.salesForecastSnippet, and reconciledSignals.growth/risk for product-level detail) — especially one lining up with an upcoming noticeable date (Filipino payday 15th/30th, or a PH seasonal window like summer / habagat-typhoon season / 'Ber' months-Christmas) if the forecast actually shows that pattern. Use salesGrowthContext.recentSalesTrend only to narrate whether the move has already begun — never as a substitute for the forecast itself. If sales are flat or declining (per the forecast), say so plainly and give a real mitigation strategy instead of dressing it up as growth.
+   b. From reconciledSignals.slowMovers, prefer a product from "confirmedDecline" (a slow mover the forecast also expects to keep declining — this is your most urgent pick); only use "otherSlowMovers" if confirmedDecline is empty, and note explicitly that it's a historical-only slow mover with no forecasted continuation. Pair it with a genuinely fast-moving product from bundleContext.bestSellers — prefer one that also appears in reconciledSignals.growth — in a specific bundle/add-on/discount mechanic, explaining why the pairing fits a bakery/celebration business.
 
 2. "inventoryOptimization" (Inventory Optimization):
    a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). For ones with a possibleProducts match, recommend producing/pushing that specific product with a reasoned discount and expected return vs. a full write-off. If no possibleProducts match exists for the most urgent item, recommend a direct clearance/discount action instead.
