@@ -35,6 +35,18 @@ const ProductForecastController = {
       next(err);
     }
   },
+
+  // Single-shot cron entry point. One Gemini call produces BOTH the
+  // 7-day and 30-day horizons together, so call this ONE route instead
+  // of /product-forecast/7d?refresh=true AND /product-forecast/30d?refresh=true.
+  refreshProductForecast: async (req, res, next) => {
+    try {
+      const result = await ProductForecastService.refreshProductForecast();
+      ok(res, result, 'Product forecast refreshed successfully');
+    } catch (err) {
+      next(err);
+    }
+  },
 };
 
 const SalesForecastController = {
@@ -45,6 +57,20 @@ const SalesForecastController = {
 
       const result = await SalesForecastService.getSalesTrendsByTimeframe(timeframe, forceRefresh);
       ok(res, result, 'Sales forecast fetched successfully');
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  // Single-shot cron entry point. Generation is unified now (it decides
+  // internally whether to produce the 30-day or 7-day series) so the
+  // cron job only needs to call this ONE route instead of hitting
+  // /sales-forecast/7d?refresh=true AND /sales-forecast/30d?refresh=true
+  // separately, which would just repeat the same resolution twice.
+  refreshSalesForecast: async (req, res, next) => {
+    try {
+      const result = await SalesForecastService.refreshSalesForecast();
+      ok(res, result, 'Sales forecast refreshed successfully');
     } catch (err) {
       next(err);
     }

@@ -25,7 +25,7 @@ const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 //   - "30d" forecasts require at least 180 days (6 months) of history.
 // If the requirement isn't met, the caller must skip Gemini entirely,
 // skip the cache write entirely, and effectively no-op the cron run.
-const REQUIRED_HISTORY_DAYS = { "7d": 60, "30d": 180 };
+const REQUIRED_HISTORY_DAYS = { "7d": 120, "30d": 180 };
 
 async function hasSufficientHistory(requiredDays) {
   const cutoff = new Date();
@@ -154,24 +154,26 @@ async function getProductGrowthAndRisk(days) {
 // cache, and no silent proceeding with an empty forecast.
 async function getForecastDependency(timeframe) {
   const salesCacheKey = `sales_forecast:${timeframe}`;
-  const productCacheKey = `product_forecast:${timeframe}`;
 
+  // Product forecast now lives under a single combined cache key
+  // (both horizons generated together — see PRODUCT_COMBINED_CACHE_KEY),
+  // so we read that once and pick out the sub-part for this timeframe.
   const [salesCached, productCached] = await Promise.all([
     AiCacheModel.getByKey(salesCacheKey),
-    AiCacheModel.getByKey(productCacheKey),
+    AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY),
   ]);
 
   const salesPayload = salesCached?.payload;
-  const productPayload = productCached?.payload;
+  const productPart = productCached?.payload?.[timeframe === "7d" ? "sevenDay" : "thirtyDay"];
 
   const salesReady = !!(salesPayload && salesPayload.insufficientData === false && salesPayload.chartData?.length);
-  const productReady = !!(productPayload && productPayload.insufficientData === false);
+  const productReady = !!(productPart && productPart.insufficientData === false);
 
   return {
     ready: salesReady && productReady,
     salesForecastSnippet: salesReady ? salesPayload.chartData.slice(0, 14) : [],
     productForecast: productReady
-      ? { growth: productPayload.growth || [], risk: productPayload.risk || [] }
+      ? { growth: productPart.growth || [], risk: productPart.risk || [] }
       : { growth: [], risk: [] },
   };
 }
@@ -450,14 +452,19 @@ const ActionableRecommendationService = {
 };
 
 // ==========================================
-// 2. PRODUCT FORECAST SERVICE (PER-TIMEFRAME, GATED BY HISTORY)
+// 2. PRODUCT FORECAST SERVICE (SINGLE CALL, BOTH HORIZONS TOGETHER)
 // ==========================================
-const PF_CACHE_TTL_MS = 24 * 60 * 60 * 1000; 
+// Unlike Sales Forecast, we can't just slice a 30-day RESULT down to get
+// the 7-day one — each product's "forecast" number here is a CUMULATIVE
+// TOTAL over its whole horizon (not a per-day series), and the growth/
+// risk lists can legitimately contain different products at 7 days vs
+// 30 days (different momentum, different window). So both horizons are
+// requested from Gemini in ONE call/reasoning pass — that keeps it to a
+// single Gemini call per cron run while still giving each horizon its
+// own real, horizon-specific numbers (no fake derivation).
+const PF_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PF_TIMEFRAME_LABELS = { "7d": "Next 7 Days", "30d": "Next 30 Days" };
-
-function buildProductCacheKey(timeframe) {
-  return `product_forecast:${timeframe}`;
-}
+const PRODUCT_COMBINED_CACHE_KEY = "product_forecast:combined";
 
 async function getRawProductSalesHistory(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
@@ -482,6 +489,9 @@ async function getRawProductSalesHistory(days) {
     byProduct[key].qtyByDate[day] = (byProduct[key].qtyByDate[day] || 0) + Number(row.quantity || 0);
   }
 
+  // dateSequence runs oldest -> newest, so dailyQty[last] is always
+  // "yesterday"/"today" — this ordering matters for the recency slice
+  // taken below (sliceRecentDays uses dailyQty.slice(-days)).
   return Object.values(byProduct).map((p) => ({
     productName: p.productName,
     category: p.category,
@@ -489,34 +499,59 @@ async function getRawProductSalesHistory(days) {
   }));
 }
 
-// UPDATED: step-by-step deterministic method instructions + explicit
-// consistency rule, replacing the old vague "utilizing ARIMA" framing.
-function buildProductPrompt(timeframe, productSalesHistory) {
-  const days = TIMEFRAME_DAYS[timeframe] || 30;
+// Takes the tail end (most recent `days` entries) of each product's
+// dailyQty array. Used to carve the 7-day-horizon's own lookback window
+// out of a longer fetched history, so the 7-day trend calc stays
+// recency-weighted even when we fetched extra days for the 30-day part.
+function sliceRecentDays(productSalesHistory, days) {
+  return productSalesHistory.map((p) => ({
+    productName: p.productName,
+    category: p.category,
+    dailyQty: p.dailyQty.slice(-days),
+  }));
+}
+
+// UPDATED: single prompt now requests BOTH horizons at once (Option C).
+// thirtyDayHistory is only included when 30-day history is sufficient —
+// when it's omitted, the prompt asks for "sevenDay" only.
+function buildProductPrompt({ sevenDayHistory, thirtyDayHistory }) {
+  const sevenDays = TIMEFRAME_DAYS["7d"];
+  const thirtyDays = TIMEFRAME_DAYS["30d"];
+  const includeThirty = Array.isArray(thirtyDayHistory);
+
+  const horizonBlock = includeThirty
+    ? `TWO independent horizons:
+1. "sevenDay" — forecast horizon of ${sevenDays} days, using ONLY the data in "sevenDayHistory" below.
+2. "thirtyDay" — forecast horizon of ${thirtyDays} days, using ONLY the data in "thirtyDayHistory" below (a longer, separate lookback window — do NOT mix it with sevenDayHistory).`
+    : `ONE horizon:
+1. "sevenDay" — forecast horizon of ${sevenDays} days, using ONLY the data in "sevenDayHistory" below. (There is not yet enough history for a reliable 30-day horizon, so do not attempt "thirtyDay" — omit it entirely.)`;
 
   const systemPrompt = `You are a product-level sales trend assistant for Cakelytics, a small Philippine bakeshop.
 
-TASK: Given each product's recent daily quantity history, identify which products are trending UP ("growth") and which are trending DOWN ("risk") over the next ${days} days.
+TASK: Given each product's recent daily quantity history, identify which products are trending UP ("growth") and which are trending DOWN ("risk"), for ${horizonBlock}
 
-Follow this method PRECISELY, in order, for EACH product, so your output stays consistent given the same input:
-1. Sum the product's quantities over the full historical window provided — this is its recent total (recentQty).
-2. Compare the average daily quantity in the most recent half of the window against the average daily quantity in the earlier half, to determine trend direction and rough magnitude.
-3. Project that trend forward across ${days} days to estimate a forecasted total quantity (forecast).
+Follow this method PRECISELY, in order, for EACH product, WITHIN EACH horizon it applies to, so your output stays consistent given the same input:
+1. Sum the product's quantities over that horizon's full history window — this is its recentQty for that horizon.
+2. Compare the average daily quantity in the most recent half of that horizon's window against the average daily quantity in the earlier half, to determine trend direction and rough magnitude.
+3. Project that trend forward across that horizon's forecast length (${sevenDays} days for sevenDay${includeThirty ? `, ${thirtyDays} days for thirtyDay` : ""}) to estimate a forecasted total quantity (forecast).
 4. Compute diff = forecast - recentQty, and pct = round((diff / recentQty) * 100). If recentQty is 0, treat pct as 100 if forecast > 0, otherwise 0.
-5. Do NOT invent growth or decline that isn't supported by the historical numbers — if a product's history is flat, it does not belong in either list.
-6. Select at most the 5 products with the strongest positive diff for "growth", and at most the 5 with the strongest negative diff for "risk". Do not include the same product in both lists.
+5. Do NOT invent growth or decline that isn't supported by the historical numbers — if a product's history is flat within a horizon, it does not belong in either list for that horizon.
+6. Within each horizon, select at most the 5 products with the strongest positive diff for "growth", and at most the 5 with the strongest negative diff for "risk". Do not include the same product in both lists of the same horizon.
+
+IMPORTANT: sevenDay${includeThirty ? " and thirtyDay are computed completely independently from their own history window" : ""} — a product can appear in one horizon's list and not the other's, or with a different pct, and that is EXPECTED, not an error. Do NOT force the horizons to agree with each other.
 
 CONSISTENCY RULE: Do NOT introduce random variation — same input data must always produce the same output.
 
 ALL numbers (forecast, diff, pct) MUST be integers.
 
-Respond with ONLY valid JSON:
+Respond with ONLY valid JSON${includeThirty ? "" : " (omit the \"thirtyDay\" key entirely — do not include it, even as null or empty)"}:
 {
-  "growth": [{ "name": "Product Name", "pct": number, "diff": number, "forecast": number }],
-  "risk": [{ "name": "Product Name", "pct": number, "diff": number, "forecast": number }]
+  "sevenDay": { "growth": [{ "name": "Product Name", "pct": number, "diff": number, "forecast": number }], "risk": [...] }${includeThirty ? `,
+  "thirtyDay": { "growth": [...], "risk": [...] }` : ""}
 }`;
 
-  const userPrompt = `Timeframe requested: ${timeframe} (forecast horizon: ${days} days)\nPer-product recent daily quantity history (oldest to newest): ${JSON.stringify(productSalesHistory)}`;
+  const userPrompt = `sevenDayHistory (oldest to newest, per product): ${JSON.stringify(sevenDayHistory)}` +
+    (includeThirty ? `\nthirtyDayHistory (oldest to newest, per product): ${JSON.stringify(thirtyDayHistory)}` : "");
 
   return { systemPrompt, userPrompt };
 }
@@ -530,11 +565,12 @@ function normalizeList(list) {
   }));
 }
 
-function normalizeProductPayload(aiResult, timeframe) {
+function normalizeProductHorizon(aiResultPart, timeframe) {
   return {
     label: PF_TIMEFRAME_LABELS[timeframe] || PF_TIMEFRAME_LABELS["30d"],
-    growth: normalizeList(aiResult?.growth),
-    risk: normalizeList(aiResult?.risk),
+    growth: normalizeList(aiResultPart?.growth),
+    risk: normalizeList(aiResultPart?.risk),
+    insufficientData: false,
   };
 }
 
@@ -542,7 +578,98 @@ function emptyProductPayload(timeframe) {
   return { label: PF_TIMEFRAME_LABELS[timeframe] || PF_TIMEFRAME_LABELS["30d"], growth: [], risk: [] };
 }
 
+// Cron/refresh entry point — generation is unified: ONE Gemini call
+// produces both horizons together whenever both have enough history;
+// only "sevenDay" is requested when 30-day history isn't there yet.
+async function refreshProductForecast() {
+  const sevenCheck = await checkForecastDataSufficiency("7d");
+  const thirtyCheck = await checkForecastDataSufficiency("30d");
+
+  // Neither horizon has enough history (7d's requirement is the lower
+  // bar, so failing it means 30d fails too) — no-op, real reason cached.
+  if (!sevenCheck.sufficient) {
+    const payload = {
+      sevenDay: { ...emptyProductPayload("7d"), insufficientData: true, message: sevenCheck.message },
+      thirtyDay: { ...emptyProductPayload("30d"), insufficientData: true, message: sevenCheck.message },
+    };
+    await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
+    return payload;
+  }
+
+  const includeThirty = thirtyCheck.sufficient;
+  const fetchDays = includeThirty ? REQUIRED_HISTORY_DAYS["30d"] : REQUIRED_HISTORY_DAYS["7d"];
+
+  const fullHistory = await getRawProductSalesHistory(fetchDays);
+  const hasSales = fullHistory.some((p) => p.dailyQty.some((q) => q > 0));
+
+  if (!hasSales) {
+    const noActivityMessage = "No product sales activity found in the historical window.";
+    const payload = {
+      sevenDay: { ...emptyProductPayload("7d"), insufficientData: true, message: noActivityMessage },
+      thirtyDay: {
+        ...emptyProductPayload("30d"),
+        insufficientData: true,
+        message: includeThirty ? noActivityMessage : thirtyCheck.message,
+      },
+    };
+    await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
+    return payload;
+  }
+
+  const sevenDayHistory = sliceRecentDays(fullHistory, REQUIRED_HISTORY_DAYS["7d"]);
+  const thirtyDayHistory = includeThirty ? fullHistory : null;
+
+  let payload;
+  try {
+    const { systemPrompt, userPrompt } = buildProductPrompt({ sevenDayHistory, thirtyDayHistory });
+    // Lowered temperature to reduce sampling randomness and make output
+    // more reproducible given the same data (same rationale as Sales).
+    const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
+
+    payload = {
+      sevenDay: normalizeProductHorizon(aiResult?.sevenDay, "7d"),
+      thirtyDay: includeThirty
+        ? normalizeProductHorizon(aiResult?.thirtyDay, "30d")
+        : { ...emptyProductPayload("30d"), insufficientData: true, message: thirtyCheck.message },
+    };
+  } catch (err) {
+    console.error("[ProductForecastService] Gemini forecast failed:", err.message);
+    const failMessage = "Forecast generation failed. Will retry on next cron run.";
+    payload = {
+      sevenDay: { ...emptyProductPayload("7d"), insufficientData: true, message: failMessage },
+      thirtyDay: {
+        ...emptyProductPayload("30d"),
+        insufficientData: true,
+        message: includeThirty ? failMessage : thirtyCheck.message,
+      },
+    };
+  }
+
+  await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
+  return payload;
+}
+
+// Read-only lookup used by the frontend routes. Never calls Gemini.
+async function getProductForecastRead(timeframe) {
+  const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
+  const cached = await AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY);
+  const part = cached?.payload?.[validTimeframe === "7d" ? "sevenDay" : "thirtyDay"];
+
+  if (part && !part.insufficientData) {
+    return { ...part, insufficientData: false };
+  }
+
+  return {
+    ...emptyProductPayload(validTimeframe),
+    insufficientData: true,
+    message: part?.message || "No cached forecast available. Awaiting Cron execution.",
+  };
+}
+
 const ProductForecastService = {
+  // Kept the same (timeframe, forceRefresh) signature — forceRefresh now
+  // triggers the unified combined resolution above regardless of which
+  // timeframe route called it, then reads back the requested horizon.
   async getProductTrendsByTimeframe(timeframe = "30d", forceRefresh = false) {
     if (typeof timeframe === 'boolean') {
       forceRefresh = timeframe;
@@ -550,49 +677,20 @@ const ProductForecastService = {
     }
 
     const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
-    const cacheKey = buildProductCacheKey(validTimeframe);
 
-    if (!forceRefresh) {
-      const cached = await AiCacheModel.getByKey(cacheKey);
-      if (cached && cached.payload && !cached.payload.insufficientData) {
-        return { ...cached.payload, insufficientData: false };
-      }
-      return {
-        ...emptyProductPayload(validTimeframe),
-        insufficientData: true,
-        message: "No cached forecast available. Awaiting Cron execution.",
-      };
+    if (forceRefresh) {
+      await refreshProductForecast();
     }
 
-    // GATE: skip Gemini entirely and skip the cache write entirely when
-    // the DB doesn't have enough calendar-day history for this timeframe.
-    const { sufficient, requiredDays, message } = await checkForecastDataSufficiency(validTimeframe);
-    if (!sufficient) {
-      return { ...emptyProductPayload(validTimeframe), insufficientData: true, message };
-    }
-
-    const productSalesHistory = await getRawProductSalesHistory(requiredDays);
-    const hasSales = productSalesHistory.some(p => p.dailyQty.some(q => q > 0));
-
-    if (!hasSales) {
-      return { ...emptyProductPayload(validTimeframe), insufficientData: true, message: "No product sales activity found in the historical window." };
-    }
-
-    try {
-      const { systemPrompt, userPrompt } = buildProductPrompt(validTimeframe, productSalesHistory);
-      // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
-      // randomness and make output more reproducible given the same data.
-      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
-      const payload = normalizeProductPayload(aiResult, validTimeframe);
-
-      const finalPayload = { ...payload, insufficientData: false };
-      await AiCacheModel.upsert(cacheKey, finalPayload, PF_CACHE_TTL_MS);
-      return finalPayload;
-    } catch (err) {
-      console.error("[ProductForecastService] Gemini forecast failed:", err.message);
-      return { ...emptyProductPayload(validTimeframe), insufficientData: true };
-    }
+    return getProductForecastRead(validTimeframe);
   },
+
+  // Explicit cron entry point — wire your cron job to call this ONCE
+  // instead of hitting /product-forecast/7d?refresh=true AND
+  // /product-forecast/30d?refresh=true separately (that would trigger
+  // two separate combined-resolution runs, i.e. two Gemini calls for
+  // no benefit).
+  refreshProductForecast,
 };
 
 // ==========================================
@@ -700,7 +798,132 @@ function normalizeSalesPayload(aiResult, timeframeDays) {
   return { chartData: finalChartData };
 }
 
+// ------------------------------------------
+// UNIFIED RESOLUTION (replaces per-timeframe generation)
+// ------------------------------------------
+// Instead of independently asking Gemini to forecast 7d AND 30d (two
+// separate calls that can legitimately disagree on the same overlapping
+// dates), we generate ONE series per cron run:
+//   1. If there's enough history for a 30-day forecast, generate ONLY
+//      that. The 7-day view is then just the first 7 entries of the
+//      SAME array — so 7d and 30d can never contradict each other.
+//   2. If 30-day history isn't sufficient but 7-day history is,
+//      generate the 7-day forecast instead, and explicitly record why
+//      30d isn't available (real reason, not a generic "no cache yet").
+//   3. If neither has enough history, both are marked insufficient with
+//      the real reason.
+async function resolveSalesForecastTimeframe() {
+  const thirtyCheck = await checkForecastDataSufficiency("30d");
+  if (thirtyCheck.sufficient) {
+    return { resolvedTimeframe: "30d", message: thirtyCheck.message };
+  }
+
+  const sevenCheck = await checkForecastDataSufficiency("7d");
+  if (sevenCheck.sufficient) {
+    return { resolvedTimeframe: "7d", thirtyDayMessage: thirtyCheck.message };
+  }
+
+  return { resolvedTimeframe: null, message: sevenCheck.message };
+}
+
+function insufficientSalesPayload(message) {
+  return {
+    chartData: [],
+    insufficientData: true,
+    message: message || "No cached forecast available. Awaiting Cron execution.",
+  };
+}
+
+// Cron/refresh entry point. Call this ONCE per cron run (not once per
+// timeframe route) — it decides internally which single forecast is
+// worth generating and writes the appropriate cache keys.
+async function refreshSalesForecast() {
+  const resolution = await resolveSalesForecastTimeframe();
+
+  if (!resolution.resolvedTimeframe) {
+    const payload = insufficientSalesPayload(resolution.message);
+    // Neither timeframe has enough history — write the real reason to
+    // BOTH keys so reads never show a stale/generic "awaiting cron"
+    // message when the true cause is insufficient history.
+    await Promise.all([
+      AiCacheModel.upsert(buildSalesCacheKey("30d"), payload, SF_CACHE_TTL_MS),
+      AiCacheModel.upsert(buildSalesCacheKey("7d"), payload, SF_CACHE_TTL_MS),
+    ]);
+    return payload;
+  }
+
+  const validTimeframe = resolution.resolvedTimeframe;
+  const requiredDays = REQUIRED_HISTORY_DAYS[validTimeframe];
+  const requestedDays = TIMEFRAME_DAYS[validTimeframe];
+
+  let finalPayload;
+  try {
+    const historicalSales = await getRawSalesHistory(requiredDays);
+    const { systemPrompt, userPrompt } = buildSalesPrompt(validTimeframe, historicalSales);
+
+    // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
+    // randomness and make output more reproducible given the same data.
+    const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
+    const payload = normalizeSalesPayload(aiResult, requestedDays);
+    finalPayload = { ...payload, insufficientData: false };
+  } catch (err) {
+    console.error("[SalesForecastService] Gemini forecast failed:", err.message);
+    finalPayload = insufficientSalesPayload("Forecast generation failed. Will retry on next cron run.");
+  }
+
+  await AiCacheModel.upsert(buildSalesCacheKey(validTimeframe), finalPayload, SF_CACHE_TTL_MS);
+
+  // If we only resolved 7d (30d truly isn't ready yet), record the real
+  // reason under the 30d key too, instead of leaving it to fall back to
+  // a generic "awaiting cron" message on read.
+  if (validTimeframe === "7d") {
+    await AiCacheModel.upsert(
+      buildSalesCacheKey("30d"),
+      insufficientSalesPayload(resolution.thirtyDayMessage),
+      SF_CACHE_TTL_MS
+    );
+  }
+  // NOTE: when validTimeframe === "30d" we deliberately do NOT touch the
+  // "7d" cache key — the read path below always prefers a ready 30d
+  // cache and derives 7d from it, so a stale standalone 7d cache is
+  // simply never consulted while 30d stays sufficient.
+
+  return finalPayload;
+}
+
+// Read-only lookup used by the frontend routes. Never calls Gemini.
+async function getSalesForecastRead(timeframe) {
+  const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
+
+  if (validTimeframe === "30d") {
+    const cached = await AiCacheModel.getByKey(buildSalesCacheKey("30d"));
+    if (cached?.payload && !cached.payload.insufficientData && cached.payload.chartData?.length) {
+      return { chartData: cached.payload.chartData, insufficientData: false };
+    }
+    return insufficientSalesPayload(cached?.payload?.message);
+  }
+
+  // "7d": prefer deriving from the 30d cache — same source array as the
+  // 30d view, so the two views can never disagree on overlapping dates.
+  const thirtyCached = await AiCacheModel.getByKey(buildSalesCacheKey("30d"));
+  if (thirtyCached?.payload && !thirtyCached.payload.insufficientData && thirtyCached.payload.chartData?.length >= 7) {
+    return { chartData: thirtyCached.payload.chartData.slice(0, 7), insufficientData: false };
+  }
+
+  const sevenCached = await AiCacheModel.getByKey(buildSalesCacheKey("7d"));
+  if (sevenCached?.payload && !sevenCached.payload.insufficientData && sevenCached.payload.chartData?.length) {
+    return { chartData: sevenCached.payload.chartData, insufficientData: false };
+  }
+
+  return insufficientSalesPayload(sevenCached?.payload?.message || thirtyCached?.payload?.message);
+}
+
 const SalesForecastService = {
+  // Kept the same (timeframe, forceRefresh) signature so the existing
+  // routes/controller don't need to change shape. The difference is
+  // internal: forceRefresh now triggers the UNIFIED resolution above
+  // (regardless of which timeframe route called it), then reads back
+  // whatever the requested timeframe should display.
   async getSalesTrendsByTimeframe(timeframe = "30d", forceRefresh = false) {
     if (typeof timeframe === 'boolean') {
       forceRefresh = timeframe;
@@ -708,45 +931,19 @@ const SalesForecastService = {
     }
 
     const validTimeframe = TIMEFRAME_DAYS[timeframe] ? timeframe : "30d";
-    const cacheKey = buildSalesCacheKey(validTimeframe);
-    const requestedDays = TIMEFRAME_DAYS[validTimeframe];
 
-    if (!forceRefresh) {
-      const cached = await AiCacheModel.getByKey(cacheKey);
-      if (cached && cached.payload && !cached.payload.insufficientData && cached.payload.chartData?.length) {
-        return { chartData: cached.payload.chartData, insufficientData: false };
-      }
-      return {
-        chartData: [],
-        insufficientData: true,
-        message: "No cached forecast available. Awaiting Cron execution.",
-      };
+    if (forceRefresh) {
+      await refreshSalesForecast();
     }
 
-    // GATE: skip Gemini entirely and skip the cache write entirely when
-    // the DB doesn't have enough calendar-day history for this timeframe.
-    const { sufficient, requiredDays, message } = await checkForecastDataSufficiency(validTimeframe);
-    if (!sufficient) {
-      return { chartData: [], insufficientData: true, message };
-    }
-
-    try {
-      const historicalSales = await getRawSalesHistory(requiredDays);
-      const { systemPrompt, userPrompt } = buildSalesPrompt(validTimeframe, historicalSales);
-
-      // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
-      // randomness and make output more reproducible given the same data.
-      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
-      const payload = normalizeSalesPayload(aiResult, requestedDays);
-
-      const finalPayload = { ...payload, insufficientData: false };
-      await AiCacheModel.upsert(cacheKey, finalPayload, SF_CACHE_TTL_MS);
-      return finalPayload;
-    } catch (err) {
-      console.error("[SalesForecastService] Gemini forecast failed:", err.message);
-      return { chartData: [], insufficientData: true };
-    }
+    return getSalesForecastRead(validTimeframe);
   },
+
+  // Explicit cron entry point — prefer wiring your cron job to call this
+  // directly (once) instead of hitting both /sales-forecast/7d?refresh=true
+  // and /sales-forecast/30d?refresh=true (which would just run the same
+  // unified resolution twice and waste a Gemini call).
+  refreshSalesForecast,
 };
 
 // ==========================================
