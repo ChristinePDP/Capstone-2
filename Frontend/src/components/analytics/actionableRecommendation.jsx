@@ -1,28 +1,25 @@
 import {
   Sparkles,
   TrendingUp,
-  Timer,
   PackagePlus,
 } from 'lucide-react';
 
 // ─── Standard, constant section labels — hindi ito galing sa AI at hindi
-// dapat nagbabago kahit anong timeframe. Ang AI lang ang nagbibigay ng
-// laman (title/desc) ng bawat recommendation sa loob ng bawat section.
-// Inalis na ang mga subtitles dito ayon sa request. ───
+// dapat nagbabago. Ang AI lang ang nagbibigay ng laman (title/desc) ng
+// bawat recommendation sa loob ng bawat section. Naging 2 categories na
+// lang (dating 3): "salesOptimization" ngayon ay kasama na rin ang bundle
+// promotions logic, at "wasteReduction" ay naging "inventoryOptimization"
+// (expiry advisory + stock-level fallback). Wala nang per-timeframe
+// subtitles. ───
 const SECTIONS = [
   {
     key: 'salesOptimization',
-    label: 'Sales Growth Strategy',
+    label: 'Sales Optimization',
     icon: TrendingUp,
   },
   {
-    key: 'wasteReduction',
-    label: 'Expiry Advisory',
-    icon: Timer,
-  },
-  {
-    key: 'bundlePromotions',
-    label: 'Bundle Opportunities',
+    key: 'inventoryOptimization',
+    label: 'Inventory Optimization',
     icon: PackagePlus,
   },
 ];
@@ -79,11 +76,10 @@ function RecommendationSection({ section, items }) {
 export default function ActionableRecommendation({ recommendations = {} }) {
   const {
     salesOptimization = [],
-    wasteReduction = [],
-    bundlePromotions = [],
+    inventoryOptimization = [],
   } = recommendations;
 
-  const dataByKey = { salesOptimization, wasteReduction, bundlePromotions };
+  const dataByKey = { salesOptimization, inventoryOptimization };
 
   return (
     <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full">

@@ -11,11 +11,14 @@ import {
 // ==========================================
 
 const ActionableRecommendationController = {
+  // No longer reads a :timeframe route param — recommendations are a
+  // single, timeframe-independent set now (see ActionableRecommendationService).
+  // NOTE: update the route definition too, e.g.
+  //   GET /actionable-recommendations           (was /actionable-recommendations/:timeframe)
   getActionableRecommendations: async (req, res, next) => {
     try {
-      const { timeframe } = req.params;
       const forceRefresh = req.query.refresh === 'true';
-      const result = await ActionableRecommendationService.getActionableRecommendations(timeframe, forceRefresh);
+      const result = await ActionableRecommendationService.getActionableRecommendations(forceRefresh);
       ok(res, result, 'Actionable recommendations fetched successfully');
     } catch (err) {
       next(err);

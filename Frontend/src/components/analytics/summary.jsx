@@ -1,4 +1,4 @@
-import { Loader2, CalendarRange, Clock } from 'lucide-react';
+import { Loader2, CalendarRange } from 'lucide-react';
 
 // ============================================================
 // Ang component na ito ay pure presentational na. 
@@ -44,12 +44,8 @@ export default function Summary({ data, isLoading, error }) {
           <div className="w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center shrink-0">
             <CalendarRange size={16} className="text-brand-600" />
           </div>
-          <h3 className="text-sm font-bold text-brand-800 truncate">Weekly Performance Summary</h3>
+          <h3 className="text-sm font-bold text-brand-800">Weekly Performance Summary</h3>
         </div>
-        <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-brand-50 text-brand-600 text-[10px] font-bold uppercase tracking-wider">
-          <Clock size={11} />
-          Last 7 days
-        </span>
       </div>
 
       {isLoading ? (
