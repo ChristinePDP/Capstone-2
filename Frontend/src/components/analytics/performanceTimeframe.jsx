@@ -147,7 +147,16 @@ export default function PerformanceTimeframe({ value, onChange }) {
         </button>
 
         {open && (
-          <div className="absolute z-10 top-full right-0 mt-2 bg-white border border-brand-300 rounded-xl shadow-lg overflow-hidden max-w-[95vw] sm:max-w-none">
+          // FIX: dati, naka `right-0` lang ito (naka-anchor sa kanang gilid
+          // ng trigger button, bumubukas papuntang kaliwa). Sa mobile,
+          // malapit sa KALIWANG gilid ng screen ang trigger, kaya kapag
+          // "right-0" ang anchor ng 200px-wide na menu, halos lumalabas ito
+          // sa negative x-offset — off-canvas sa kaliwa ng screen — kaya
+          // invisible ang mga text (checkmark/icon na lang minsan ang
+          // natitirang bahagi na naka-buffer pa sa loob ng viewport).
+          // Sa `sm:` pataas (mas malawak na screen), bumabalik sa dating
+          // `right-0` na anchoring.
+          <div className="absolute z-10 top-full left-0 sm:left-auto sm:right-0 mt-2 bg-white border border-brand-300 rounded-xl shadow-lg overflow-hidden max-w-[95vw] sm:max-w-none">
             {!showCustom ? (
               <div role="menu" className="py-2 w-[200px]">
                 <ul>

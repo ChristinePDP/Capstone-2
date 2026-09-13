@@ -45,35 +45,56 @@ function sourceLabel(order) {
   if (!source) return null;
   return source === 'online' ? 'Online' : source.charAt(0).toUpperCase() + source.slice(1);
 }
+// Shows "-" instead of the generic "Walk-in Customer" placeholder name.
+function displayName(customer) {
+  const name = (customer.name || '').trim();
+  if (!name || /^walk-in customer$/i.test(name)) return '-';
+  return name;
+}
+// Shows "-" instead of a placeholder phone number like "00000000000".
+function displayPhone(customer) {
+  const phone = String(customer.phone || '').trim();
+  if (!phone || /^0+$/.test(phone)) return '-';
+  return phone;
+}
 // Stacks the order source (Online / Walk-in) above the order type
-// (Pre-Order / Buy Now) badge so both live together in one cell.
+// (Pre-Order / Buy Now) label so both live together in one cell.
+// No badge background, no color — plain text — and never wraps to a
+// second line.
 function TypeCell({ order, orderType }) {
   const label = sourceLabel(order);
   return (
-    <div className="flex flex-col gap-1 items-start">
+    <div className="flex flex-col gap-1 items-start whitespace-nowrap">
       {label && (
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{label}</span>
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap">{label}</span>
       )}
-      <Badge variant={typeVariant(orderType)} className="font-medium px-2 py-0.5 text-xs">{orderType}</Badge>
+      <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
+        {orderType}
+      </span>
     </div>
   );
 }
+// Single line only: "Fully Paid" or "Deposit: ₱X,XXX.XX" — no color,
+// no balance line underneath, and never wraps to a second line.
 function PaymentDisplay({ order }) {
-  const payType    = order.paymentType || order.payment_type;
-  const amtPaid    = order.amountPaid  || order.amount_paid;
-  const grandTotal = order.grandTotal  || order.grand_total;
+  const payType = order.paymentType || order.payment_type;
+  const amtPaid = order.amountPaid  || order.amount_paid;
+  const grandTotal = order.grandTotal || order.grand_total;
   if (payType === 'deposit') {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <p className="text-amber-700 font-semibold text-[13.5px]">Deposit {fmt(amtPaid)}</p>
-        <p className="text-xs text-slate-500 font-medium">Balance {fmt(grandTotal - amtPaid)}</p>
-      </div>
-    );
+    return <p className="text-slate-700 font-semibold text-[13.5px] whitespace-nowrap">Deposit: {fmt(amtPaid)}</p>;
   }
+  return <p className="text-slate-700 font-semibold text-[13.5px] whitespace-nowrap">Fully Paid</p>;
+}
+// Renders pick-up info as two stacked lines: "Date: ..." and "Time: ...".
+function PickupCell({ date, time, timeEnd }) {
+  const d = formatDate(date);
+  const start = formatTime(time);
+  const end = formatTime(timeEnd);
+  const timeStr = start ? `${start}${end ? ` – ${end}` : ''}` : '—';
   return (
     <div className="flex flex-col gap-0.5">
-      <p className="text-emerald-700 font-semibold text-[13.5px]">Fully Paid</p>
-      <p className="text-xs text-slate-500 font-medium">{fmt(grandTotal)}</p>
+      <p className="text-[13px] text-slate-700 font-medium">Date: {d || '—'}</p>
+      <p className="text-[13px] text-slate-700 font-medium">Time: {timeStr}</p>
     </div>
   );
 }
@@ -243,8 +264,8 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-[11px] font-medium text-slate-400 truncate">#{orderId}</p>
-                      <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{customer.name || 'Walk-in'}</p>
-                      {customer.phone && <p className="text-[12px] text-slate-500">{customer.phone}</p>}
+                      <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{displayName(customer)}</p>
+                      <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
                     </div>
                     <Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none shrink-0">
                       {order.status}
@@ -278,7 +299,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
                     <Button size="sm" variant="secondary"
                       className="font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs px-3 py-1.5 shrink-0"
                       onClick={() => onViewOrder(order)}>
-                      View Details
+                      More Details
                     </Button>
                   </div>
                 </div>
@@ -307,22 +328,22 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
             const orderId    = order.order_number || order.id;
             return (
               <Tr key={order.id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
-                <Td className="text-[12px] font-medium text-slate-500">#{orderId}</Td>
+                <Td className="text-[12px] font-medium text-slate-500 whitespace-nowrap">#{orderId}</Td>
                 <Td>
-                  <div className="flex flex-col gap-0.5">
-                    <p className="font-semibold text-slate-900 text-[14px]">{customer.name || 'Walk-in'}</p>
-                    {customer.phone && <p className="text-[12px] text-slate-500">{customer.phone}</p>}
+                  <div className="flex flex-col gap-0.5 whitespace-nowrap">
+                    <p className="font-semibold text-slate-900 text-[14px]">{displayName(customer)}</p>
+                    <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
                   </div>
                 </Td>
                 <Td><TypeCell order={order} orderType={orderType} /></Td>
-                <Td className="font-semibold text-slate-900 text-[14px]">{fmt(grandTotal)}</Td>
+                <Td className="font-semibold text-slate-900 text-[14px] whitespace-nowrap">{fmt(grandTotal)}</Td>
                 <Td><PaymentDisplay order={order} /></Td>
-                <Td className="text-[13px] text-slate-700 font-medium">{pickupLabel(pickupDate, pickupTime, pickupTimeEnd)}</Td>
-                <Td><Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none">{order.status}</Badge></Td>
+                <Td><PickupCell date={pickupDate} time={pickupTime} timeEnd={pickupTimeEnd} /></Td>
+                <Td className="whitespace-nowrap"><Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none whitespace-nowrap">{order.status}</Badge></Td>
                 <Td align="center">
                   <Button size="sm" variant="secondary" className="font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs px-3 py-1.5"
                     onClick={() => onViewOrder(order)}>
-                    View Details
+                    More Details
                   </Button>
                 </Td>
               </Tr>

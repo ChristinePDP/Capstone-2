@@ -14,9 +14,13 @@ function TrendBadge({ delta, invert = false }) {
     : 'bg-rose-50 text-rose-600';
 
   return (
-    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] xl:text-[11px] font-bold tabular-nums shrink-0 whitespace-nowrap ${colorClasses}`}>
+    <span className={`inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-1 sm:py-0.5 rounded-md text-[10px] xl:text-[11px] font-bold tabular-nums shrink-0 whitespace-nowrap ${colorClasses}`}>
       <Icon size={12} strokeWidth={2.5} className="shrink-0" />
-      {Math.abs(delta).toFixed(1)}%
+      {/* Sa mobile, icon na lang (up/down arrow) ang bisible — natatago
+          muna ang percentage text hanggang `sm` breakpoint pataas, para
+          hindi na ito kumain ng space na dapat para sa KPI number mismo
+          (na siyang priority na makita sa maliit na screen). */}
+      <span className="hidden sm:inline">{Math.abs(delta).toFixed(1)}%</span>
     </span>
   );
 }

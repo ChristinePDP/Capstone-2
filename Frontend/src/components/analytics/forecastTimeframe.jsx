@@ -31,7 +31,17 @@ export default function ForecastTimeframe({
   const activeLabel = RANGES.find((r) => r.key === selected)?.label || '30 Days';
 
   return (
-    <div className="relative inline-block" ref={wrapperRef}>
+    // `w-fit` dito ay sadyang idinagdag: kung ito ay anak ng isang flex o
+    // grid container, may posibilidad na i-stretch ng parent layout ang
+    // wrapper na ito para punuin ang available space (lalo na sa grid, na
+    // default na "stretch" ang alignment kahit "inline-block" pa ang
+    // display). Kapag nangyari yun, ang dropdown na "w-full" sa ibaba ay
+    // susunod sa STRETCHED na lapad ng wrapper — hindi sa tunay na lapad ng
+    // button — kaya lumalabas na mas malapad ang dropdown kaysa button
+    // ("sagad" sa gilid). Ang `w-fit` ay pumipilit sa wrapper na
+    // manatili sa eksaktong lapad ng laman nito (ang button), anuman ang
+    // gawin ng parent.
+    <div className="relative inline-block w-fit" ref={wrapperRef}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -47,7 +57,7 @@ export default function ForecastTimeframe({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1.5 w-40 bg-white border border-[#e7ded4] rounded-lg shadow-lg overflow-hidden z-20">
+        <div className="absolute left-0 mt-1.5 w-full bg-white border border-[#e7ded4] rounded-lg shadow-lg overflow-hidden z-20">
           {RANGES.map((opt) => (
             <button
               key={opt.key}

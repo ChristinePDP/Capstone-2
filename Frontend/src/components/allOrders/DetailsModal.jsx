@@ -30,11 +30,21 @@ function formatDateTime(ts) {
   return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+// Confirmed = Blue, Ready = Orange, Completed = Green, Cancelled = Red.
 const STATUS_STYLES = {
-  Confirmed: 'bg-amber-50 text-amber-700',
-  Ready: 'bg-blue-50 text-blue-700',
+  Confirmed: 'bg-blue-50 text-blue-700',
+  Ready: 'bg-orange-50 text-orange-700',
   Completed: 'bg-green-50 text-green-700',
   Cancelled: 'bg-red-50 text-red-600',
+};
+
+// Solid-color variants of the same palette, used on the "Mark as ..." action
+// button in the footer so the button's color always matches the status it's
+// moving the order INTO (e.g. clicking to advance into "Ready" shows an
+// orange button, into "Completed" shows a green button).
+const STATUS_BUTTON_STYLES = {
+  Ready: 'bg-orange-500 hover:bg-orange-600',
+  Completed: 'bg-green-600 hover:bg-green-700',
 };
 
 function StatusBadge({ status }) {
@@ -575,7 +585,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             {nextStatus[order.status] && (
               <button
                 onClick={() => { onStatusChange(order.id, nextStatus[order.status]); onClose(); }}
-                className="w-full sm:w-auto bg-green-600 text-white hover:bg-green-700 px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-colors"
+                className={`w-full sm:w-auto text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-colors ${
+                  STATUS_BUTTON_STYLES[nextStatus[order.status]] || 'bg-green-600 hover:bg-green-700'
+                }`}
               >
                 Mark as {nextStatus[order.status]}
               </button>

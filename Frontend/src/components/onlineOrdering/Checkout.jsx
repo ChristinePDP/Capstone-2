@@ -1,5 +1,6 @@
 // src/components/onlineOrdering/Checkout.jsx
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
@@ -147,7 +148,19 @@ export default function Checkout({ cart, setCart }) {
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
+  // timeDropdownRef = wrapper around the trigger button ONLY. The dropdown
+  // list itself is portaled to <body> (see timeDropdownListRef below) so it
+  // can float above ancestors that clip with overflow-hidden/overflow-y-auto
+  // (e.g. the scrollable left column). Because of that, "click outside"
+  // detection needs to check BOTH refs — the trigger and the portaled list —
+  // otherwise clicking an option inside the portal would look like an
+  // "outside" click and instantly close the dropdown before onClick fires.
   const timeDropdownRef = useRef(null);
+  const timeDropdownListRef = useRef(null);
+  // Where (in fixed/viewport coordinates) to render the portaled dropdown,
+  // and whether it should open upward instead of downward.
+  const [timeDropdownPos, setTimeDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [timeDropdownOpenUpward, setTimeDropdownOpenUpward] = useState(false);
 
   // Close the custom calendar popover when clicking outside of it.
   useEffect(() => {
@@ -161,16 +174,43 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
 
-  // Close the custom time dropdown when clicking outside of it.
+  // Close the custom time dropdown when clicking outside of it (checking
+  // both the trigger button and the portaled list — see refs above).
   useEffect(() => {
     if (!showTimeDropdown) return;
     const handleClickOutside = (e) => {
-      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
+      const clickedTrigger = timeDropdownRef.current && timeDropdownRef.current.contains(e.target);
+      const clickedList = timeDropdownListRef.current && timeDropdownListRef.current.contains(e.target);
+      if (!clickedTrigger && !clickedList) {
         setShowTimeDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showTimeDropdown]);
+
+  // Keep the portaled dropdown glued to the trigger button while it's open
+  // (the page/column can still scroll or the window can resize underneath
+  // a `position: fixed` portal element).
+  useEffect(() => {
+    if (!showTimeDropdown) return;
+    const reposition = () => {
+      const btn = timeDropdownRef.current?.querySelector('button');
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const DROPDOWN_HEIGHT_ESTIMATE = 240;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      setTimeDropdownOpenUpward(spaceBelow < DROPDOWN_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
+      setTimeDropdownPos({ top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width });
+    };
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
   }, [showTimeDropdown]);
 
   // Prevent the background page from scrolling while the Order Summary modal
@@ -566,8 +606,18 @@ if (data.success && data.checkoutUrl) {
                                   />
                                 </button>
 
-                                {showTimeDropdown && (
-                                  <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden">
+                                {showTimeDropdown && createPortal(
+                                  <div
+                                    ref={timeDropdownListRef}
+                                    className="fixed z-[1200] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden"
+                                    style={{
+                                      left: timeDropdownPos.left,
+                                      width: timeDropdownPos.width,
+                                      ...(timeDropdownOpenUpward
+                                        ? { bottom: window.innerHeight - timeDropdownPos.top + 6 }
+                                        : { top: timeDropdownPos.bottom + 6 }),
+                                    }}
+                                  >
                                     <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
                                       {TIME_SLOTS.map(slot => {
                                         const disabled = isSlotDisabled(slot);
@@ -600,22 +650,24 @@ if (data.success && data.checkoutUrl) {
                                         );
                                       })}
                                     </ul>
-                                  </div>
+                                  </div>,
+                                  document.body
                                 )}
                               </div>
                           </div>
                       </div>
 
-                      <div className="mb-4 pb-6">
+                      <div className="mb-4 pb-6 invisible pointer-events-none select-none" aria-hidden="true">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
                           <input
                             type="text"
                             placeholder="Anything else we should know?"
-                            value={form.instructions}
-                            className="w-full h-[42px] border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-ellipsis overflow-hidden whitespace-nowrap"
-                            onChange={e => setForm({...form, instructions: e.target.value})}
+                            readOnly
+                            tabIndex={-1}
+                            className="w-full h-[42px] border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl text-ellipsis overflow-hidden whitespace-nowrap"
                           />
                       </div>
+
                   </div>
               </div>
 
