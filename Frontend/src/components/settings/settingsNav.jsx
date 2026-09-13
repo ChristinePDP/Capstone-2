@@ -13,7 +13,7 @@ export default function SettingsNav({ active, onChange }) {
         <select
           value={active}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-xl border border-brand-200 bg-white pl-3.5 pr-9 py-2.5 text-[13.5px] font-semibold text-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-300"
+          className="w-full appearance-none rounded-xl border border-brand-200 bg-white pl-3.5 pr-9 py-2.5 text-sm font-semibold text-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-300"
         >
           {SETTINGS_TABS.map((tab) => (
             <option key={tab.id} value={tab.id}>{tab.label}</option>
@@ -29,7 +29,7 @@ export default function SettingsNav({ active, onChange }) {
             key={tab.id}
             onClick={() => onChange(tab.id)}
             className={
-              `flex items-center gap-2.5 text-left px-3.5 py-2.5 rounded-lg text-[13.5px] transition-colors ` +
+              `flex items-center gap-2.5 text-left px-3.5 py-2.5 rounded-lg text-sm transition-colors ` +
               (active === tab.id
                 ? 'bg-brand-700 text-white font-semibold shadow-sm'
                 : 'text-brand-500 hover:bg-white hover:text-brand-800 font-medium')

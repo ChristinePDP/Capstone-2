@@ -362,6 +362,11 @@ const MONTH_OPTIONS = [
   { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' },
 ];
 
+// Bundles are capped at 2 products — pag naabot na ang max, awtomatikong
+// magsasara ang product picker pero puwede pa ring buksan ulit ("Edit
+// Products") kung kailangang baguhin ang napili.
+const MAX_BUNDLE_PRODUCTS = 2;
+
 const emptyForm = {
   bundle_name: '',
   product_items: [], // Holds { productId, options }
@@ -431,6 +436,8 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
     [allProducts, form.product_items]
   );
 
+  const atMaxProducts = form.product_items.length >= MAX_BUNDLE_PRODUCTS;
+
   const getVariantPrice = (product, options) => {
     if (product.pricing_mode === 'variable' && product.price_matrix) {
       const match = product.price_matrix.find(entry => 
@@ -450,20 +457,35 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
   const computedPrice = Math.round(originalTotal * (1 - discountPercent / 100));
 
   const toggleProduct = (product) => {
+    const exists = form.product_items.some(item => item.productId === product.id);
+
+    // Max 2 products lang per bundle — huwag payagang magdagdag kapag
+    // naabot na ang cap.
+    if (!exists && form.product_items.length >= MAX_BUNDLE_PRODUCTS) {
+      setFormError(`You can only select up to ${MAX_BUNDLE_PRODUCTS} products per bundle.`);
+      return;
+    }
+    setFormError(null);
+
     setForm(prev => {
-      const exists = prev.product_items.find(item => item.productId === product.id);
       if (exists) {
         return { ...prev, product_items: prev.product_items.filter(item => item.productId !== product.id) };
-      } else {
-        let defaultOptions = {};
-        if (product.pricing_mode === 'variable' && product.price_groups) {
-           product.price_groups.forEach(g => {
-             defaultOptions[g.name] = g.options[0];
-           });
-        }
-        return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions }] };
       }
+      let defaultOptions = {};
+      if (product.pricing_mode === 'variable' && product.price_groups) {
+         product.price_groups.forEach(g => {
+           defaultOptions[g.name] = g.options[0];
+         });
+      }
+      return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions }] };
     });
+
+    // Pagkatapos makapili at naabot na ang max (2), isasara na ang picker
+    // kasabay ng pag-display ng computed price sa itaas. Puwede pa ring
+    // buksan ulit gamit ang "Edit Products" button kung magkakamali.
+    if (!exists && form.product_items.length + 1 >= MAX_BUNDLE_PRODUCTS) {
+      setProductListOpen(false);
+    }
   };
 
   const updateItemOption = (productId, groupName, value) => {
@@ -661,7 +683,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
             className="w-full flex items-center justify-between px-3.5 py-2.5 border border-[#DED4CC] rounded-xl bg-white text-left"
           >
             <span className="text-[11px] font-bold uppercase tracking-wide text-[#8A7264]">
-              Products in this Bundle ({form.product_items.length} selected — min. 2)
+              Products in this Bundle ({form.product_items.length}/{MAX_BUNDLE_PRODUCTS} selected)
             </span>
             <ChevronDown
               size={16}
@@ -671,6 +693,15 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
 
           {!productListOpen && selectedProducts.length > 0 && (
             <div className="flex flex-col gap-2 mt-3">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setProductListOpen(true)}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-[#3B1F0A] hover:underline"
+                >
+                  <Edit2 size={11} /> Edit Products
+                </button>
+              </div>
               {selectedProducts.map(p => {
                 const item = form.product_items.find(i => i.productId === p.id);
                 const currentPrice = getVariantPrice(p, item.options);
@@ -714,12 +745,15 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
               <div className="border border-[#DED4CC] rounded-xl max-h-52 overflow-y-auto divide-y divide-[#EAE4E0]">
                 {filteredProducts.map(p => {
                   const checked = form.product_items.some(item => item.productId === p.id);
+                  const disabled = !checked && atMaxProducts;
                   return (
                     <label
                       key={p.id}
-                      className={`flex items-center gap-3 px-3.5 py-2.5 text-xs cursor-pointer transition-colors ${checked ? 'bg-[#F5EFEB]' : 'hover:bg-[#FAF7F5]'}`}
+                      className={`flex items-center gap-3 px-3.5 py-2.5 text-xs transition-colors ${
+                        checked ? 'bg-[#F5EFEB] cursor-pointer' : disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-[#FAF7F5]'
+                      }`}
                     >
-                      <input type="checkbox" checked={checked} onChange={() => toggleProduct(p)} className="accent-[#3B1F0A]" />
+                      <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleProduct(p)} className="accent-[#3B1F0A]" />
                       <span className="flex-1 font-medium text-[#3B1F0A] truncate">{p.name}</span>
                       <span className="text-[#8A7264]">
                         {p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}
@@ -727,6 +761,11 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
                     </label>
                   );
                 })}
+                {atMaxProducts && (
+                  <p className="px-3.5 py-2.5 text-[10px] text-center text-[#8A7264] bg-[#FAF7F5]">
+                    Max of {MAX_BUNDLE_PRODUCTS} products reached. Remove one to add another.
+                  </p>
+                )}
                 {filteredProducts.length === 0 && (
                   <p className="px-3.5 py-4 text-xs text-center text-[#8A7264]">No products found.</p>
                 )}

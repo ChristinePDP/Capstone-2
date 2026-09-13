@@ -123,15 +123,15 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
         {/* Logo Section — hidden when collapsed (icon-only rail); the padding-top
             still reserves clearance for the toggle button above. Sized down a
             notch on tablet-range (md-only) screens, full size at lg+. */}
-        <div className={`flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0 ${collapsed ? 'md:pt-14 md:pb-2 md:px-1' : ''}`}>
+        <div className={`flex flex-col items-center pt-6 pb-4 border-b border-white/10 shrink-0 transition-[padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${collapsed ? 'md:pt-14 md:pb-2 md:px-1' : ''}`}>
           <img
             src={brandLogo}
             alt="Logo"
-            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] w-[72px] ${
-              collapsed ? 'md:hidden' : 'md:w-[60px] xl:w-[72px]'
+            className={`aspect-square object-contain shrink-0 transition-[width,opacity,margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] w-[72px] ${
+              collapsed ? 'md:w-0 md:opacity-0 md:-mb-2' : 'md:w-[60px] xl:w-[72px] md:opacity-100'
             }`}
           />
-          <div className={`${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
+          <div className={labelClass}>
             <h2 className="font-serif text-[16px] md:text-[14px] xl:text-[16px] font-bold text-white tracking-wide text-center leading-tight mt-1 px-2">
               Aileen Cake Max
             </h2>
@@ -150,12 +150,12 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
                 idx === 0
                   ? ''
                   : group.section
-                    ? `mt-3 ${collapsed ? 'md:mt-2' : ''}`
-                    : `mt-5 pt-3 border-t border-white/10 ${collapsed ? 'md:mt-3 md:pt-2' : ''}`
+                    ? `mt-3 transition-[margin] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${collapsed ? 'md:mt-1' : ''}`
+                    : `mt-5 pt-3 border-t border-white/10 transition-[margin,padding] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${collapsed ? 'md:mt-2 md:pt-1.5' : ''}`
               }
             >
               {group.section && (
-                <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-1 px-2 ${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
+                <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-1 px-2 ${labelClass} ${collapsed ? 'md:h-0 md:mb-0 md:overflow-hidden' : ''}`}>
                   {group.section}
                 </p>
               )}
@@ -169,8 +169,8 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
                     title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
                       `flex items-center gap-2.5 xl:gap-3 px-2.5 xl:px-3 py-1.5 xl:py-2 rounded-lg text-[12.5px] xl:text-[13px] font-semibold ` +
-                      `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
-                      (collapsed ? 'md:justify-center md:px-0 ' : '') +
+                      `transition-[background-color,color,padding,column-gap] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+                      (collapsed ? 'md:gap-0 md:px-[17px] ' : '') +
                       (isActive
                         ? 'bg-white/20 text-white shadow-sm'
                         : 'text-white/90 hover:bg-white/10 hover:text-white')
@@ -187,14 +187,15 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
 
         {/* Footer - Logout only. Name/avatar removed — already shown in Header,
             so this stays a single, uncluttered row (icon-only when collapsed). */}
-        <div className="px-3 pb-4 pt-2 shrink-0 border-t border-white/10">
+        <div className="px-3 pb-4 pt-2 shrink-0 border-t border-white/10 md:flex md:justify-center">
           <button
             onClick={onLogoutClick}
             title={collapsed ? `Log out (${adminName})` : undefined}
             className={
               `flex items-center justify-center gap-3 px-3 py-2 rounded-lg text-[13px] font-semibold w-full ` +
-              `text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
-              (collapsed ? 'md:w-9 md:h-9 md:p-0 md:mx-auto md:rounded-full' : '')
+              `text-red-300 hover:bg-red-500/15 hover:text-red-200 ` +
+              `transition-[background-color,color,width,height,padding,border-radius] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
+              (collapsed ? 'md:w-9 md:h-9 md:p-0 md:rounded-full' : '')
             }
           >
             <LogOut size={20} strokeWidth={2} className="shrink-0" />

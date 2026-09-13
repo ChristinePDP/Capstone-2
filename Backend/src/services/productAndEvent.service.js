@@ -131,21 +131,70 @@ export const uploadImageToProductBucket = async (file) => {
 // ============================================================
 // PROMO BUNDLE SERVICES
 // ============================================================
-const isBundleWithinDateRange = (bundle, today) => {
-  if (!bundle.start_month || !bundle.start_day || !bundle.end_month || !bundle.end_day) {
-    return true;
-  }
 
-  const month = today.getMonth() + 1;
-  const day = today.getDate();
+// Shared "is today's month/day inside this month/day range" checker.
+// Ginagamit ito ng parehong bundle availability (dito) at event/occasion
+// "is live today" checks sa ibaba — iisang lohika lang, para hindi
+// mag-drift ang dalawa. Sinusuportahan ang wrap-around range (hal.
+// Dec 15 -> Jan 5) sa pamamagitan ng OR check kapag start > end.
+const isDateInMonthDayRange = (month, day, startMonth, startDay, endMonth, endDay) => {
   const current = month * 100 + day;
-  const start = bundle.start_month * 100 + bundle.start_day;
-  const end = bundle.end_month * 100 + bundle.end_day;
+  const start = startMonth * 100 + startDay;
+  const end = endMonth * 100 + endDay;
 
   if (start <= end) {
     return current >= start && current <= end;
   }
   return current >= start || current <= end;
+};
+
+// Kinukuha ang lahat ng ACTIVE occasions at inaayos bilang { event_tag: occasion }
+// para mabilis itong ma-lookup ng bawat bundle sa halip na mag-query paulit-ulit.
+// Kapag na-delete/na-deactivate ang occasion, mawawala rin ito sa map na ito —
+// kaya awtomatikong nagiging "not available" ang bundles na naka-tag dito.
+const getActiveOccasionsByTag = async () => {
+  try {
+    const occasions = await OccasionModel.findAll({ activeOnly: true });
+    const byTag = {};
+    occasions.forEach(o => {
+      if (o.event_tag) byTag[o.event_tag] = o;
+    });
+    return byTag;
+  } catch (err) {
+    console.error('Error fetching occasions for bundle availability check:', err);
+    return {};
+  }
+};
+
+// FIX: dating tinitingnan lang ng function na ito ang SARILING start/end ng
+// bundle — pero kapag "Linked to Event" ang availabilityMode (may event_tag),
+// LAGING null ang mga field na iyon (tingnan ang BundleFormModal.handleSubmit
+// sa frontend), kaya laging bumabalik itong `true` ("always available") kahit
+// malayo pa ang event. Ngayon, kapag may event_tag ang bundle, ang basehan na
+// ay ang TALAGANG date range ng kaparehong occasion (event) sa `occasions`
+// table — hindi na sariling start/end ng bundle. Kung walang match na active
+// occasion sa event_tag (na-delete/na-deactivate/mali ang tag), itinuturing
+// itong HINDI available — "wait for it" hanggang aktwal na dumating ang araw.
+const isBundleWithinDateRange = (bundle, today, occasionsByTag = {}) => {
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  if (bundle.event_tag) {
+    const occasion = occasionsByTag[bundle.event_tag];
+    if (!occasion) return false;
+    return isDateInMonthDayRange(
+      month, day,
+      occasion.start_month || 1, occasion.start_day || 1,
+      occasion.end_month || 12, occasion.end_day || 31
+    );
+  }
+
+  // Walang event_tag: "Specific Dates" mode (may sariling start/end) o
+  // "Always Available" mode (walang laman ang apat na field — laging true).
+  if (!bundle.start_month || !bundle.start_day || !bundle.end_month || !bundle.end_day) {
+    return true;
+  }
+  return isDateInMonthDayRange(month, day, bundle.start_month, bundle.start_day, bundle.end_month, bundle.end_day);
 };
 
 // Normalizes a value so combo matching isn't broken by type/case/whitespace
@@ -194,7 +243,7 @@ const findMatrixPrice = (product, options = {}) => {
   return Number.isFinite(lowest) ? lowest : null;
 };
 
-const enrichBundleWithPricing = async (bundle) => {
+const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
   // Accept string OR number ids — don't silently drop numeric ids.
   let safeIds = [];
   if (Array.isArray(bundle.product_ids)) {
@@ -237,18 +286,31 @@ const enrichBundleWithPricing = async (bundle) => {
     original_total: originalTotal,
     bundle_price: bundlePrice,
     discount_percent: discountPercent,
-    is_within_date_range: isBundleWithinDateRange(bundle, new Date())
+    is_within_date_range: isBundleWithinDateRange(bundle, new Date(), occasionsByTag)
   };
 };
 
+// `filters.visibleOnly === 'true'` (galing sa `?visibleOnly=true` query param)
+// ay ginagamit ng PUBLIC-facing na Home.jsx para makuha lang ang mga bundle na
+// dapat talagang lumabas ngayon (active AT nasa loob ng availability window,
+// event-based man o specific-dates). Ang ADMIN page (PromoBundles.jsx) ay
+// hindi nagpapasa ng param na ito kaya nakikita pa rin doon LAHAT — kasama
+// ang mga "out of season"/inactive — para maayos itong ma-manage.
 export const getAllBundles = async (filters = {}) => {
   try {
     const { data, error } = await BundleModel.findAll(filters);
     if (error) throw error;
 
+    const occasionsByTag = await getActiveOccasionsByTag();
+
     const bundlesWithPricing = await Promise.all(
-      (data || []).map(enrichBundleWithPricing)
+      (data || []).map(bundle => enrichBundleWithPricing(bundle, occasionsByTag))
     );
+
+    const visibleOnly = filters.visibleOnly === 'true' || filters.visibleOnly === true;
+    if (visibleOnly) {
+      return bundlesWithPricing.filter(b => b.is_active && b.is_within_date_range);
+    }
 
     return bundlesWithPricing;
   } catch (error) {
@@ -260,7 +322,8 @@ export const getBundleById = async (id) => {
   try {
     const bundle = await BundleModel.findById(id);
     if (!bundle) return null;
-    return enrichBundleWithPricing(bundle);
+    const occasionsByTag = await getActiveOccasionsByTag();
+    return enrichBundleWithPricing(bundle, occasionsByTag);
   } catch (error) {
     throw new Error(`Service Error (getBundleById): ${error.message}`);
   }
@@ -286,7 +349,8 @@ export const createBundle = async (bundleData) => {
     if (response.error) throw new Error(response.error.message);
 
     const savedBundle = Array.isArray(response.data) ? response.data[0] : response.data;
-    return enrichBundleWithPricing(savedBundle);
+    const occasionsByTag = await getActiveOccasionsByTag();
+    return enrichBundleWithPricing(savedBundle, occasionsByTag);
   } catch (error) {
     throw new Error(`Service Error (createBundle): ${error.message}`);
   }
@@ -320,7 +384,8 @@ export const updateBundle = async (id, bundleData) => {
     // sa controller.
     if (response.notFound) return null;
 
-    return enrichBundleWithPricing(response.data);
+    const occasionsByTag = await getActiveOccasionsByTag();
+    return enrichBundleWithPricing(response.data, occasionsByTag);
   } catch (error) {
     throw new Error(`Service Error (updateBundle): ${error.message}`);
   }
@@ -485,14 +550,11 @@ const EVENT_ICON_OPTIONS = [
 const isEventLiveToday = (event, today) => {
   const month = today.getMonth() + 1;
   const day = today.getDate();
-  const current = month * 100 + day;
-  const start = (event.start_month || 1) * 100 + (event.start_day || 1);
-  const end = (event.end_month || 12) * 100 + (event.end_day || 31);
-
-  if (start <= end) {
-    return current >= start && current <= end;
-  }
-  return current >= start || current <= end;
+  return isDateInMonthDayRange(
+    month, day,
+    event.start_month || 1, event.start_day || 1,
+    event.end_month || 12, event.end_day || 31
+  );
 };
 
 export const generateEventAds = async () => {

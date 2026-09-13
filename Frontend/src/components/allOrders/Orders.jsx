@@ -45,11 +45,31 @@ function sourceLabel(order) {
   if (!source) return null;
   return source === 'online' ? 'Online' : source.charAt(0).toUpperCase() + source.slice(1);
 }
-// Shows "-" instead of the generic "Walk-in Customer" placeholder name.
-function displayName(customer) {
-  const name = (customer.name || '').trim();
-  if (!name || /^walk-in customer$/i.test(name)) return '-';
-  return name;
+// Shows "-" ONLY when there's truly no name anywhere — not for every
+// walk-in order across the board.
+//
+// Many walk-in orders don't get their own customer record; they're all
+// linked to ONE shared generic "Walk-in Customer" row in the customers
+// table. When staff DOES type in the actual customer's name for a
+// specific walk-in transaction, that name is saved on the ORDER itself
+// (customerName / customer_name) — not on that shared customer record.
+// The old version only ever checked customer.name, so it showed "-" for
+// every walk-in order regardless of whether a real name was typed in.
+// This now checks the order-level name FIRST, and only falls back to
+// the shared customer record (then "-") when the order itself has none.
+//
+// NOTE: if your actual field for this is named differently than
+// order.customerName / order.customer_name, update the two lookups below.
+function displayName(order, customer) {
+  const isPlaceholder = (n) => !n || /^walk-in customer$/i.test(n);
+
+  const orderName = String(order?.customerName || order?.customer_name || '').trim();
+  if (!isPlaceholder(orderName)) return orderName;
+
+  const customerName = String(customer?.name || '').trim();
+  if (!isPlaceholder(customerName)) return customerName;
+
+  return '-';
 }
 // Shows "-" instead of a placeholder phone number like "00000000000".
 function displayPhone(customer) {
@@ -264,7 +284,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-[11px] font-medium text-slate-400 truncate">#{orderId}</p>
-                      <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{displayName(customer)}</p>
+                      <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{displayName(order, customer)}</p>
                       <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
                     </div>
                     <Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none shrink-0">
@@ -331,7 +351,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
                 <Td className="text-[12px] font-medium text-slate-500 whitespace-nowrap">#{orderId}</Td>
                 <Td>
                   <div className="flex flex-col gap-0.5 whitespace-nowrap">
-                    <p className="font-semibold text-slate-900 text-[14px]">{displayName(customer)}</p>
+                    <p className="font-semibold text-slate-900 text-[14px]">{displayName(order, customer)}</p>
                     <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
                   </div>
                 </Td>

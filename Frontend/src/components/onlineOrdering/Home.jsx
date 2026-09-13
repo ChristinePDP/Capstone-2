@@ -464,7 +464,12 @@ function getConfig() {
 let bundlesFetchPromise = null;
 function getBundles() {
   if (!bundlesFetchPromise) {
-    bundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
+    // `visibleOnly=true`: ipinapasa lang ng backend ang mga bundle na
+    // is_active AT nasa loob ng aktwal na availability window nito ngayon —
+    // event-linked man (base sa live na occasion) o may specific dates.
+    // Kaya hindi na lumalabas dito agad ang isang "Christmas Bundle" bago pa
+    // man magsimula ang Pasko.
+    bundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`)
       .then(res => res.json())
       .then(data => (data.success && Array.isArray(data.data)) ? data.data : [])
       .catch(err => {

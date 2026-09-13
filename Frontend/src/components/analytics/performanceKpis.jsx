@@ -3,10 +3,37 @@ import { Wallet, Receipt, PiggyBank, ShoppingBag, ArrowUpRight, ArrowDownRight }
 const fmtFull = (n) => '₱' + n.toLocaleString('en-PH');
 const fmtCount = (n) => n.toLocaleString('en-PH');
 
-function TrendBadge({ delta, invert = false }) {
-  if (delta === undefined || delta === null || delta === 0) return null;
+// A delta like -99.3% is a real, readable number. But once the PRIOR
+// period's base is very small (or the delta comes out as Infinity/NaN
+// because the prior period was literally 0), the raw percentage either
+// overflows the badge ("128,400.0%") or isn't a real number to print
+// ("Infinity%"). This keeps the badge readable in both cases instead of
+// just letting Math.abs(delta).toFixed(1) print whatever comes out.
+function formatDeltaPercent(delta) {
+  // Prior period was 0 → percentage change is mathematically undefined,
+  // not a genuine "infinite%" spike. Label it plainly instead.
+  if (!Number.isFinite(delta)) return 'New';
 
-  const isUp = delta > 0;
+  const abs = Math.abs(delta);
+
+  // Once a swing gets into the thousands (usually because the prior
+  // period's base was tiny, not necessarily zero), compact-format it
+  // (e.g. "12K%" instead of "12,400.0%") so it always fits the badge and
+  // stays roughly legible at a glance.
+  if (abs >= 1000) {
+    return `${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(abs)}%`;
+  }
+
+  return `${abs.toFixed(1)}%`;
+}
+
+function TrendBadge({ delta, invert = false }) {
+  // Also filters out NaN — that happens when BOTH the current and prior
+  // period were 0, which is truly "no change to report," not just an
+  // unformattable number.
+  if (delta === undefined || delta === null || delta === 0 || Number.isNaN(delta)) return null;
+
+  const isUp = delta > 0; // still correct when delta is Infinity/-Infinity
   const isGood = invert ? !isUp : isUp;
   const Icon = isUp ? ArrowUpRight : ArrowDownRight;
   const colorClasses = isGood
@@ -14,13 +41,16 @@ function TrendBadge({ delta, invert = false }) {
     : 'bg-rose-50 text-rose-600';
 
   return (
-    <span className={`inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-1 sm:py-0.5 rounded-md text-[10px] xl:text-[11px] font-bold tabular-nums shrink-0 whitespace-nowrap ${colorClasses}`}>
+    <span
+      className={`inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-1 sm:py-0.5 rounded-md text-[10px] xl:text-[11px] font-bold tabular-nums shrink-0 whitespace-nowrap ${colorClasses}`}
+      title={Number.isFinite(delta) ? `${delta.toFixed(1)}% vs. prior period` : 'No prior-period data to compare against'}
+    >
       <Icon size={12} strokeWidth={2.5} className="shrink-0" />
       {/* Sa mobile, icon na lang (up/down arrow) ang bisible — natatago
           muna ang percentage text hanggang `sm` breakpoint pataas, para
           hindi na ito kumain ng space na dapat para sa KPI number mismo
           (na siyang priority na makita sa maliit na screen). */}
-      <span className="hidden sm:inline">{Math.abs(delta).toFixed(1)}%</span>
+      <span className="hidden sm:inline">{formatDeltaPercent(delta)}</span>
     </span>
   );
 }
@@ -67,7 +97,7 @@ export default function PerformanceKpis({ kpi, isLoading }) {
           className="relative overflow-hidden bg-white border border-[#f1ece4] rounded-xl px-4 xl:px-5 py-4 flex flex-col justify-between shadow-sm min-w-0"
         >
           <div className="flex items-start justify-between gap-2">
-            <p className="text-[10px] xl:text-[11px] font-bold uppercase tracking-wide text-brand-400 leading-tight line-clamp-2 pt-1">
+            <p className="text-[10px] xl:text-[11px] font-bold uppercase tracking-wide text-[#3d2410] leading-tight line-clamp-2 pt-1">
               {card.label}
             </p>
             <div className="w-8 h-8 xl:w-9 xl:h-9 rounded-full bg-brand-50 flex items-center justify-center shrink-0">

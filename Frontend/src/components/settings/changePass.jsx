@@ -23,7 +23,7 @@ function getStrength(pw) {
 function PasswordField({ label, value, onChange, show, onToggleShow, placeholder, error }) {
   return (
     <div>
-      <label className="block text-[13px] font-semibold text-brand-700 mb-1.5">{label}</label>
+      <label className="block text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1.5">{label}</label>
       <div className="relative">
         <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-brand-300" />
         <input
@@ -33,7 +33,7 @@ function PasswordField({ label, value, onChange, show, onToggleShow, placeholder
           placeholder={placeholder}
           autoComplete="new-password"
           className={
-            `w-full pl-10 pr-10 py-2.5 rounded-xl border text-[14px] text-brand-800 placeholder:text-brand-300 ` +
+            `w-full pl-10 pr-10 py-2.5 rounded-xl border text-sm text-brand-900 font-sans placeholder:text-brand-300 ` +
             `focus:outline-none focus:ring-2 focus:ring-brand-300 transition-colors ` +
             (error ? 'border-red-300 focus:ring-red-200' : 'border-brand-200')
           }
@@ -47,7 +47,7 @@ function PasswordField({ label, value, onChange, show, onToggleShow, placeholder
           {show ? <EyeOff size={15} /> : <Eye size={15} />}
         </button>
       </div>
-      {error && <p className="text-[11.5px] text-red-500 mt-1 font-medium">{error}</p>}
+      {error && <p className="text-[11px] text-red-500 mt-1">{error}</p>}
     </div>
   );
 }
@@ -116,8 +116,8 @@ export default function ChangePass() {
   return (
     <div className="max-w-md">
       <div className="mb-5">
-        <h2 className="font-serif text-[17px] font-bold text-brand-800">Change Password</h2>
-        <p className="text-[12.5px] text-brand-400 mt-0.5">
+        <h2 className="text-lg font-bold text-brand-800">Change Password</h2>
+        <p className="text-xs text-brand-400 mt-0.5">
           Choose a strong password you don't use anywhere else.
         </p>
       </div>
@@ -152,7 +152,7 @@ export default function ChangePass() {
                   style={{ width: `${strength.pct}%` }}
                 />
               </div>
-              <p className="text-[11px] text-brand-400 mt-1 font-medium">{strength.label}</p>
+              <p className="text-[11px] text-brand-400 mt-1">{strength.label}</p>
             </div>
           )}
         </div>
@@ -168,7 +168,7 @@ export default function ChangePass() {
         />
 
         {successMsg && (
-          <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-[13px] font-semibold rounded-xl px-3.5 py-2.5">
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-sm font-semibold rounded-xl px-3.5 py-2.5">
             <CheckCircle2 size={16} />
             {successMsg}
           </div>
@@ -176,7 +176,7 @@ export default function ChangePass() {
 
         {/* Show either the backend error or the field-validation summary when submission cannot complete. */}
         {!successMsg && Object.keys(errors).length > 0 && (
-          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-[13px] font-semibold rounded-xl px-3.5 py-2.5">
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 text-sm font-semibold rounded-xl px-3.5 py-2.5">
             <AlertCircle size={16} />
             {errors.form || 'Please fix the errors above.'}
           </div>
