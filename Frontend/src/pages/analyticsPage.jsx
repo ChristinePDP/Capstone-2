@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '../services/apiClient';
 import PerformanceTimeframe from '../components/analytics/performanceTimeframe';
-import FourKpi from '../components/analytics/fourKPI';
+import PerformanceKpis from '../components/analytics/performanceKpis';
 import StackedBar from '../components/analytics/stackedBar';
-import TopProductsList from '../components/analytics/topProducts';
 import ForecastTimeframe from '../components/analytics/forecastTimeframe';
 import SalesForecast from '../components/analytics/salesForecast';
 import ProductForecasting from '../components/analytics/productForecast';
@@ -18,74 +17,109 @@ import Summary from '../components/analytics/summary';
 // auto-logout interceptor), kaya consistent na ito sa buong app.
 const ANALYTICS_API_URL = `${import.meta.env.VITE_API_URL}/analytics`;
 
+// Inilabas ang helper para magamit ng bawat useEffect nang hindi pabalik-balik ginagawa
+const safeFetch = async (url) => {
+  try {
+    const res = await apiClient.get(url);
+    return { ok: true, data: res.data };
+  } catch (err) {
+    console.error(`Error fetching ${url}:`, err);
+    return { ok: false, data: null };
+  }
+};
+
 export default function AnalyticsPage() {
   const [perfTimeframe, setPerfTimeframe] = useState('Today');
   const [forecastTimeframe, setForecastTimeframe] = useState('30d');
 
-  const [analyticsData, setAnalyticsData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [analyticsData, setAnalyticsData] = useState({});
+  
+  // Hinati ang loading states para hindi sabay-sabay naglo-load kapag isa lang ang nagbago
+  const [isPerfLoading, setIsPerfLoading] = useState(true);
+  const [isForecastLoading, setIsForecastLoading] = useState(true);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(true);
 
+  // 1. Fetch Performance Data (Nakadepende sa perfTimeframe)
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      setIsLoading(true);
-      try {
-        // Helper na kapareho ng safeFetch() sa AppContext.jsx — hindi
-        // nagfa-fail ang Promise.all kapag may isang endpoint na nag-error.
-        const safeFetch = async (url) => {
-          try {
-            const res = await apiClient.get(url);
-            return { ok: true, data: res.data };
-          } catch (err) {
-            console.error(`Error fetching ${url}:`, err);
-            return { ok: false, data: null };
-          }
-        };
+    const fetchPerf = async () => {
+      setIsPerfLoading(true);
+      
+      const [kpiRes, stackedRes] = await Promise.all([
+        safeFetch(`${ANALYTICS_API_URL}/four-kpi/${encodeURIComponent(perfTimeframe)}`),
+        safeFetch(`${ANALYTICS_API_URL}/stacked-bar/${encodeURIComponent(perfTimeframe)}`)
+      ]);
 
-        const [kpiRes, stackedRes, topRes, salesRes, prodRes, actionRes, summaryRes] = await Promise.all([
-          safeFetch(`${ANALYTICS_API_URL}/four-kpi/${encodeURIComponent(perfTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/stacked-bar/${encodeURIComponent(perfTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/top-products/${encodeURIComponent(perfTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`),
-          safeFetch(`${ANALYTICS_API_URL}/summary`), // Dinagdag na ang Summary endpoint dito
-        ]);
+      const rawKpi = kpiRes.ok ? (kpiRes.data?.data || kpiRes.data) : null;
+      
+      const mappedKpi = rawKpi ? {
+        sales: rawKpi.totalSales || 0,
+        expenses: rawKpi.totalExpenses || 0,
+        profit: rawKpi.grossProfit || 0,
+        orders: rawKpi.totalOrders || rawKpi.orderCount || 0,
+        sDelta: rawKpi.sDelta || 0,
+        eDelta: rawKpi.eDelta || 0,
+        pDelta: rawKpi.pDelta || 0,
+        oDelta: rawKpi.oDelta || 0,
+      } : { sales: 0, expenses: 0, profit: 0, orders: 0, sDelta: 0, eDelta: 0, pDelta: 0, oDelta: 0 };
 
-        const rawKpi = kpiRes.ok ? (kpiRes.data?.data || kpiRes.data) : null;
-        
-        const mappedKpi = rawKpi ? {
-          sales: rawKpi.totalSales || 0,
-          expenses: rawKpi.totalExpenses || 0,
-          profit: rawKpi.grossProfit || 0,
-          margin: rawKpi.profitMargin || 0,
-          sDelta: rawKpi.sDelta || 0, 
-          eDelta: rawKpi.eDelta || 0, 
-          pDelta: rawKpi.pDelta || 0, 
-          mDelta: rawKpi.mDelta || 0
-        } : { sales: 0, expenses: 0, profit: 0, margin: 0, sDelta: 0, eDelta: 0, pDelta: 0, mDelta: 0 };
+      const performanceTrend = stackedRes.ok ? (stackedRes.data?.data || stackedRes.data) : [];
 
-        const salesPayload = salesRes.ok ? (salesRes.data?.data || salesRes.data) : {};
-
-        setAnalyticsData({
-          kpi: mappedKpi,
-          performanceTrend: stackedRes.ok ? (stackedRes.data?.data || stackedRes.data) : [],
-          topProducts: topRes.ok ? (topRes.data?.data || topRes.data) : [],
-          salesForecast: Array.isArray(salesPayload?.chartData) ? salesPayload.chartData : (Array.isArray(salesPayload) ? salesPayload : []),
-          salesInsufficient: !!salesPayload?.insufficientData,
-          salesMessage: salesPayload?.message || '',
-          productForecast: prodRes.ok ? (prodRes.data?.data || prodRes.data) : { growth: [], risk: [] },
-          recommendations: actionRes.ok ? (actionRes.data?.data?.recommendations || actionRes.data?.data || actionRes.data) : {},
-          summary: summaryRes?.ok ? (summaryRes.data?.data || summaryRes.data) : null // Kinukuha na ang summary data
-        });
-
-      } catch (err) {
-        console.error("Dashboard Error:", err.message);
-      } finally {
-        setIsLoading(false);
-      }
+      setAnalyticsData(prev => ({
+        ...prev,
+        kpi: mappedKpi,
+        performanceTrend
+      }));
+      
+      setIsPerfLoading(false);
     };
-    fetchAnalytics();
-  }, [perfTimeframe, forecastTimeframe]);
+    
+    fetchPerf();
+  }, [perfTimeframe]);
+
+  // 2. Fetch Forecast Data (Nakadepende sa forecastTimeframe)
+  useEffect(() => {
+    const fetchForecast = async () => {
+      setIsForecastLoading(true);
+      
+      const [salesRes, prodRes, actionRes] = await Promise.all([
+        safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}`),
+        safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}`),
+        safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`)
+      ]);
+
+      const salesPayload = salesRes.ok ? (salesRes.data?.data || salesRes.data) : {};
+
+      setAnalyticsData(prev => ({
+        ...prev,
+        salesForecast: Array.isArray(salesPayload?.chartData) ? salesPayload.chartData : (Array.isArray(salesPayload) ? salesPayload : []),
+        salesInsufficient: !!salesPayload?.insufficientData,
+        salesMessage: salesPayload?.message || '',
+        productForecast: prodRes.ok ? (prodRes.data?.data || prodRes.data) : { growth: [], risk: [] },
+        recommendations: actionRes.ok ? (actionRes.data?.data?.recommendations || actionRes.data?.data || actionRes.data) : {}
+      }));
+      
+      setIsForecastLoading(false);
+    };
+    
+    fetchForecast();
+  }, [forecastTimeframe]);
+
+  // 3. Fetch Summary Data (Isang beses lang maglo-load dahil fixed naman)
+  useEffect(() => {
+    const fetchSummary = async () => {
+      setIsSummaryLoading(true);
+      const summaryRes = await safeFetch(`${ANALYTICS_API_URL}/summary`);
+      
+      setAnalyticsData(prev => ({
+        ...prev,
+        summary: summaryRes?.ok ? (summaryRes.data?.data || summaryRes.data) : null
+      }));
+      
+      setIsSummaryLoading(false);
+    };
+    
+    fetchSummary();
+  }, []); // Empty array kaya hindi mauulit kapag nagpalit ng timeframe
 
   return (
     <div className="space-y-6 overflow-x-hidden w-full max-w-full">
@@ -95,15 +129,19 @@ export default function AnalyticsPage() {
           <PerformanceTimeframe value={perfTimeframe} onChange={setPerfTimeframe} />
         </div>
 
-        <FourKpi period={perfTimeframe} kpi={analyticsData?.kpi} isLoading={isLoading} />
-
-        <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 w-full items-stretch">
-          <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} />
-          <TopProductsList period={perfTimeframe} data={analyticsData?.topProducts} />
+        {/* KPI grid (2x2) sa kaliwa, StackedBar sa kanan. 
+            Tumaas ng kaunti ang height ng StackedBar (mula 140 naging 180) 
+            dahil naka-stretch ang parent container nila, sasabay din 
+            lumaki ang KPI grid para pumantay. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[440px_1fr] gap-4 sm:gap-5 w-full items-stretch">
+          <div className="h-full w-full">
+            <PerformanceKpis kpi={analyticsData?.kpi} isLoading={isPerfLoading} />
+          </div>
+          <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} height={180} />
         </div>
 
-        {/* Pinapasa na ang fetched data at loading status */}
-        <Summary data={analyticsData?.summary} isLoading={isLoading} />
+        {/* Weekly Summary — sariling row, buong lapad. Wala nang loading damay effect */}
+        <Summary data={analyticsData?.summary} isLoading={isSummaryLoading} />
 
         <div className="mt-4 pt-6 border-t border-[#e7ded4] flex flex-col gap-5 w-full">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full">

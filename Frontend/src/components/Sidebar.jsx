@@ -127,21 +127,21 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
           <img
             src={brandLogo}
             alt="Logo"
-            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] w-[88px] ${
-              collapsed ? 'md:hidden' : 'md:w-[68px] xl:w-[88px]'
+            className={`aspect-square object-contain shrink-0 transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] w-[72px] ${
+              collapsed ? 'md:hidden' : 'md:w-[60px] xl:w-[72px]'
             }`}
           />
           <div className={`${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
-            <h2 className="font-serif text-[18px] md:text-[15px] xl:text-[18px] font-bold text-white tracking-wide text-center leading-tight mt-1.5 px-2">
+            <h2 className="font-serif text-[16px] md:text-[14px] xl:text-[16px] font-bold text-white tracking-wide text-center leading-tight mt-1 px-2">
               Aileen Cake Max
             </h2>
-            <p className="text-[10px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium text-center">Bake Shop</p>
+            <p className="text-[9px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium text-center">Bake Shop</p>
           </div>
         </div>
 
         {/* Navigation */}
         <nav
-          className="flex-1 py-4 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.15)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/15 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-white/25"
+          className="flex-1 py-3 px-3 overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.15)_transparent] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/15 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-white/25"
         >
           {NAV.map((group, idx) => (
             <div
@@ -150,16 +150,16 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
                 idx === 0
                   ? ''
                   : group.section
-                    ? `mt-6 ${collapsed ? 'md:mt-2' : ''}`
-                    : `mt-4 pt-4 border-t border-white/10 ${collapsed ? 'md:mt-2 md:pt-2' : ''}`
+                    ? `mt-3 ${collapsed ? 'md:mt-2' : ''}`
+                    : `mt-5 pt-3 border-t border-white/10 ${collapsed ? 'md:mt-3 md:pt-2' : ''}`
               }
             >
               {group.section && (
-                <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-2 px-2 ${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
+                <p className={`text-[10px] font-bold text-white/50 tracking-wider mb-1 px-2 ${labelClass} ${collapsed ? 'md:hidden' : ''}`}>
                   {group.section}
                 </p>
               )}
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-0.5">
                 {group.items.map(item => (
                   <NavLink
                     key={item.to}
@@ -168,7 +168,7 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
                     onClick={onClose}
                     title={collapsed ? item.label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-2.5 xl:gap-3 px-2.5 xl:px-3 py-2 xl:py-2.5 rounded-lg text-[12.5px] xl:text-[13px] font-semibold ` +
+                      `flex items-center gap-2.5 xl:gap-3 px-2.5 xl:px-3 py-1.5 xl:py-2 rounded-lg text-[12.5px] xl:text-[13px] font-semibold ` +
                       `transition-[background-color,color] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
                       (collapsed ? 'md:justify-center md:px-0 ' : '') +
                       (isActive
@@ -187,12 +187,12 @@ function Sidebar({ open, onClose, collapsed, onToggleCollapse, onLogoutClick }) 
 
         {/* Footer - Logout only. Name/avatar removed — already shown in Header,
             so this stays a single, uncluttered row (icon-only when collapsed). */}
-        <div className="px-3 pb-5 pt-3 shrink-0 border-t border-white/10">
+        <div className="px-3 pb-4 pt-2 shrink-0 border-t border-white/10">
           <button
             onClick={onLogoutClick}
             title={collapsed ? `Log out (${adminName})` : undefined}
             className={
-              `flex items-center justify-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold w-full ` +
+              `flex items-center justify-center gap-3 px-3 py-2 rounded-lg text-[13px] font-semibold w-full ` +
               `text-red-300 hover:bg-red-500/15 hover:text-red-200 transition-colors duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] ` +
               (collapsed ? 'md:w-9 md:h-9 md:p-0 md:mx-auto md:rounded-full' : '')
             }

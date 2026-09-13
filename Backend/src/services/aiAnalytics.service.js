@@ -813,11 +813,11 @@ async function getSummaryContext() {
 }
 
 function buildSummaryPrompt(context) {
-  const systemPrompt = `You are a meticulous business report analyst for Cakelytics, a bake shop point-of-sale analytics system.
+  const systemPrompt = `You are a meticulous business report analyst speaking directly to the owner of a bake shop, like a trusted advisor giving the boss a quick briefing.
 You are given ALREADY-COMPUTED figures comparing the business's current 7-day performance (the last 7 days including today) against the prior 7-day period (the 7 days before that).
 
 CRITICAL RULES:
-1. Write a 2 to 3 sentence executive summary in clear, simple, friendly English describing the performance.
+1. Write a 2 to 3 sentence executive summary in clear, simple, friendly English describing the performance. Address the reader directly as the owner (e.g. "boss", "you") — never refer to the business by a system or platform name.
 2. Explicitly compare the current 7 days against the previous 7 days. State clearly if the performance improved or declined based on the provided current vs prior metrics. (e.g. "Sales went up from ₱4,000 last week to ₱5,000 this week...").
 3. Incorporate the computed Total Sales, Gross Profit, and Total Expenses. Format currency correctly (e.g. ₱5,000). You do not need to list exact percentage formulas unless it makes the narrative sound natural, but focus on comparing the real monetary values.
 4. HIGHLIGHT key figures by wrapping them in double asterisks so they become bold (e.g. **₱5,000**).

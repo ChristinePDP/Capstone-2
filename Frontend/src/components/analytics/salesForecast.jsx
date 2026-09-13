@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { LineChart as LucideLineChart } from 'lucide-react';
 
 const formatCurrency = (val) => `₱${Number(val).toLocaleString('en-PH')}`;
@@ -124,7 +124,15 @@ export default function SalesForecast({
       ) : (
         <div className="flex-1 min-h-[220px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 15, right: 20, left: -15, bottom: 15 }}>
+            <AreaChart data={chartData} margin={{ top: 15, right: 20, left: -15, bottom: 15 }}>
+              <defs>
+                <linearGradient id="salesForecastFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#d97706" stopOpacity={0.35} />
+                  <stop offset="55%" stopColor="#d97706" stopOpacity={0.08} />
+                  <stop offset="100%" stopColor="#d97706" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+
               <CartesianGrid strokeDasharray="3 3" stroke="#f1ece4" vertical={false} />
               
               <XAxis 
@@ -145,17 +153,18 @@ export default function SalesForecast({
 
               <Tooltip content={<CustomTooltip />} cursor={false} />
 
-              <Line 
-                type="linear" 
+              <Area 
+                type="monotone" 
                 dataKey="forecastSales" 
                 name="Forecast" 
                 stroke="#d97706" 
                 strokeWidth={2.5} 
+                fill="url(#salesForecastFill)"
                 dot={false} 
-                activeDot={{ r: 5 }} 
+                activeDot={{ r: 5, fill: '#d97706', stroke: '#fff', strokeWidth: 2 }} 
                 connectNulls 
               />
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       )}

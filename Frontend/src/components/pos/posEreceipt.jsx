@@ -103,8 +103,8 @@ export default function PosEReceipt({
   };
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-6 overflow-y-auto">
-      <div className="relative w-full max-w-[340px] md:max-w-[650px] flex flex-col items-center">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-6 overflow-y-auto animate-in fade-in duration-200">
+      <div className="relative w-full max-w-[340px] md:max-w-[650px] flex flex-col items-center animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300">
 
         <button
           onClick={onClose}

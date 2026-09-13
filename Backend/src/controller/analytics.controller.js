@@ -1,8 +1,7 @@
 import { ok } from '../utils/response.js';
 import { 
   FourKpiService, 
-  StackedBarServices, 
-  TopProductsService 
+  StackedBarServices 
 } from '../services/analytics.service.js';
 
 // ==========================================
@@ -35,21 +34,7 @@ const StackedBarController = {
   },
 };
 
-const TopProductsController = {
-  getTopProducts: async (req, res, next) => {
-    try {
-      const { timeframe } = req.params;
-      const result = await TopProductsService.getTopProductsByTimeframe(timeframe);
-      
-      ok(res, result, 'Top products fetched successfully');
-    } catch (err) {
-      next(err);
-    }
-  },
-};
-
 export {
   FourKpiController,
-  StackedBarController,
-  TopProductsController
+  StackedBarController
 };

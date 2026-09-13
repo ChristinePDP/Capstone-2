@@ -1,23 +1,9 @@
 import {
   Sparkles,
-  Lightbulb,
-  AlertTriangle,
-  Tag,
-  Info,
-  ShieldAlert,
   TrendingUp,
   Timer,
   PackagePlus,
 } from 'lucide-react';
-
-// ─── Palette — matched sa Sales Forecast card (#5C3317 / #9a8b7a / #3d2410 / #e7ded4) ───
-const AI_COLORS = {
-  success: { color: '#0f9d68', bg: '#eafaf3', icon: Lightbulb },
-  warning: { color: '#d97706', bg: '#fdf3e5', icon: AlertTriangle },
-  danger: { color: '#e0483f', bg: '#fdedec', icon: ShieldAlert },
-  info: { color: '#3373c4', bg: '#eaf2fb', icon: Tag },
-  neutral: { color: '#5C3317', bg: '#f1ece4', icon: Info },
-};
 
 // ─── Standard, constant section labels — hindi ito galing sa AI at hindi
 // dapat nagbabago kahit anong timeframe. Ang AI lang ang nagbibigay ng
@@ -42,16 +28,10 @@ const SECTIONS = [
 ];
 
 function RecommendationItem({ ins }) {
-  const theme = AI_COLORS[ins.type] || AI_COLORS.neutral;
-  const Icon = theme.icon;
-
   return (
     <div className="flex gap-3 py-4 first:pt-0 last:pb-0">
-      <div
-        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
-        style={{ background: theme.bg }}
-      >
-        <Icon size={15} style={{ color: theme.color }} strokeWidth={2.25} />
+      <div className="w-8 h-8 flex items-center justify-center shrink-0">
+        <span className="w-1.5 h-1.5 rounded-full bg-brand-400" />
       </div>
 
       <div className="min-w-0">
@@ -120,7 +100,7 @@ export default function ActionableRecommendation({ recommendations = {} }) {
         {SECTIONS.map((section) => (
           <div
             key={section.key}
-            className="rounded-xl border border-[#e7ded4] bg-[#fdfbf8] p-4"
+            className="rounded-xl border border-brand-100 bg-brand-50/30 p-4"
           >
             <RecommendationSection section={section} items={dataByKey[section.key]} />
           </div>

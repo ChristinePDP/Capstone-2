@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
+import { ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
+import { Badge, Button, Table, Tr, Td, Modal, Input } from '../ui';
 
 // Base URL ng backend. Kinukuha mula sa VITE_API_URL sa .env
 // (hal. VITE_API_URL=http://localhost:3000/api — kasama na ang "/api"
@@ -167,155 +168,130 @@ function EventModal({
   const endMaxDays = getDaysInMonth(form.end_month);
   const endDayOptions = Array.from({ length: endMaxDays }, (_, i) => ({ value: i + 1, label: (i + 1).toString() }));
 
+  // Ginayahan na ang modal sa mismong shared Modal/Input/Button mula sa ../ui
+  // (kaparehong components na ginagamit ng ibang bahagi ng app) sa halip na
+  // sariling custom overlay/card/button markup — kaya consistent na ang
+  // radius, spacing, header/footer style, at portal behavior (dati'y hindi
+  // naka-portal ang modal na ito, kaya iba ang stacking behavior nito kumpara
+  // sa ibang modals gaya ng ConfirmModal).
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden border border-[#EAE4E0]">
-        
-        <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-bold text-[#3B1F0A]">
-            {isEditing ? 'Edit Event' : 'Add New Event'}
-          </h2>
-          <button 
-            onClick={onClose} 
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="px-7 py-6 overflow-y-auto flex flex-col gap-5">
-          
-          <div className="w-full">
-            <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">
-              Event Name <span className="text-red-500">*</span>
-            </label>
-            <input 
-              type="text" 
-              value={form.event_name} 
-              onChange={(e) => setForm({...form, event_name: e.target.value})} 
-              placeholder="e.g. Valentine's Promo" 
-              className="w-full border border-[#DED4CC] rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-[#5A453C] bg-white transition-colors placeholder:text-gray-400" 
-            />
-          </div>
-
-          <div className="w-full">
-            <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">
-              AI Recommendation Tag <span className="text-red-500">*</span>
-            </label>
-            <input 
-              type="text" 
-              value={form.event_tag} 
-              onChange={(e) => setForm({...form, event_tag: e.target.value})} 
-              placeholder="e.g. valentines" 
-              className="w-full border border-[#DED4CC] rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-[#5A453C] bg-white transition-colors placeholder:text-gray-400"
-            />
-            <p className="text-[10px] text-[#8A7264] mt-1.5 italic">
-              This tells the AI which products to highlight on the homepage. Must match exactly with your product tags.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            
-            <div className="w-full">
-              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">
-                Start Date (Annual) <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <CustomDropdown 
-                    value={form.start_month}
-                    options={monthOptions}
-                    openUpwards={true}
-                    onChange={(newMonth) => {
-                      const maxDays = getDaysInMonth(newMonth);
-                      setForm({
-                        ...form, 
-                        start_month: newMonth,
-                        start_day: form.start_day > maxDays ? maxDays : form.start_day 
-                      });
-                    }}
-                  />
-                </div>
-                <div className="w-16 shrink-0">
-                  <CustomDropdown 
-                    value={form.start_day}
-                    options={startDayOptions}
-                    openUpwards={true}
-                    onChange={(newDay) => setForm({...form, start_day: newDay})}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="w-full">
-              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">
-                End Date (Annual) <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <CustomDropdown 
-                    value={form.end_month}
-                    options={monthOptions}
-                    openUpwards={true}
-                    onChange={(newMonth) => {
-                      const maxDays = getDaysInMonth(newMonth);
-                      setForm({
-                        ...form, 
-                        end_month: newMonth,
-                        end_day: form.end_day > maxDays ? maxDays : form.end_day 
-                      });
-                    }}
-                  />
-                </div>
-                <div className="w-16 shrink-0">
-                  <CustomDropdown 
-                    value={form.end_day}
-                    options={endDayOptions}
-                    openUpwards={true}
-                    onChange={(newDay) => setForm({...form, end_day: newDay})}
-                  />
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          <div className="flex items-center gap-2 mt-1">
-            <input 
-              type="checkbox" 
-              id="activeToggle" 
-              checked={form.is_active} 
-              onChange={(e) => setForm({...form, is_active: e.target.checked})} 
-              className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer border-[#DED4CC]" 
-            />
-            <label 
-              htmlFor="activeToggle" 
-              className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer"
-            >
-              Set as Active
-            </label>
-          </div>
-
-        </div>
-
-        {/* FOOTER: Cancel / Save lang — yung Delete nasa card actions na sa listahan */}
-        <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0 flex items-center justify-end gap-3">
-          <button 
-            onClick={onClose} 
-            className="bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors"
-          >
-            Cancel
-          </button>
-          <button 
-            onClick={handleSave} 
-            className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors shadow-md"
-          >
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isEditing ? 'Edit Event' : 'Add New Event'}
+      size="sm"
+      footer={
+        <div className="flex items-center justify-end gap-3">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleSave}>
             {isEditing ? 'Save Changes' : 'Save Event'}
-          </button>
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-5">
+
+        <Input
+          label="Event Name"
+          required
+          value={form.event_name}
+          onChange={(e) => setForm({ ...form, event_name: e.target.value })}
+          placeholder="e.g. Valentine's Promo"
+        />
+
+        <Input
+          label="AI Recommendation Tag"
+          required
+          value={form.event_tag}
+          onChange={(e) => setForm({ ...form, event_tag: e.target.value })}
+          placeholder="e.g. valentines"
+          hint="This tells the AI which products to highlight on the homepage. Must match exactly with your product tags."
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+
+          <div className="w-full">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1.5 block">
+              Start Date (Annual) <span className="text-red-500 ml-0.5">*</span>
+            </label>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <CustomDropdown 
+                  value={form.start_month}
+                  options={monthOptions}
+                  openUpwards={true}
+                  onChange={(newMonth) => {
+                    const maxDays = getDaysInMonth(newMonth);
+                    setForm({
+                      ...form, 
+                      start_month: newMonth,
+                      start_day: form.start_day > maxDays ? maxDays : form.start_day 
+                    });
+                  }}
+                />
+              </div>
+              <div className="w-16 shrink-0">
+                <CustomDropdown 
+                  value={form.start_day}
+                  options={startDayOptions}
+                  openUpwards={true}
+                  onChange={(newDay) => setForm({...form, start_day: newDay})}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1.5 block">
+              End Date (Annual) <span className="text-red-500 ml-0.5">*</span>
+            </label>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <CustomDropdown 
+                  value={form.end_month}
+                  options={monthOptions}
+                  openUpwards={true}
+                  onChange={(newMonth) => {
+                    const maxDays = getDaysInMonth(newMonth);
+                    setForm({
+                      ...form, 
+                      end_month: newMonth,
+                      end_day: form.end_day > maxDays ? maxDays : form.end_day 
+                    });
+                  }}
+                />
+              </div>
+              <div className="w-16 shrink-0">
+                <CustomDropdown 
+                  value={form.end_day}
+                  options={endDayOptions}
+                  openUpwards={true}
+                  onChange={(newDay) => setForm({...form, end_day: newDay})}
+                />
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div className="flex items-center gap-2 mt-1">
+          <input 
+            type="checkbox" 
+            id="activeToggle" 
+            checked={form.is_active} 
+            onChange={(e) => setForm({...form, is_active: e.target.checked})} 
+            className="w-4 h-4 accent-brand-600 rounded cursor-pointer border-brand-200" 
+          />
+          <label 
+            htmlFor="activeToggle" 
+            className="text-xs font-bold uppercase tracking-wider text-brand-800 select-none cursor-pointer"
+          >
+            Set as Active
+          </label>
         </div>
 
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -526,60 +502,46 @@ export default function EventManager() {
         </div>
       ) : (
         <>
-          {/* TABLE — makikita mula md breakpoint pataas (tablet/desktop) */}
+          {/* TABLE — makikita mula md breakpoint pataas (tablet/desktop).
+              Gamit na ang mismong Table/Tr/Td/Badge/Button mula sa shared ../ui
+              (kaparehong components na ginagamit ng Orders) para eksaktong
+              magkatugma ang header bar, badge, at action buttons — hindi na
+              hex-approximation lang. */}
           <div className="hidden md:block bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-[#F5EFEB] text-[10px] font-bold text-[#8A7264] uppercase tracking-wider">
-                  <th className="px-7 py-3">Event</th>
-                  <th className="px-4 py-3">AI Tag</th>
-                  <th className="px-4 py-3">Date Range</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-7 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#EAE4E0]">
-                {events.map((event) => (
-                  <tr key={event.id} className="hover:bg-[#FAF7F4] transition-colors">
-                    <td className="px-7 py-4 text-xs font-semibold text-[#3B1F0A]">{event.event_name}</td>
-                    <td className="px-4 py-4 text-xs text-[#5A453C]">{event.event_tag}</td>
-                    <td className="px-4 py-4 text-xs text-[#5A453C] whitespace-nowrap">
-                      {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
-                    </td>
-                    <td className="px-4 py-4">
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                          event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {event.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-7 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleOpenEdit(event)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => requestDelete(event)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Table columns={[
+              { label: 'Event' }, { label: 'AI Tag' }, { label: 'Date Range' },
+              { label: 'Status' }, { label: 'Action', align: 'right' },
+            ]}>
+              {events.map((event) => (
+                <Tr key={event.id}>
+                  <Td className="font-semibold text-brand-900">{event.event_name}</Td>
+                  <Td>{event.event_tag}</Td>
+                  <Td className="whitespace-nowrap">
+                    {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
+                  </Td>
+                  <Td>
+                    <Badge variant={event.is_active ? 'success' : 'default'}>
+                      {event.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </Td>
+                  <Td align="right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button size="sm" variant="secondary" className="text-xs px-3 py-1.5" onClick={() => handleOpenEdit(event)}>
+                        <Pencil size={12} /> Edit
+                      </Button>
+                      <Button size="sm" variant="danger" className="text-xs px-3 py-1.5" onClick={() => requestDelete(event)}>
+                        <Trash2 size={12} /> Delete
+                      </Button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
+            </Table>
           </div>
 
-          {/* CARDS — makikita lang pagbaba sa mobile (below md breakpoint) */}
+          {/* CARDS — makikita lang pagbaba sa mobile (below md breakpoint).
+              Kaparehong pill badge at bordered text+icon action buttons ng
+              desktop table para consistent ang dalawang view. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-4">
             {events.map((event) => (
               <div
@@ -590,13 +552,9 @@ export default function EventManager() {
                   <h3 className="text-xs sm:text-sm font-bold text-[#3B1F0A] leading-snug break-words">
                     {event.event_name}
                   </h3>
-                  <span
-                    className={`shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                      event.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'
-                    }`}
-                  >
+                  <Badge variant={event.is_active ? 'success' : 'default'} className="shrink-0">
                     {event.is_active ? 'Active' : 'Inactive'}
-                  </span>
+                  </Badge>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -617,20 +575,12 @@ export default function EventManager() {
                 </div>
 
                 <div className="flex items-center justify-end gap-2 mt-1 pt-3 border-t border-[#EAE4E0]">
-                  <button
-                    onClick={() => handleOpenEdit(event)}
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
-                    title="Edit"
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    onClick={() => requestDelete(event)}
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-red-50 hover:text-red-600 transition-colors"
-                    title="Delete"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <Button size="sm" variant="secondary" className="text-xs px-3 py-1.5" onClick={() => handleOpenEdit(event)}>
+                    <Pencil size={12} /> Edit
+                  </Button>
+                  <Button size="sm" variant="danger" className="text-xs px-3 py-1.5" onClick={() => requestDelete(event)}>
+                    <Trash2 size={12} /> Delete
+                  </Button>
                 </div>
               </div>
             ))}

@@ -13,11 +13,12 @@ function calculateMetrics(orders, inventoryLogs) {
     if (log.transaction_type === 'IN') return sum + Number(log.cost || 0);
     return sum;
   }, 0);
+  const totalOrders = (orders || []).length;
 
   const grossProfit = totalSales - totalExpenses;
   const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
 
-  return { totalSales, totalExpenses, grossProfit, profitMargin };
+  return { totalSales, totalExpenses, grossProfit, profitMargin, totalOrders };
 }
 
 function calculateDelta(current, prior) {
@@ -60,7 +61,9 @@ async function getKpiByTimeframe(timeframe) {
       grossProfit: parseFloat(currentMetrics.grossProfit.toFixed(2)),
       pDelta: parseFloat(calculateDelta(currentMetrics.grossProfit, priorMetrics.grossProfit).toFixed(2)),
       profitMargin: parseFloat(currentMetrics.profitMargin.toFixed(2)),
-      mDelta: parseFloat((currentMetrics.profitMargin - priorMetrics.profitMargin).toFixed(2))
+      mDelta: parseFloat((currentMetrics.profitMargin - priorMetrics.profitMargin).toFixed(2)),
+      totalOrders: currentMetrics.totalOrders,
+      oDelta: parseFloat(calculateDelta(currentMetrics.totalOrders, priorMetrics.totalOrders).toFixed(2))
     };
 
   } catch (error) {
@@ -88,7 +91,9 @@ async function getStackedBarByTimeframe(timeframe) {
     const end = new Date(endDate);
 
     if (timeframe === 'Today' || timeframe === 'Yesterday') {
-      const hours = [6, 8, 10, 12, 14, 16, 18, 20];
+      // Business hours lang: 7 AM - 5 PM (dating 6 AM - 8 PM ang range, sobra sa
+      // aktwal na oras ng tindahan). Pareho pa rin ang 2-hour bucket spacing.
+      const hours = [7, 9, 11, 13, 15, 17];
       hours.forEach(h => {
         const label = h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
         groupedData[label] = { label, Sales: 0, Expenses: 0, sortKey: h };
@@ -139,9 +144,11 @@ async function getStackedBarByTimeframe(timeframe) {
       const d = new Date(isoString);
       if (period === 'Today' || period === 'Yesterday') {
         let h = d.getHours();
-        if (h < 6) h = 6; 
-        if (h > 20) h = 20; 
-        if (h % 2 !== 0) h -= 1; 
+        // I-clamp papunta sa business hours na 7 AM - 5 PM (dating 6-20), tapos
+        // i-round down papunta sa pinakamalapit na odd-hour bucket (7,9,11,13,15,17).
+        if (h < 7) h = 7; 
+        if (h > 17) h = 17; 
+        if (h % 2 === 0) h -= 1; 
         return h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
       } else if (period === 'Last 7 Days') {
         const day = d.toLocaleDateString('en-US', { weekday: 'short' });

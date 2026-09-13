@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Calendar } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td, Pagination, SearchBar } from '../ui';
+import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Badge, Button, Table, Tr, Td } from '../ui';
 import QrScanner from './QrScanner';
 
 const ORDER_STATUSES = ['All', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
@@ -84,6 +84,82 @@ const COLUMNS = [
   { label: 'Status' }, { label: 'Action', align: 'center' },
 ];
 
+// ─── INLINE COMPONENTS ────────────────────────────────────────
+function SearchBar({ value, onChange, placeholder, className = '' }) {
+  return (
+    <div className={`relative ${className}`}>
+      <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A7264]" />
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full pl-9 pr-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white transition-colors placeholder:text-gray-400"
+      />
+    </div>
+  );
+}
+
+function Pagination({ page, count, perPage, total, onChange, className = '' }) {
+  const maxPage = Math.max(1, Math.ceil(count / perPage));
+
+  const getPages = () => {
+    if (maxPage <= 5) {
+      return Array.from({ length: maxPage }, (_, i) => i + 1);
+    }
+    if (page <= 3) {
+      return [1, 2, 3, '...', maxPage];
+    }
+    if (page >= maxPage - 2) {
+      return [1, '...', maxPage - 2, maxPage - 1, maxPage];
+    }
+    return [1, '...', page, '...', maxPage];
+  };
+
+  const start = count === 0 ? 0 : (page - 1) * perPage + 1;
+  const end = Math.min(page * perPage, count);
+
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-4 text-sm ${className}`}>
+      <div className="text-slate-500 text-xs">
+        Showing <span className="font-medium text-slate-700">{start}</span> to <span className="font-medium text-slate-700">{end}</span> of <span className="font-medium text-slate-700">{count}</span> {total}
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          disabled={page === 1}
+          onClick={() => onChange(page - 1)}
+          className="p-1 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        {getPages().map((p, i) => (
+          <button
+            key={i}
+            disabled={p === '...'}
+            onClick={() => p !== '...' && onChange(p)}
+            className={`min-w-[28px] h-7 px-2 rounded-md flex items-center justify-center text-xs font-medium transition-colors ${
+              p === page
+                ? 'bg-[#3B1F0A] text-white'
+                : p === '...'
+                ? 'text-slate-400 cursor-default'
+                : 'text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A]'
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          disabled={page === maxPage}
+          onClick={() => onChange(page + 1)}
+          className="p-1 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+// ─────────────────────────────────────────────────────────────
+
 // ─── ORDERS ───────────────────────────────────────────────────
 // The listing itself: toolbar (search/filter/scan), mobile cards,
 // desktop table, and pagination. Tells the parent when a row is
@@ -97,7 +173,17 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
     const statusOk = statusFilter === 'All' || o.status === statusFilter;
     const name     = (o.customer || o.customers)?.name || '';
     const ordNum   = o.order_number || o.id || '';
-    const searchOk = !search || name.toLowerCase().includes(search.toLowerCase()) || String(ordNum).toLowerCase().includes(search.toLowerCase());
+    // FIX: i-normalize ang parehong side bago ikumpara — i-trim ang search
+    // input at alisin ang "#" prefix sa dulo, dahil sa table/card ipinapakita
+    // ang order number bilang "#ORD-2632" pero ang aktwal na order_number/id
+    // field ay walang "#". Dati, kapag na-type o na-copy ng user ang buong
+    // "#ORD-2632" (kasama ang "#"), hindi ito nagma-match kahit tama ang
+    // order number, dahil wala talagang "#" sa ordNum kaya laging fail ang
+    // .includes() check.
+    const query = search.trim().toLowerCase().replace(/^#/, '');
+    const searchOk = !query
+      || name.toLowerCase().includes(query)
+      || String(ordNum).toLowerCase().replace(/^#/, '').includes(query);
     return statusOk && searchOk;
   });
 
@@ -110,44 +196,34 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
 
   return (
     <div className="space-y-5">
-      {/* Desktop (lg+): iisang row na lang ang search, status tabs, at
-          QR button — makatipid sa space. Mobile/tablet: hiwalay pa rin
-          ang bawat isa sa sariling row, mas komportable sa maliit na
-          screen. */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
-        <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-full lg:w-64 lg:shrink-0 border-2 border-brand-200" />
+        <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search order or customer..." className="w-full lg:w-64 lg:shrink-0" />
 
-        {/* Order status tabs — underline style (gaya ng category tabs sa
-            customer-facing Menu). Sa mobile, "justify-between" para
-            kumalat/mag-spread ang mga tab sa buong lapad; sa desktop
-            (lg+), "justify-start" na lang para naka-left-align sila sa
-            loob ng natitirang espasyo sa row, hindi na naka-spread. */}
-        <div className="flex w-full lg:flex-1 justify-between lg:justify-start gap-4 sm:gap-8 lg:gap-6 overflow-x-auto scrollbar-hide border-b border-slate-200 lg:border-b-0">
-          {ORDER_STATUSES.map(status => (
-            <button
-              key={status}
-              onClick={() => { setStatusFilter(status); setPage(1); }}
-              className={`shrink-0 pb-2.5 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                statusFilter === status
-                  ? 'border-slate-900 text-slate-900'
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              {status}
-            </button>
-          ))}
+        <div className="flex w-full lg:flex-1 justify-between lg:justify-start gap-5 sm:gap-7 lg:gap-6 overflow-x-auto overflow-y-hidden scrollbar-hide border-b border-[#EAE4E0] lg:border-b-0">
+          {ORDER_STATUSES.map(status => {
+            const active = statusFilter === status;
+            return (
+              <button
+                key={status}
+                onClick={() => { setStatusFilter(status); setPage(1); }}
+                className={`relative shrink-0 pb-2.5 text-xs sm:text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
+                  active
+                    ? 'text-[#3B1F0A]'
+                    : 'text-[#8A7264] hover:text-[#3B1F0A]'
+                }`}
+              >
+                {status}
+                {active && (
+                  <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#3B1F0A] rounded-full" />
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <QrScanner orders={orders} onStatusChange={onStatusChange} onViewOrder={onViewOrder} />
       </div>
 
-      {/* Mobile / tablet — cards. Gamit ang "lg" breakpoint (1024px) sa
-          halip na "md" (768px): may 8 columns ang table (ID, Customer,
-          Type, Amount, Payment, Pick-up, Status, Action), kaya kahit sa
-          mga tablet-width na screen (768–1024px) masisikip/maiipit pa rin
-          ito kung ipipilit — mas maganda pa ring cards ang lumabas doon.
-          Totoong desktop-width (1024px+) na lang talaga dapat lumabas
-          ang table view. */}
       <div className="lg:hidden">
         {loading ? (
           <p className="text-center py-16 text-slate-400 font-medium bg-white rounded-xl border border-slate-200 shadow-sm">Loading orders…</p>
@@ -217,10 +293,6 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
         </div>
       </div>
 
-      {/* Desktop — table. Lumalabas lang mula lg (1024px) pataas, para
-          may sapat na lapad ang 8 columns. Dinagdagan pa rin ng
-          overflow-x-auto bilang safety net kung sakaling masikipan pa
-          rin sa mismong 1024px width. */}
       <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         <Table columns={COLUMNS}>
           {loading ? (
@@ -260,7 +332,9 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
             <Tr><Td className="text-center text-slate-500 font-medium py-16 text-sm" colSpan={8}>No orders found.</Td></Tr>
           )}
         </Table>
-        <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+        <div className="px-4 py-3 border-t border-slate-200">
+          <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+        </div>
       </div>
     </div>
   );

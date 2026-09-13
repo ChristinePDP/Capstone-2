@@ -237,9 +237,6 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
             })}
           </div>
         )}
-        <p className="text-[10px] text-[#8A7264] mt-2 italic font-light">
-          Leave blank for everyday products (e.g. pandesal) or let the AI automatically assign seasonal tags based on the product's name.
-        </p>
       </div>
     </div>
   );
@@ -529,14 +526,22 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             }
         }
 
+        // Add the fixed special instructions explicitly so it gets saved to the backend
         const cleanFields = fields
-        .filter(f => f.label.trim())
+        .filter(f => f.label.trim() && f.label.toLowerCase() !== 'special instructions')
         .map(f => ({
             id: f.id,
             label: f.label.trim(),
             type: f.type,
             options: NEEDS_OPTIONS.includes(f.type) ? f.options.split(',').map(o => o.trim()).filter(Boolean) : [],
         }));
+        
+        cleanFields.unshift({
+            id: 'fixed-special-instructions',
+            label: 'Special Instructions',
+            type: 'Textarea',
+            options: []
+        });
 
         const payload = {
             name: form.name,
@@ -646,7 +651,17 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </p>
 
           <div className="flex flex-col gap-2.5">
-            {fields.map(field => (
+            {/* Fixed Special Instructions Field */}
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
+              <input value="Special Instructions" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
+              <select value="Textarea" disabled className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed">
+                <option value="Textarea">Textarea</option>
+              </select>
+              <input value="—" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
+              <div className="p-2 shrink-0 self-end sm:self-auto w-[30px]"></div>
+            </div>
+
+            {fields.filter(f => f.label.toLowerCase() !== 'special instructions').map(field => (
               <div key={field.id} className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
                 <input value={field.label} onChange={e => updateField(field.id, 'label', e.target.value)} placeholder="Field Label (e.g. Cake Message)" className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
                 <select value={field.type} onChange={e => updateField(field.id, 'type', e.target.value)} className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white">

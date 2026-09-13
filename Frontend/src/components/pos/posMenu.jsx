@@ -454,7 +454,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 // Parehong stepper-per-component UX gaya ng Menu.jsx's BundleModal — dinadaan
 // dito ang cashier sa bawat product na laman ng bundle para masagutan ang
 // order slip fields nito bago ma-add sa cart bilang isang bundle line.
-function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit }) {
+function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
@@ -494,7 +494,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit }) {
         return !answer || answer.trim() === '';
       });
       if (missingFields.length > 0) {
-        alert(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`);
+        showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
         return;
       }
     }
@@ -667,23 +667,29 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   // ng cart, kaya patuloy pa ring naa-add ("Add to Cart" sa grid, sa
   // PosProductModal, at sa PosBundleModal) kahit lampas na sa available
   // stock. Kailangan i-pasa ang `cart` prop papunta dito galing sa parent
-  // (PosPage) para gumana ito — parehong toast message/style gaya ng
-  // ginagamit na sa posCart.jsx (handleUpdateQty doon).
+  // (PosPage) para gumana ito.
+  //
+  // FIX (toast): iisang LOCAL na toast bar (walang bagong/hiwalay na
+  // file) — ginagamit na ito para sa stock-limit warning DITO at para
+  // sa "required fields" na dating alert() sa loob ng PosBundleModal
+  // (ipinapasa lang bilang prop pababa dito, gaya ng checkAndWarnLimit).
   // ─────────────────────────────────────────────────────────────
-  const [limitToast, setLimitToast] = useState(null);
-  const limitToastTimerRef = useRef(null);
+  const [toast, setToast] = useState(null); // { message, type }
+  const toastTimerRef = useRef(null);
 
-  const showLimitToast = (message) => {
-    if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
-    setLimitToast(message);
-    limitToastTimerRef.current = setTimeout(() => setLimitToast(null), 3200);
+  const showToast = (message, type = 'error') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3200);
   };
 
   useEffect(() => {
     return () => {
-      if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
+
+  const showLimitToast = (message) => showToast(message, 'error');
 
   const getCartQtyForId = (id) => cart.filter(i => i.id === id).reduce((sum, i) => sum + i.qty, 0);
 
@@ -1020,18 +1026,23 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       </button>
 
       {modal && modal.type === 'bundle' ? (
-        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
+        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} showToast={showToast} />
       ) : modal ? (
         <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : null}
 
-      {/* RESTORED: exceed-limit warning toast — parehong style/z-index gaya
-          ng sa posCart.jsx (z-[6000]) para lumitaw ito kahit bukas ang
-          PosProductModal/PosBundleModal (z-[4000]). */}
-      {limitToast && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
-          <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
-          <span className="leading-snug">{limitToast}</span>
+      {/* RESTORED: exceed-limit / validation warning toast — parehong
+          style/z-index gaya ng dati (z-[6000]) para lumitaw ito kahit
+          bukas ang PosProductModal/PosBundleModal (z-[4000]). Simpleng
+          banner lang ito, walang backdrop — hindi modal. */}
+      {toast && (
+        <div
+          className={`fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200 ${
+            toast.type === 'error' ? 'bg-red-600' : toast.type === 'success' ? 'bg-[#15803D]' : 'bg-[#3B1F0A]'
+          }`}
+        >
+          <span className="w-2 h-2 rounded-full bg-white/70 shrink-0" />
+          <span className="leading-snug">{toast.message}</span>
         </div>
       )}
     </div>

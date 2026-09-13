@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 const PRODUCTS_API = API_BASE;
@@ -127,14 +127,14 @@ function Modal({ isOpen, onClose, title, footer, children }) {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
+      <div className="bg-[#FCFAF9] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
         <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-bold text-[#3B1F0A]">{title}</h2>
+          <h2 className="text-xl font-bold font-serif text-[#3B1F0A]">{title}</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
             <X size={18} />
           </button>
         </div>
-        <div className="px-7 py-6 overflow-y-auto">{children}</div>
+        <div className="px-6 sm:px-8 py-6 overflow-y-auto scrollbar-thin">{children}</div>
         {footer && <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
       </div>
     </div>
@@ -572,27 +572,89 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
         </div>
       }
     >
-      <div className="space-y-5">
+      <div className="space-y-6">
         {formError && (
           <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
             {formError}
           </div>
         )}
 
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
-            Bundle Name
-          </label>
-          <input
-            value={form.bundle_name}
-            onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))}
-            placeholder="e.g. Christmas Sweet Deal"
-            className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white"
-          />
+        {/* 1. Bundle Details & Image Section */}
+        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Bundle Overview</p>
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              
+              <div className="relative shrink-0 flex flex-col gap-2">
+                <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm">
+                  {form.custom_image_url ? (
+                    <img
+                        src={form.custom_image_url}
+                        alt="bundle preview"
+                        className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Package size={32} className="text-[#DED4CC]" />
+                  )}
+                </div>
+                {form.custom_image_url && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, custom_image_url: '' }))}
+                    title="Remove image"
+                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+                <label className="cursor-pointer w-full">
+                  <span className="flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs px-4 py-2.5 bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] transition-colors w-full text-center">
+                    {uploadingImage ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Choose File
+                  </span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploadingImage} />
+                </label>
+              </div>
+
+              <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Bundle Name</label>
+                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder="e.g. Christmas Sweet Deal" className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Discount %</label>
+                    <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Bundle Price</label>
+                    <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center">
+                      {originalTotal > 0 ? (
+                        <>
+                          <span className="line-through text-[#8A7264] font-normal mr-1.5">₱{originalTotal.toLocaleString()}</span>
+                          ₱{computedPrice.toLocaleString()}
+                        </>
+                      ) : (
+                        'Select products first'
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-1">
+                  <label className="flex items-center gap-2 cursor-pointer w-fit">
+                    <input type="checkbox" checked={form.is_active} onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))} className="accent-[#3B1F0A] w-4 h-4 rounded" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#3B1F0A] select-none">Active (visible in online ordering)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Product multi-select */}
-        <div>
+        {/* 2. Product Selection Section */}
+        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">Bundle Products</p>
           <button
             type="button"
             onClick={() => setProductListOpen(prev => !prev)}
@@ -673,43 +735,11 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
           )}
         </div>
 
-        {/* Discount % + live computed price */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
-              Discount %
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={form.discount_percent}
-              onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))}
-              className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
-              Computed Bundle Price
-            </label>
-            <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold">
-              {originalTotal > 0 ? (
-                <>
-                  <span className="line-through text-[#8A7264] font-normal mr-1.5">₱{originalTotal.toLocaleString()}</span>
-                  ₱{computedPrice.toLocaleString()}
-                </>
-              ) : (
-                'Select products first'
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Availability UI */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
+        {/* 3. Availability UI Section */}
+        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">
             When can this be purchased? (Choose one)
-          </label>
+          </p>
           <div className="flex gap-2 bg-[#F5EFEB] p-1.5 rounded-xl mb-4 border border-[#DED4CC]">
             {[
               { id: 'always', label: 'Always Available' },
@@ -731,7 +761,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
             ))}
           </div>
 
-          <div className="bg-[#FAF7F5] p-4 rounded-xl border border-[#DED4CC]">
+          <div className="bg-[#FCFAF9] p-4 rounded-xl border border-[#DED4CC]">
             {form.availabilityMode === 'always' && (
               <p className="text-xs text-[#5A453C] font-medium text-center">
                 This will be visible and available for purchase on the menu at any time.
@@ -800,49 +830,6 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
             )}
           </div>
         </div>
-
-        {/* Optional custom image */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wide text-[#8A7264] mb-1.5">
-            Bundle Image (optional)
-          </label>
-          <div className="flex items-center gap-3">
-            {form.custom_image_url ? (
-              <img src={form.custom_image_url} alt="Bundle" className="w-16 h-16 rounded-xl object-cover border border-[#DED4CC]" />
-            ) : (
-              <div className="w-16 h-16 rounded-xl bg-[#F5EFEB] flex items-center justify-center border border-[#DED4CC]">
-                <ImagePlus size={18} className="text-[#8A7264]" />
-              </div>
-            )}
-            <label className="cursor-pointer">
-              <span className="inline-flex items-center gap-1.5 rounded-xl font-semibold text-xs px-4 py-2 bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] transition-colors">
-                {uploadingImage ? <Loader2 size={13} className="animate-spin" /> : null}
-                {form.custom_image_url ? 'Change Image' : 'Upload Image'}
-              </span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploadingImage} />
-            </label>
-            {form.custom_image_url && (
-              <button
-                type="button"
-                onClick={() => setForm(prev => ({ ...prev, custom_image_url: '' }))}
-                className="text-[11px] font-bold text-red-600 hover:underline"
-              >
-                Remove
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Active toggle */}
-        <label className="flex items-center gap-2 cursor-pointer w-fit">
-          <input
-            type="checkbox"
-            checked={form.is_active}
-            onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))}
-            className="accent-[#3B1F0A]"
-          />
-          <span className="text-xs font-semibold text-[#3B1F0A]">Active (visible in online ordering)</span>
-        </label>
       </div>
     </Modal>
   );

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Tag, Wallet, User, FileText } from 'lucide-react';
+import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText } from 'lucide-react';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -191,7 +191,7 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 
 // ── DETAILS MODAL ────────────────────────────────────────────
 export default function DetailsModal({ order, isOpen, onClose, onStatusChange }) {
-  const [activeTab, setActiveTab] = useState('customer');
+  const [activeTab, setActiveTab] = useState('order');
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const items = order ? (order.items || order.order_items || []) : [];
@@ -208,7 +208,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   // the Order Slip tab.
   useEffect(() => {
     if (activeTab === 'slip' && !hasOrderSlipCheck && !hasReferenceImageCheck) {
-      setActiveTab('customer');
+      setActiveTab('order');
     }
   }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
 
@@ -253,11 +253,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
 
   const createdAt = order.createdAt || order.created_at;
   const updatedAt = order.updatedAt || order.updated_at;
-
-  const specialInstructions = order.specialInstructions || 
-                              order.special_instructions || 
-                              items.find(i => i.special_instructions)?.special_instructions || 
-                              items.find(i => i.specialInstructions)?.specialInstructions;
 
   const referenceImage       = order.customerReference || 
                                order.customer_reference_url || 
@@ -349,7 +344,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   });
 
   const TABS = [
-    { id: 'customer', label: 'Customer Details', icon: User },
     { id: 'order', label: 'Order Details', icon: ReceiptText },
     ...(showSlipTab ? [{ id: 'slip', label: 'Order Slip', icon: FileText }] : []),
   ];
@@ -431,50 +425,32 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         {/* Body */}
         <div className="px-4 sm:px-7 py-6 overflow-y-auto overscroll-contain flex-1">
 
-          {activeTab === 'customer' && (
+          {activeTab === 'order' && (
             <div className="flex flex-col gap-5">
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-                {/* Left: Customer + Pickup, stacked */}
-                <div className="flex flex-col gap-5">
-                  <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
-                    <SectionLabel icon={User}>Customer Details</SectionLabel>
-                    <h3 className="text-base font-bold text-[#3B1F0A] mb-3 leading-tight">{customer.name || 'Walk-in'}</h3>
-                    {customer.phone && (
-                      <div className="flex items-center gap-2 text-sm text-[#5A453C]">
-                        <Phone size={13} className="text-[#8A7264]" />
-                        <span className="font-medium">{customer.phone}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
-                    <SectionLabel icon={Calendar}>Pick-up Schedule</SectionLabel>
-                    <p className="text-base font-bold text-[#3B1F0A]">{formatDate(pickupDate) || '—'}</p>
-                    {pickupTimeLabel && (
-                      <p className="text-sm text-[#5A453C] font-medium flex items-center gap-1.5 mt-1.5">
-                        <Clock size={13} className="text-[#8A7264]" />
-                        {pickupTimeLabel}
-                      </p>
-                    )}
-                  </div>
+                <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
+                  <SectionLabel icon={User}>Customer Details</SectionLabel>
+                  <h3 className="text-base font-bold text-[#3B1F0A] mb-3 leading-tight">{customer.name || 'Walk-in'}</h3>
+                  {customer.phone && (
+                    <div className="flex items-center gap-2 text-sm text-[#5A453C]">
+                      <Phone size={13} className="text-[#8A7264]" />
+                      <span className="font-medium">{customer.phone}</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Right: Special Instructions — stretches to match the
-                    combined height of the two stacked boxes on the left */}
-                <div className="flex flex-col h-full">
-                  <SectionLabel icon={Tag}>Special Instructions</SectionLabel>
-                  <div className="flex-1 bg-[#FAF7F4] rounded-2xl p-4 text-sm text-[#3B1F0A] leading-relaxed border border-[#EAE4E0] italic">
-                    {specialInstructions && specialInstructions !== 'EMPTY' ? specialInstructions : 'No special instructions provided.'}
-                  </div>
+                <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
+                  <SectionLabel icon={Calendar}>Pick-up Schedule</SectionLabel>
+                  <p className="text-base font-bold text-[#3B1F0A]">{formatDate(pickupDate) || '—'}</p>
+                  {pickupTimeLabel && (
+                    <p className="text-sm text-[#5A453C] font-medium flex items-center gap-1.5 mt-1.5">
+                      <Clock size={13} className="text-[#8A7264]" />
+                      {pickupTimeLabel}
+                    </p>
+                  )}
                 </div>
               </div>
-
-            </div>
-          )}
-
-          {activeTab === 'order' && (
-            <div className="flex flex-col gap-5">
 
               {/* Order Items */}
               <div className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
@@ -500,7 +476,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                 </div>
               </div>
 
-              {/* Payment Status — Reference Image now lives in the Order Slip tab */}
+              {/* Payment Status */}
               <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5">
                 <SectionLabel icon={Wallet}>Payment Status</SectionLabel>
                 <div className="flex items-center justify-between mb-2.5">
@@ -523,43 +499,39 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           )}
 
           {activeTab === 'slip' && showSlipTab && (
-            <div className="flex flex-col gap-5">
-
-              {/* Order Slip — one card per bundle (or per standalone
-                  product); when a bundle has more than one product with
-                  slip details, each product gets its own clearly labeled
-                  section inside instead of merging them together. Only
-                  rendered when there's actual slip data — an order with
-                  just a reference image and no slip fields still gets
-                  this tab, just without these cards. */}
-              {hasOrderSlip && orderSlipCards.map((card, idx) => (
-                <div key={idx} className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
-                    <FileText size={14} className="text-[#8A7264]" />
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">
-                      {card.title}
-                    </p>
-                    {card.sections.length > 1 && <BundleTag />}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+              
+              {/* Left Column: Order Slip Details */}
+              <div className="flex flex-col gap-5">
+                {hasOrderSlip && orderSlipCards.map((card, idx) => (
+                  <div key={idx} className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
+                    <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
+                      <FileText size={14} className="text-[#8A7264]" />
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">
+                        {card.title}
+                      </p>
+                      {card.sections.length > 1 && <BundleTag />}
+                    </div>
+                    <div className="divide-y divide-[#EAE4E0]">
+                      {card.sections.map(({ item, fields }, i) => (
+                        <div key={i} className="p-5 space-y-2.5">
+                          {card.sections.length > 1 && (
+                            <p className="text-xs font-bold text-[#3B1F0A] mb-1">
+                              {item.name || item.product_name}
+                            </p>
+                          )}
+                          {Object.entries(fields).map(([key, value], j) => (
+                            <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="divide-y divide-[#EAE4E0]">
-                    {card.sections.map(({ item, fields }, i) => (
-                      <div key={i} className="p-5 space-y-2.5">
-                        {card.sections.length > 1 && (
-                          <p className="text-xs font-bold text-[#3B1F0A] mb-1">
-                            {item.name || item.product_name}
-                          </p>
-                        )}
-                        {Object.entries(fields).map(([key, value], j) => (
-                          <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
 
-              {/* Reference image — placed below the order slip itself, not beside it */}
-              <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5">
+              {/* Right Column: Customer Reference Image (Compact Box) */}
+              <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5 md:sticky md:top-0">
                 <SectionLabel icon={ImageIcon}>Customer Reference</SectionLabel>
                 <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center">
                   {referenceImage ? (
@@ -569,7 +541,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                       className="w-full group relative cursor-zoom-in"
                       aria-label="View full-size reference image"
                     >
-                      <img src={referenceImage} alt="reference" className="w-full h-auto max-h-[280px] object-cover" />
+                      <img src={referenceImage} alt="reference" className="w-full h-auto max-h-[220px] object-cover" />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                         <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
                           View Image
@@ -589,8 +561,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           )}
         </div>
 
-        {/* Footer — hidden entirely when there's nothing actionable left
-            (e.g. the order is already Completed or Cancelled) */}
+        {/* Footer */}
         {(order.status === 'Confirmed' || nextStatus[order.status]) && (
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2.5 px-4 sm:px-7 py-5 border-t border-[#EAE4E0] shrink-0">
             {order.status === 'Confirmed' && (
@@ -604,7 +575,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             {nextStatus[order.status] && (
               <button
                 onClick={() => { onStatusChange(order.id, nextStatus[order.status]); onClose(); }}
-                className="w-full sm:w-auto bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-colors"
+                className="w-full sm:w-auto bg-green-600 text-white hover:bg-green-700 px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-colors"
               >
                 Mark as {nextStatus[order.status]}
               </button>
@@ -613,26 +584,38 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         )}
       </div>
 
-      {/* Reference image lightbox — click the thumbnail to view it full-size */}
+      {/* Reference image lightbox.
+          FIX: dati, naka-nest ang lightbox na ito sa LOOB ng outer modal
+          overlay na may onClick={onClose} sa root nito, at walang
+          stopPropagation() ang lightbox — kaya anumang click dito (kasama
+          yung X button) ay bumu-bubble paitaas at nagsasara rin ng BUONG
+          Details modal, hindi lang ng preview. Idinagdag ang
+          stopPropagation() sa backdrop click (isara lang ang lightbox,
+          hindi ang buong modal) at binalot sa isang relative wrapper ang
+          image + X button (na may sarili ring stopPropagation) para hindi
+          na ito makarating pa sa outer modal.
+          Inilapit din ang X sa mismong image (relative sa image wrapper,
+          hindi sa buong screen) sa halip na nakatapon sa sulok ng viewport. */}
       {lightboxOpen && referenceImage && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setLightboxOpen(false)}
+          onClick={(e) => { e.stopPropagation(); setLightboxOpen(false); }}
         >
-          <button
-            type="button"
-            onClick={() => setLightboxOpen(false)}
-            className="absolute top-5 right-5 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
-          <img
-            src={referenceImage}
-            alt="reference full size"
-            className="max-w-full max-h-full object-contain rounded-lg"
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(false)}
+              className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={referenceImage}
+              alt="reference full size"
+              className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl block"
+            />
+          </div>
         </div>
       )}
     </div>

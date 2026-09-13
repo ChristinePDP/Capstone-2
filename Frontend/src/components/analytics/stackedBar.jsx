@@ -1,53 +1,104 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { BarChart2 } from 'lucide-react';
 
-export default function StackedBar({ period = 'Last 7 Days', height = 280, data: propData }) {
-  const [isMobile, setIsMobile] = useState(false);
-  
+export default function StackedBar({ period = 'Last 7 Days', height = 220, data: propData }) {
+  const chartWrapRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(0);
+
+  // Track the ACTUAL rendered width of the chart instead of just a mobile/desktop
+  // boolean. This lets the tick interval adapt to any container size (sidebar
+  // collapsed, split view, custom date range card, etc.), not just screen width.
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
+    const el = chartWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (w) setChartWidth(w);
+    });
+    ro.observe(el);
+    setChartWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
   }, []);
 
-  const hasFetchedButEmpty = !Array.isArray(propData) || propData.length === 0 || (
-    propData.every(d => Number(d.Sales || 0) === 0 && Number(d.Expenses || 0) === 0)
-  );
+  const isHourly = period.toLowerCase() === 'today' || period.toLowerCase() === 'yesterday';
 
-  // Wala nang mock/random data generator. Gagamitin lang ang totoong propData;
-  // kung wala, mananatiling walang laman (empty chart / empty state).
-  const chartData = useMemo(() => {
+  // LOGIC PARA SA RANGE / 30-DAY LIMIT O INTERVAL:
+  // Kapag ang data ay lumagpas sa 30 items (hal. 60 days o 3 months), 
+  // awtomatiko nating nilalagyan ng interval o downsampling para hindi magsiksikan 
+  // at manatiling malinis at UI-approved ang X-axis labels.
+  const processedChartData = useMemo(() => {
     const data = Array.isArray(propData) ? propData : [];
+    
+    // Kung mahigit 30 ang data points (e.g. Custom range na lampas 1 month), 
+    // kinukuha natin ang tamang step para magkasya sa max 30 bars/labels.
+    let filteredData = data;
+    if (!isHourly && data.length > 30) {
+      const step = Math.ceil(data.length / 30);
+      filteredData = data.filter((_, index) => index % step === 0 || index === data.length - 1);
+    }
 
-    return data.map(d => {
+    return filteredData.map(d => {
       const Sales = Number(d.Sales || 0);
       const Expenses = Number(d.Expenses || 0);
       const Profit = Sales - Expenses;
+      const isLoss = Expenses > Sales;
       
+      let VisBaseExpenses = null;
+      let VisBaseSales = null;
+      let VisExcessExpenses = null;
+      let VisProfit = null;
+      let VisSalesRemainder = null;
+
+      if (isHourly) {
+        if (isLoss) {
+          VisBaseSales = Sales > 0 ? Sales : null; 
+          VisExcessExpenses = Expenses > Sales ? Expenses - Sales : null; 
+        } else {
+          VisBaseExpenses = Expenses > 0 ? Expenses : null; 
+          VisSalesRemainder = Sales > Expenses ? Sales - Expenses : null; 
+        }
+      } else {
+        VisBaseExpenses = Expenses > 0 ? Expenses : null; 
+        VisProfit = Profit > 0 ? Profit : null;
+      }
+
       return {
         ...d,
         Sales,
         Expenses,
         Profit,
-        VisExpenses: Profit >= 0 ? (Expenses > 0 ? Expenses : null) : Sales,
-        VisProfit: Profit > 0 ? Profit : null, 
+        VisBaseExpenses,
+        VisBaseSales,
+        VisExcessExpenses,
+        VisProfit,
+        VisSalesRemainder
       };
     });
-  }, [propData]);
+  }, [propData, isHourly]);
+
+  const hasFetchedButEmpty = !Array.isArray(processedChartData) || processedChartData.length === 0 || (
+    processedChartData.every(d => Number(d.Sales || 0) === 0 && Number(d.Expenses || 0) === 0)
+  );
+
+  // Roughly how many horizontal pixels a single label like "Sep 1" or "Sep 30"
+  // needs so it doesn't collide with its neighbors (glyph width + breathing room).
+  const LABEL_PX = 58;
 
   const tickInterval = useMemo(() => {
-    const len = chartData.length;
-    if (isMobile) {
-      if (len <= 5) return 0;
-      if (len <= 7) return 1; 
-      return 4; 
-    } else {
-      if (len <= 15) return 0;
-      return 2; 
-    }
-  }, [chartData.length, isMobile]);
+    const len = processedChartData.length;
+    if (len === 0) return 0;
+
+    // While chartWidth hasn't been measured yet, fall back to a sane guess
+    // instead of showing every single label (which is what caused the crowding).
+    const width = chartWidth || (typeof window !== 'undefined' ? window.innerWidth * 0.6 : 600);
+
+    const maxVisibleLabels = Math.max(3, Math.floor(width / LABEL_PX));
+    if (len <= maxVisibleLabels) return 0;
+
+    // interval=N means "render every (N+1)th tick", so subtract 1 from the step.
+    return Math.max(0, Math.ceil(len / maxVisibleLabels) - 1);
+  }, [processedChartData.length, chartWidth]);
 
   const fmtFull = (n) => '₱' + Math.round(n).toLocaleString('en-PH');
   const fmtAxis = (v) => {
@@ -59,8 +110,8 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
   const axisStyle = { fontSize: 11, fill: '#64748b', fontWeight: 600 };
 
   return (
-    <div className="p-4 sm:p-5 bg-white border border-brand-100 rounded-xl flex flex-col h-full shadow-sm" data-testid="performance-trend">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
+    <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl flex flex-col h-full shadow-sm" data-testid="performance-trend">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 pt-1">
         <div className="flex items-center gap-2">
           <BarChart2 size={18} className="text-brand-600 shrink-0" />
           <div>
@@ -69,19 +120,24 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
           </div>
         </div>
         <div className="flex items-center gap-4 text-xs text-brand-500 font-semibold">
+          {isHourly && (
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#3b82f6]" />Sales</span>
+          )}
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#f43f5e]" />Expenses</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#10b981]" />Profit</span>
+          {!isHourly && (
+            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#10b981]" />Profit</span>
+          )}
         </div>
       </div>
 
       {hasFetchedButEmpty ? (
-        <div role="status" className="flex-1 flex items-center justify-center text-sm text-brand-400 border border-dashed border-brand-200 rounded-lg text-center px-6 min-h-[240px]">
+        <div role="status" style={{ minHeight: height }} className="flex-1 flex items-center justify-center text-sm text-brand-400 rounded-lg text-center px-6">
           No performance trend data available for this timeframe
         </div>
       ) : (
-      <div className="flex-1 min-h-[240px]">
+      <div ref={chartWrapRef} className="flex-1" style={{ minHeight: height }}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <BarChart data={chartData} margin={{ top: 8, right: 8, left: -15, bottom: 0 }} barCategoryGap="24%">
+          <BarChart data={processedChartData} margin={{ top: 8, right: 8, left: -15, bottom: 0 }} barCategoryGap="20%">
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={true} horizontal={true} />
             
             <XAxis 
@@ -93,7 +149,7 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
               angle={0} 
               textAnchor="middle"
               dy={12} 
-              minTickGap={15} 
+              minTickGap={20} 
             />
             
             <YAxis tick={axisStyle} axisLine={false} tickLine={false} tickFormatter={fmtAxis} width={56} />
@@ -104,30 +160,53 @@ export default function StackedBar({ period = 'Last 7 Days', height = 280, data:
                 if (!active || !payload?.length) return null;
                 const dataObj = payload[0].payload; 
                 
+                const tooltipHourly = isHourly || /AM|PM/i.test(label);
+                
                 return (
                   <div className="bg-white border border-brand-200 rounded-md shadow-lg p-3 text-sm min-w-[150px] z-50">
                     <p className="font-semibold text-brand-800 mb-2">{label}</p>
-                    <p className="flex items-center justify-between gap-4 mb-2 pb-2 border-b border-slate-100">
-                      <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block bg-[#3b82f6]" /><span className="text-brand-500">Total Sales:</span></span>
-                      <span className="font-bold text-blue-600">{fmtFull(dataObj.Sales)}</span>
-                    </p>
-                    <p className="flex items-center justify-between gap-4 mb-1">
-                      <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block bg-[#f43f5e]" /><span className="text-brand-500">Expenses:</span></span>
-                      <span className="font-bold text-brand-800">{fmtFull(dataObj.Expenses)}</span>
-                    </p>
-                    <p className="flex items-center justify-between gap-4 mb-1">
-                      <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block bg-[#10b981]" /><span className="text-brand-500">Profit:</span></span>
-                      <span className={`font-bold ${dataObj.Profit < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                        {fmtFull(dataObj.Profit)}
-                      </span>
-                    </p>
+                    
+                    {dataObj.Sales !== 0 && (
+                      <p className="flex items-center justify-between gap-4 mb-2 pb-2 border-b border-slate-100">
+                        {tooltipHourly ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full inline-block bg-[#3b82f6]" />
+                            <span className="text-brand-500">Sales:</span>
+                          </span>
+                        ) : (
+                          <span className="text-brand-500 font-medium">Total Sales:</span>
+                        )}
+                        <span className={`font-bold ${tooltipHourly ? 'text-blue-600' : 'text-brand-800'}`}>
+                          {fmtFull(dataObj.Sales)}
+                        </span>
+                      </p>
+                    )}
+                    
+                    {dataObj.Expenses !== 0 && (
+                      <p className="flex items-center justify-between gap-4 mb-1">
+                        <span className="text-brand-500">Expenses:</span>
+                        <span className="font-bold text-red-500">{fmtFull(dataObj.Expenses)}</span>
+                      </p>
+                    )}
+                    
+                    {!tooltipHourly && dataObj.Profit !== 0 && (
+                      <p className="flex items-center justify-between gap-4 mb-1">
+                        <span className="text-brand-500">Profit:</span>
+                        <span className={`font-bold ${dataObj.Profit < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                          {fmtFull(dataObj.Profit)}
+                        </span>
+                      </p>
+                    )}
                   </div>
                 );
               }}
             />
             
-            <Bar dataKey="VisExpenses" name="Expenses" fill="#f43f5e" stackId="a" />
+            <Bar dataKey="VisBaseExpenses" name="Expenses" fill="#f43f5e" stackId="a" />
+            <Bar dataKey="VisBaseSales" name="Sales" fill="#3b82f6" stackId="a" />
+            <Bar dataKey="VisSalesRemainder" name="Sales" fill="#3b82f6" stackId="a" radius={[6, 6, 0, 0]} />
             <Bar dataKey="VisProfit" name="Profit" fill="#10b981" stackId="a" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="VisExcessExpenses" name="Excess Expenses" fill="#f43f5e" stackId="a" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

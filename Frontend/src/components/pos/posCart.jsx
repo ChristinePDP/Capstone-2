@@ -1,124 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, User, 
-  Calendar as CalendarIcon, AlertCircle, ChevronLeft, ChevronRight, Tag, Receipt, Lock, X, Clock, Check
+import {
+  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
-
-const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-function formatDateLong(dateStr) {
-  if (!dateStr) return '';
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return `${MONTH_LABELS[m - 1]} ${d}, ${y}`;
-}
-
-function toDateStr(year, month, day) {
-  const mm = String(month + 1).padStart(2, '0');
-  const dd = String(day).padStart(2, '0');
-  return `${year}-${mm}-${dd}`;
-}
-
-const getLiveNow = () => {
-  const now = new Date();
-  const dateStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-  const timeStr = now.toTimeString().slice(0, 5);
-  return { dateStr, timeStr };
-};
-
-const addDaysToDateString = (dateStr, days) => {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
-};
-
-function MonthCalendar({ selectedDate, minDate, todayDate, style, onSelect, onClose }) {
-  const initial = selectedDate || minDate || todayDate;
-  const [iy, im] = initial.split('-').map(Number);
-  const [viewYear, setViewYear] = useState(iy);
-  const [viewMonth, setViewMonth] = useState(im - 1);
-
-  const firstOfMonth = new Date(viewYear, viewMonth, 1);
-  const startWeekday = firstOfMonth.getDay();
-  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
-
-  const cells = [];
-  for (let i = 0; i < startWeekday; i++) {
-    const day = daysInPrevMonth - startWeekday + 1 + i;
-    cells.push({ day, inMonth: false, dateStr: null });
-  }
-  for (let day = 1; day <= daysInMonth; day++) {
-    cells.push({ day, inMonth: true, dateStr: toDateStr(viewYear, viewMonth, day) });
-  }
-  while (cells.length % 7 !== 0) {
-    const day = cells.length - (startWeekday + daysInMonth) + 1;
-    cells.push({ day, inMonth: false, dateStr: null });
-  }
-
-  const canGoPrev = viewYear > iy || viewMonth > im - 1 ? true : `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}` > minDate.slice(0, 7);
-  const goPrev = () => {
-    if (viewMonth === 0) { setViewYear(v => v - 1); setViewMonth(11); }
-    else setViewMonth(v => v - 1);
-  };
-  const goNext = () => {
-    if (viewMonth === 11) { setViewYear(v => v + 1); setViewMonth(0); }
-    else setViewMonth(v => v + 1);
-  };
-
-  return (
-    <div style={style} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-3 w-[280px]">
-      <div className="flex items-center justify-between mb-2">
-        <button type="button" onClick={goPrev} disabled={!canGoPrev} className={`p-1 rounded-lg hover:bg-[#F5EFEB] ${!canGoPrev ? 'opacity-30 cursor-not-allowed' : ''}`}>
-          <ChevronLeft size={16} />
-        </button>
-        <span className="text-xs font-semibold text-[#3B1F0A]">{MONTH_LABELS[viewMonth]} {viewYear}</span>
-        <button type="button" onClick={goNext} className="p-1 rounded-lg hover:bg-[#F5EFEB]">
-          <ChevronRight size={16} />
-        </button>
-      </div>
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {WEEKDAY_LABELS.map(w => <div key={w} className="text-[10px] font-semibold text-[#8A7264] text-center py-1">{w}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((cell, idx) => {
-          if (!cell.inMonth) return <div key={idx} className="text-[11px] text-center py-1.5 text-[#D8CFC9]">{cell.day}</div>;
-          const isDisabled = cell.dateStr < minDate;
-          const isSelected = cell.dateStr === selectedDate;
-          const isToday = cell.dateStr === todayDate;
-          return (
-            <button
-              type="button"
-              key={idx}
-              disabled={isDisabled}
-              onClick={() => { onSelect(cell.dateStr); onClose(); }}
-              className={`text-[11px] text-center py-1.5 rounded-lg transition-colors
-                ${isDisabled ? 'text-[#D8CFC9] cursor-not-allowed' : 'text-[#3B1F0A] hover:bg-[#F5EFEB] cursor-pointer'}
-                ${isSelected ? 'bg-[#4A3B36] text-white hover:bg-[#4A3B36]' : ''}
-                ${isToday && !isSelected ? 'border border-[#8A7264]' : ''}
-              `}
-            >
-              {cell.day}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-const TIME_SLOTS = [
-  { value: '08:00-10:00', label: '8:00 AM - 10:00 AM', start: '08:00', end: '10:00' },
-  { value: '10:00-12:00', label: '10:00 AM - 12:00 PM', start: '10:00', end: '12:00' },
-  { value: '12:00-15:00', label: '12:00 PM - 3:00 PM', start: '12:00', end: '15:00' },
-  { value: '15:00-17:00', label: '3:00 PM - 5:00 PM', start: '15:00', end: '17:00' },
-];
-
-function getSlotLabel(value) {
-  return TIME_SLOTS.find(s => s.value === value)?.label || '';
-}
+import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, TIME_SLOTS } from './orderSum';
 
 // ─────────────────────────────────────────────────────────────
 // Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
@@ -143,14 +29,32 @@ function getQuantityLimit(item) {
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
 export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced }) {
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false); 
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState(null);
-  const [limitToast, setLimitToast] = useState(null); // { message } — auto-dismiss top toast, same style as Menu.jsx
-  const limitToastTimerRef = useRef(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
+
+  // FIX (toast): iisang LOCAL na toast bar na ito (walang bagong/hiwalay
+  // na file) — ginagamit na ito ngayon PARA SA LAHAT ng dating alert()/
+  // blocking-modal na mensahe dito sa loob ng cart (validation errors,
+  // checkout errors, stock-limit warning, at order-success message).
+  // Simpleng banner sa taas ng screen, walang backdrop/overlay — hindi
+  // ito modal, kaya hindi na ito humaharang sa screen tulad ng dating
+  // native `alert()` ("localhost says ...").
+  const [toast, setToast] = useState(null); // { message, type: 'error' | 'success' | 'info' }
+  const toastTimerRef = useRef(null);
+
+  const showToast = (message, type = 'error') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const [additionalCharge, setAdditionalCharge] = useState(() => localStorage.getItem('pos_additionalCharge') || '');
   const [discountName, setDiscountName] = useState(() => localStorage.getItem('pos_discountName') || '');
@@ -165,30 +69,15 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   const prevCartLength = useRef(cart.length);
 
-  const showLimitToast = (message) => {
-    if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
-    setLimitToast({ message });
-    limitToastTimerRef.current = setTimeout(() => setLimitToast(null), 3200);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (limitToastTimerRef.current) clearTimeout(limitToastTimerRef.current);
-    };
-  }, []);
+  // Ginagamit ng handleUpdateQty (stock/daily-limit warning) ang parehong
+  // LOCAL na toast bar sa itaas.
+  const showLimitToast = (message) => showToast(message, 'error');
 
   // Prevent the background POS screen from scrolling while the Order
-  // Summary modal (a `fixed inset-0` overlay) is open. `fixed` overlays
-  // don't block scroll on their own, so we explicitly lock <body> here
-  // and restore its previous value on close or unmount.
-  useEffect(() => {
-    if (!showSummaryModal) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [showSummaryModal]);
+  // Summary modal (a `fixed inset-0` overlay) is open — now handled inside
+  // OrderSummaryModal (orderSum.jsx) itself since the modal owns its own
+  // `show` lifecycle.
+
 
   // Kapag pinapataas ang quantity (delta > 0) ng isang tracked item
   // (may daily_limit o stock_quantity), i-block bago pa lumagpas sa
@@ -248,68 +137,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   useEffect(() => { localStorage.setItem('pos_discountPercentage', discountPercentage); }, [discountPercentage]);
   useEffect(() => { localStorage.setItem('pos_paymentMode', paymentMode); }, [paymentMode]);
 
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarPos, setCalendarPos] = useState(null);
-  const calendarWrapRef = useRef(null);
-  const calendarTriggerRef = useRef(null);
-  const calendarPortalRef = useRef(null);
-
-  // Custom Pick-up Time dropdown — parehong component/markup gaya ng
-  // ginagamit sa Checkout.jsx (Online Ordering), kapalit ng dating plain
-  // <select> para magkatugma ang look ng dalawa.
-  const [showTimeDropdown, setShowTimeDropdown] = useState(false);
-  const timeDropdownRef = useRef(null);
-
-  const openCalendar = () => {
-    if (calendarTriggerRef.current) {
-      const rect = calendarTriggerRef.current.getBoundingClientRect();
-      const CALENDAR_WIDTH = 280;
-      const CALENDAR_HEIGHT_ESTIMATE = 330;
-      const openUpward = window.innerHeight - rect.bottom < CALENDAR_HEIGHT_ESTIMATE && rect.top > CALENDAR_HEIGHT_ESTIMATE;
-      const left = Math.min(rect.left, window.innerWidth - CALENDAR_WIDTH - 12);
-      setCalendarPos({
-        position: 'fixed',
-        left: Math.max(left, 12),
-        ...(openUpward ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 })
-      });
-    }
-    setShowCalendar(true);
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (!showCalendar) return;
-      const clickedTrigger = calendarWrapRef.current && calendarWrapRef.current.contains(e.target);
-      const clickedPortal = calendarPortalRef.current && calendarPortalRef.current.contains(e.target);
-      if (!clickedTrigger && !clickedPortal) setShowCalendar(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showCalendar]);
-
-  useEffect(() => {
-    if (!showCalendar) return;
-    const handleScroll = () => setShowCalendar(false);
-    window.addEventListener('scroll', handleScroll, true);
-    window.addEventListener('resize', handleScroll);
-    return () => {
-      window.removeEventListener('scroll', handleScroll, true);
-      window.removeEventListener('resize', handleScroll);
-    };
-  }, [showCalendar]);
-
-  // Close the custom time dropdown when clicking outside of it.
-  useEffect(() => {
-    if (!showTimeDropdown) return;
-    const handleClickOutside = (e) => {
-      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
-        setShowTimeDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTimeDropdown]);
-
   useEffect(() => {
     if (orderType === 'Buy Now') {
       const { dateStr } = getLiveNow();
@@ -319,29 +146,40 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     }
   }, [orderType]);
 
-  const isSlotDisabled = (slot) => {
-    if (orderType !== 'Buy Now') return false;
-    const { timeStr } = getLiveNow();
-    return slot.end <= timeStr;
-  };
-
+  // Review Order simply opens the Order Summary modal now — the Customer
+  // Details fields (Name, Contact, Pick-up Date/Time) live inside that
+  // modal (orderSum.jsx) as an editable form.
   const handleProceedToOrder = () => {
     if (cart.length === 0) return;
+    setShowSummaryModal(true);
+  };
+
+  // FIX: validation ng required Customer Details fields — hiniwalay ito
+  // mula sa pag-submit (handlePlaceOrder). Tinatawag na ito ng
+  // OrderSummaryModal (orderSum.jsx) BAGO pa man magpakita ng "Are you
+  // sure?" confirm dialog — kaya kapag may kulang pa sa required fields,
+  // ang lalabas muna ay ang "Please complete all required fields (*)"
+  // toast, hindi ang confirm dialog. Bumabalik ng `true` kung pwede nang
+  // magpatuloy, `false` kung may error (may toast na ring lumabas dito).
+  const validateOrderForm = () => {
     if (orderType === 'Pre-Order') {
       if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
-        return setToastMessage('Please complete all required fields (*)');
+        showToast('Please complete all required fields (*)', 'error');
+        return false;
       }
     }
     const phoneRegex = /^\d{11}$/;
     if (orderType === 'Pre-Order' || form.phone) {
       if (!phoneRegex.test(form.phone)) {
-        return setToastMessage('Your Contact Number must be exactly 11 digits.');
+        showToast('Your Contact Number must be exactly 11 digits.', 'error');
+        return false;
       }
     }
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
-      return setToastMessage('Your Alternative Number must be exactly 11 digits.');
+      showToast('Your Alternative Number must be exactly 11 digits.', 'error');
+      return false;
     }
-    setShowSummaryModal(true);
+    return true;
   };
 
   const handlePlaceOrder = async () => {
@@ -483,9 +321,29 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       const result = await response.json();
       if (!response.ok) throw new Error(result.message || 'Failed to process order');
 
+      // FIX (req #4): laging isinasara muna ang Order Summary/Checkout
+      // modal BAGO magpasya kung magbubukas ng E-Receipt, kaya hindi
+      // kailanman magkasabay na naka-open ang dalawang modal — ang
+      // setShowSummaryModal(false) dito ay tumatakbo bago pa man ang
+      // if/else sa ibaba, kahit anong resulta (e-receipt man o toast
+      // na lang ang lalabas).
       setShowSummaryModal(false);
 
-      if (orderType === 'Pre-Order') {
+      // FIX (req #5): ang E-Receipt ay dapat lumabas LANG kapag:
+      //   a) Pre-Order (talagang may pickup schedule na dapat i-confirm
+      //      pag-uwi ng customer), o
+      //   b) Buy Now PERO may kumpletong customer details (name + phone)
+      //      AT pumili ng isang Pick-up Time slot — ibig sabihin,
+      //      "pick-up later" na order pa rin kahit same-day/"Buy Now",
+      //      hindi basta't walk-in na dinadala agad ng customer.
+      // Kung Buy Now na walang customer details/pickup time (regular na
+      // instant/walk-in sale), toast na lang ang success message — walang
+      // dahilan para bigyan pa ito ng QR/e-receipt na wala namang
+      // babalikan pang pick-up schedule.
+      const isScheduledBuyNow = orderType === 'Buy Now' && Boolean(form.name) && Boolean(form.phone) && Boolean(form.pickupTime);
+      const shouldShowEreceipt = orderType === 'Pre-Order' || isScheduledBuyNow;
+
+      if (shouldShowEreceipt) {
         setEreceiptData({
           orderId: result.data.id,
           orderNumber: result.data.order_number,
@@ -497,7 +355,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           confirmToken: result.data.receiptToken,
         });
       } else {
-        alert(`Order successful! Order Ref: ${result.data.order_number}`);
+        showToast(`Order successful! Order Ref: ${result.data.order_number}`, 'success');
       }
 
       onClearCart();
@@ -527,31 +385,16 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     } catch (error) {
       console.error('Checkout error:', error);
-      setToastMessage(error.message || 'An error occurred while processing your order.');
+      showToast(error.message || 'An error occurred while processing your order.', 'error');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleToggleDetails = () => {
-    if (!isDetailsOpen) {
-      setIsDetailsOpen(true);
-      setIsDiscountsOpen(false); 
-    } else {
-      setIsDetailsOpen(false);
-    }
-  };
-
   const handleToggleDiscounts = () => {
-    if (!isDiscountsOpen) {
-      setIsDiscountsOpen(true);
-      setIsDetailsOpen(false); 
-    } else {
-      setIsDiscountsOpen(false);
-    }
+    setIsDiscountsOpen(s => !s);
   };
 
-  const isBuyNow = orderType === 'Buy Now';
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   const percentageNumber = Number(discountPercentage) || 0;
   const discountAmount = subtotal * (percentageNumber / 100);
@@ -561,10 +404,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   return (
     <>
-      {limitToast && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
-          <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
-          <span className="leading-snug">{limitToast.message}</span>
+      {toast && (
+        <div
+          className={`fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200 ${
+            toast.type === 'error' ? 'bg-red-600' : toast.type === 'success' ? 'bg-[#15803D]' : 'bg-[#3B1F0A]'
+          }`}
+        >
+          <span className="w-2 h-2 rounded-full bg-white/70 shrink-0" />
+          <span className="leading-snug">{toast.message}</span>
         </div>
       )}
 
@@ -630,157 +477,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
-          <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
-            <button 
-              onClick={handleToggleDetails}
-              className="w-full flex items-center justify-between px-5 py-3 hover:bg-[#F5EFEB] transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <User size={14} className="text-[#8A7264]" />
-                <span className="text-xs font-semibold text-[#8A7264]">
-                  Customer Details
-                  {isBuyNow ? (
-                    <span className="text-[#B7A99F] font-normal ml-1">· Optional</span>
-                  ) : (
-                    <span className="text-red-500 font-normal ml-1">· Required</span>
-                  )}
-                </span>
-              </div>
-              {isDetailsOpen ? <ChevronUp size={16} className="text-[#8A7264]" /> : <ChevronDown size={16} className="text-[#8A7264]" />}
-            </button>
-
-            {isDetailsOpen && (
-              <div className="px-5 pb-4 flex flex-col gap-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <input 
-                      type="text" 
-                      placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
-                      value={form.name}
-                      onChange={e => setForm({...form, name: e.target.value})}
-                      className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white" 
-                    />
-                  </div>
-                  <div>
-                    <input 
-                      type="text" 
-                      placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
-                      maxLength="11"
-                      value={form.phone}
-                      onChange={e => setForm({...form, phone: e.target.value.replace(/\D/g, '')})}
-                      className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white" 
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <input 
-                    type="text" 
-                    placeholder="Alternative Phone (Optional)" 
-                    maxLength="11"
-                    value={form.altPhone}
-                    onChange={e => setForm({...form, altPhone: e.target.value.replace(/\D/g, '')})}
-                    className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white" 
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="relative" ref={calendarWrapRef}>
-                    {orderType === 'Buy Now' ? (
-                      <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <Lock size={12} className="shrink-0" />
-                          <span className="truncate">{formatDateLong(getLiveNow().dateStr)} (Today)</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          ref={calendarTriggerRef}
-                          onClick={() => (showCalendar ? setShowCalendar(false) : openCalendar())}
-                          className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
-                        >
-                          <span className={form.pickupDate ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
-                            {form.pickupDate ? formatDateLong(form.pickupDate) : 'Pick-up Date *'}
-                          </span>
-                          <CalendarIcon size={14} className="text-[#8A7264] shrink-0 ml-1" />
-                        </button>
-                        {showCalendar && calendarPos && createPortal(
-                          <div ref={calendarPortalRef}>
-                            <MonthCalendar
-                              selectedDate={form.pickupDate}
-                              minDate={minPreOrderDate}
-                              todayDate={getLiveNow().dateStr}
-                              style={calendarPos}
-                              onSelect={(dateStr) => setForm(f => ({...f, pickupDate: dateStr}))}
-                              onClose={() => setShowCalendar(false)}
-                            />
-                          </div>,
-                          document.body
-                        )}
-                      </>
-                    )}
-                  </div>
-                  
-                  <div className="relative" ref={timeDropdownRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowTimeDropdown(s => !s)}
-                      className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
-                    >
-                      <span className="flex items-center gap-2 truncate">
-                        <Clock size={13} className="text-[#8A7264] shrink-0" />
-                        <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : 'Pick-up Time *'}</span>
-                      </span>
-                      <ChevronDown
-                        size={14}
-                        className={`text-[#8A7264] shrink-0 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
-                      />
-                    </button>
-
-                    {showTimeDropdown && (
-                      <div className="absolute z-30 top-full left-0 right-0 mt-1.5 bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden">
-                        <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
-                          {TIME_SLOTS.map(slot => {
-                            const disabled = isSlotDisabled(slot);
-                            const selected = form.pickupTime === slot.value;
-                            return (
-                              <li key={slot.value}>
-                                <button
-                                  type="button"
-                                  disabled={disabled}
-                                  onClick={() => {
-                                    setForm(f => ({ ...f, pickupTime: slot.value }));
-                                    setShowTimeDropdown(false);
-                                  }}
-                                  className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
-                                    disabled
-                                      ? 'text-[#C9BEB6] cursor-not-allowed'
-                                      : selected
-                                      ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
-                                      : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
-                                  }`}
-                                >
-                                  <span>{slot.label}</span>
-                                  {disabled ? (
-                                    <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
-                                  ) : selected ? (
-                                    <Check size={13} className="text-[#5A453C] shrink-0" />
-                                  ) : null}
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
           <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
             <button 
               onClick={handleToggleDiscounts}
@@ -930,27 +626,24 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5 mt-2 pt-3 border-t border-[#EAE4E0] mb-3">
-            <div>
-              <span className="text-[11px] font-semibold text-[#3B1F0A] block mb-1.5">Payment Mode</span>
-              <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
-                {['Full Payment', '50% Deposit'].map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setPaymentMode(mode)}
-                    className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
-                      paymentMode === mode ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
+          <div className="flex items-center justify-between gap-3 mt-2 pt-3 border-t border-[#EAE4E0] mb-3">
+            <div className="flex bg-[#F5EFEB] rounded-lg p-1 gap-1 shrink-0">
+              {['Full Payment', '50% Deposit'].map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setPaymentMode(mode)}
+                  className={`px-3 py-2 text-[11px] font-semibold rounded-md whitespace-nowrap transition-colors ${
+                    paymentMode === mode ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
+                  }`}
+                >
+                  {mode === '50% Deposit' ? '50% Deposit' : 'Full Payment'}
+                </button>
+              ))}
             </div>
-            
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[#3B1F0A]">Amount Due</span>
-              <span className="font-serif text-xl text-[#3B1F0A] font-semibold">₱{amountDue.toLocaleString()}</span>
+
+            <div className="flex flex-col items-end gap-0 min-w-0">
+              <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">Amount Due</span>
+              <span className="font-serif text-lg text-[#3B1F0A] font-semibold truncate">₱{amountDue.toLocaleString()}</span>
             </div>
           </div>
 
@@ -959,217 +652,30 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             disabled={cart.length === 0 || isProcessing}
             className="w-full bg-[#3B1F0A] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
           >
-            Review Order
+            Continue
           </button>
         </div>
 
-        {showSummaryModal && createPortal(
-          <div className="fixed inset-0 z-[1900] flex items-center justify-center bg-black/50 px-4 py-6">
-            <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] max-h-[90vh] flex flex-col overflow-hidden">
-              <div className="p-4 pb-3 sm:p-5 sm:pb-4 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
-                <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
-                  <Receipt size={14} />
-                </div>
-                <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
-              </div>
-
-              {/* Scrollable Body: Order Details + Items.
-                  FIX (mobile): dati, ang Payment + Action Buttons ay NASA LOOB ng Right
-                  Column (kasama ng Items), at ang Left Column (Order Details) ay may
-                  sarili ring `overflow-y-auto`. Sa mobile (naka-stack ang mga columns
-                  pababa dahil `flex-col`), kapag mahaba ang Order Details + Items, wala
-                  nang natitirang space ang Place Order/Back buttons sa ilalim ng flex-1
-                  na Right Column — at dahil `overflow-hidden` ang parent, basta NAWAWALA
-                  na lang sila (hindi man lang ma-scroll papunta doon). Ginawa na lang
-                  natin itong buong Order Details + Items na IISANG unified scroll area sa
-                  mobile (may sarili pa ring per-column scroll sa md+/desktop), at inilabas
-                  natin ang Payment + Buttons bilang hiwalay, laging-nakikitang footer sa
-                  ibaba (see closing tags) — kaya garantisadong visible na ito lagi, kahit
-                  gaano pa kahaba ang laman sa itaas. Parehong pattern gaya ng Checkout.jsx. */}
-              <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden overscroll-contain scrollbar-thin">
-                <div className="w-full md:w-[260px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 md:overflow-y-auto scrollbar-thin">
-                  <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
-                  <div className="flex flex-col gap-2.5 text-xs">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[#B7A99F]">Order Type</span>
-                      <span className="text-[#3B1F0A] font-semibold">{orderType}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[#B7A99F]">Name</span>
-                      <span className="text-[#3B1F0A] font-semibold">{form.name || '—'}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[#B7A99F]">Contact</span>
-                      <span className="text-[#3B1F0A] font-semibold">{form.phone || '—'}</span>
-                    </div>
-                    {form.altPhone && (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[#B7A99F]">Alt Contact</span>
-                        <span className="text-[#3B1F0A] font-semibold">{form.altPhone}</span>
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[#B7A99F]">Date &amp; Time</span>
-                      <span className="text-[#3B1F0A] font-semibold">
-                        {form.pickupDate ? formatDateLong(form.pickupDate) : '—'}
-                        {form.pickupTime && <><br />{getSlotLabel(form.pickupTime)}</>}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex-1 min-w-0 bg-white p-4 sm:p-5 md:overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
-                    <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
-
-                    {cart.map((item, i) => (
-                      <div key={i} className="flex gap-3.5 pb-3.5 border-b border-[#F1EBE6] last:border-0 last:pb-0">
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-[#F5EFEB] rounded-xl border border-[#EAE4E0] overflow-hidden flex items-center justify-center">
-                          {item.image_url ? (
-                            <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-[#B7A99F] text-[10px]">No Image</span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1 flex flex-col">
-                          <div className="flex justify-between items-start gap-2 mb-1">
-                            <p className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
-                            <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
-                          </div>
-
-                          {item.selected_price_options && Object.entries(item.selected_price_options).map(([label, value]) => (
-                            <p key={`sum-opt-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                              <span className="font-medium">{label}:</span> {value}
-                            </p>
-                          ))}
-
-                          {item.type === 'bundle' && item.order_slip_details ? (
-                            Object.entries(item.order_slip_details).map(([prodId, answers]) => {
-                              const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                              return Object.entries(answers).map(([label, value]) => (
-                                <p key={`sum-slip-${prodId}-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                  <span className="font-medium">{pName}</span> - {label}: {value}
-                                </p>
-                              ));
-                            })
-                          ) : (
-                            item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
-                              <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                <span className="font-medium">{label}:</span> {value}
-                              </p>
-                            ))
-                          )}
-
-                          {item.inspiration_image && (
-                            <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug">
-                              {item.type === 'bundle'
-                                ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
-                                : 'Image Attached'}
-                            </p>
-                          )}
-
-                          {item.details && (
-                            <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-              {/* End of scrollable body (Order Details + Items) */}
-
-              {/* Fixed Payment Section — hiwalay na footer ng buong modal (sibling ng
-                  scrollable body sa itaas), hindi na nested sa loob ng Right Column.
-                  `shrink-0` ito kaya hindi ito sinisiksik/nawawala kahit gaano pa
-                  kahaba ang Order Details o Items list — palaging visible ang
-                  Back/Place Order. */}
-              <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
-                <div className="mb-4">
-                  {discountAmount > 0 && (
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-[#8A7264]">Subtotal</span>
-                      <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
-                    </div>
-                  )}
-                  {discountAmount > 0 && (
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
-                      <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
-                    </div>
-                  )}
-                  {chargeAmount > 0 && (
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-red-500">Additional Charge</span>
-                      <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
-                    </div>
-                  )}
-
-                  {paymentMode === '50% Deposit' ? (
-                    <>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
-                      </div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                        <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
-                      </div>
-                      <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
-                      </div>
-                      <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                    </>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                    <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2.5">
-                  <button
-                    onClick={() => setShowSummaryModal(false)}
-                    disabled={isProcessing}
-                    className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={handlePlaceOrder}
-                    disabled={isProcessing}
-                    className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isProcessing ? 'Processing...' : 'Place Order'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-        {toastMessage && createPortal(
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 px-4">
-            <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-xl p-5 sm:p-6 w-full max-w-[320px] flex flex-col items-center text-center">
-              <div className="w-12 h-12 rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
-                <AlertCircle size={24} />
-              </div>
-              <p className="text-sm font-semibold text-[#3B1F0A] mb-6">{toastMessage}</p>
-              <button
-                onClick={() => setToastMessage(null)}
-                className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] transition-colors"
-              >
-                Okay
-              </button>
-            </div>
-          </div>,
-          document.body
-        )}
+        <OrderSummaryModal
+          show={showSummaryModal}
+          onBack={() => setShowSummaryModal(false)}
+          cart={cart}
+          orderType={orderType}
+          form={form}
+          setForm={setForm}
+          minPreOrderDate={minPreOrderDate}
+          paymentMode={paymentMode}
+          discountName={discountName}
+          percentageNumber={percentageNumber}
+          discountAmount={discountAmount}
+          chargeAmount={chargeAmount}
+          subtotal={subtotal}
+          cartTotal={cartTotal}
+          amountDue={amountDue}
+          isProcessing={isProcessing}
+          onPlaceOrder={handlePlaceOrder}
+          onValidate={validateOrderForm}
+        />
 
         {ereceiptData && createPortal(
           <PosEReceipt

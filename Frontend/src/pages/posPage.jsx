@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import PosMenu from '../components/pos/posMenu';
 import PosCart from '../components/pos/posCart';
@@ -46,7 +46,28 @@ async function fetchPosProducts(force = false) {
   return posProductsPromise;
 }
 
+// FIX (toast): dating gumagamit ng native `alert()` ang pag-load ng
+// products ("Could not load products...") — ito yung browser popup na
+// nagpapakita ng "localhost says". Pinalitan ito ng isang simpleng,
+// LOCAL na toast bar (walang hiwalay/bagong file, walang backdrop/
+// overlay — hindi ito modal, isa lamang maliit na banner na
+// nawawala mag-isa) dito mismo sa loob ng component.
 export default function PosPage() {
+  const [toast, setToast] = useState(null); // { message, type }
+  const toastTimerRef = useRef(null);
+
+  const showToast = (message, type = 'error') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ message, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 3200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   // 1. Initialized mula sa Local Storage
   const [cart, setCart] = useState(() => {
     const savedCart = localStorage.getItem('pos_cart');
@@ -99,7 +120,7 @@ export default function PosPage() {
       setProducts(normalized);
     } catch (error) {
       console.error('Error fetching POS products:', error);
-      alert('Could not load products. Please check your connection.');
+      showToast('Could not load products. Please check your connection.', 'error');
     } finally {
       setLoading(false);
     }
@@ -234,6 +255,20 @@ export default function PosPage() {
           onClose={() => setSlipModalItem(null)} 
           onConfirm={handleAddToCart} 
         />
+      )}
+
+      {/* Simpleng, non-blocking na toast bar — hindi modal, walang backdrop,
+          nawawala mag-isa. Ito ang humahalili sa dating native alert() ng
+          "Could not load products..." */}
+      {toast && (
+        <div
+          className={`fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200 ${
+            toast.type === 'error' ? 'bg-red-600' : toast.type === 'success' ? 'bg-[#15803D]' : 'bg-[#3B1F0A]'
+          }`}
+        >
+          <span className="w-2 h-2 rounded-full bg-white/70 shrink-0" />
+          <span className="leading-snug">{toast.message}</span>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { Lightbulb, Loader2 } from 'lucide-react';
+import { Loader2, CalendarRange, Clock } from 'lucide-react';
 
 // ============================================================
 // Ang component na ito ay pure presentational na. 
@@ -15,15 +15,15 @@ const EMPTY_SUMMARY = {
 // at i-render bilang <span className="font-semibold">
 function renderTextWithBold(text) {
   if (!text) return null;
-  
+
   // Hahatiin natin ang text kung nasaan ang mga **
   const parts = text.split(/(\*\*.*?\*\*)/g);
-  
+
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       // Tinatanggal natin yung literal na "**" para i-render ang text sa loob
       return (
-        <span key={i} className="font-semibold text-[#3d2410]">
+        <span key={i} className="font-bold text-brand-900">
           {part.slice(2, -2)}
         </span>
       );
@@ -35,56 +35,57 @@ function renderTextWithBold(text) {
 export default function Summary({ data, isLoading, error }) {
   const resolvedData = data ?? EMPTY_SUMMARY;
   const hasData = Boolean(resolvedData.summaryText) || (resolvedData.topProducts || []).length > 0;
-
-  // Formatting lang para ilista ang top products na binigay ng backend
-  const topProductsText = (resolvedData.topProducts || [])
-    .map((p, i, arr) => {
-      const label = `${p.name} (${p.qty} pcs)`;
-      if (i === 0) return label;
-      if (i === arr.length - 1) return `at ${label}`;
-      return label;
-    })
-    .join(', ');
+  const topProducts = resolvedData.topProducts || [];
 
   return (
-    <div className="w-full p-4 sm:p-5 bg-white border border-[#e7ded4] rounded-xl flex flex-col">
-      <div className="mb-4 flex items-center gap-2 shrink-0">
-        <Lightbulb size={18} className="text-[#5C3317] shrink-0" />
-        <div className="min-w-0">
-          <h3 className="text-sm font-bold text-[#3d2410] truncate">Performance Summary</h3>
+    <div className="relative w-full p-4 sm:p-5 bg-white rounded-xl flex flex-col overflow-hidden shadow-sm">
+      <div className="mb-4 flex items-center justify-between gap-2 shrink-0 pt-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center shrink-0">
+            <CalendarRange size={16} className="text-brand-600" />
+          </div>
+          <h3 className="text-sm font-bold text-brand-800 truncate">Weekly Performance Summary</h3>
         </div>
+        <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-brand-50 text-brand-600 text-[10px] font-bold uppercase tracking-wider">
+          <Clock size={11} />
+          Last 7 days
+        </span>
       </div>
 
       {isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-[#8a7a68]">
+        <div className="flex items-center gap-2 text-sm text-brand-400">
           <Loader2 size={16} className="animate-spin" />
           <span>Loading performance summary...</span>
         </div>
       ) : error ? (
-        <div className="flex-1 min-h-[140px] flex items-center justify-center rounded-lg border border-dashed border-[#e7c9c9] bg-[#fdfaf9] px-4 py-8">
-          <p className="text-sm text-[#c17b83] text-center">
+        <div className="flex-1 min-h-[140px] flex items-center justify-center rounded-lg bg-brand-50/50 px-4 py-8">
+          <p className="text-sm text-brand-400 text-center">
             Unable to load the performance summary right now. Please try again later.
           </p>
         </div>
       ) : !hasData ? (
-        <div className="flex-1 min-h-[140px] flex items-center justify-center rounded-lg border border-dashed border-[#e7c9c9] bg-[#fdfaf9] px-4 py-8">
-          <p className="text-sm text-[#c17b83] text-center">
+        <div className="flex-1 min-h-[140px] flex items-center justify-center rounded-lg bg-brand-50/50 px-4 py-8">
+          <p className="text-sm text-brand-400 text-center">
             No performance summary data available for this timeframe
           </p>
         </div>
       ) : (
-        <p className="text-sm leading-relaxed text-[#5b4636]">
-          {/* I-render ang text from AI, tas isunod ang formatted Top Products */}
-          {renderTextWithBold(resolvedData.summaryText)}
-          
-          {topProductsText && (
-            <>
-              {' Nanguna sa benta sa nakalipas na linggo ang '}
-              <span className="font-semibold text-[#3d2410]">{topProductsText}</span>
-              {'.'}
-            </>
-          )}
-        </p>
+        <div className="flex-1 flex flex-col gap-3.5">
+          <div className="bg-brand-50/30 border border-brand-100 rounded-lg p-4">
+            <p className="text-sm leading-relaxed text-brand-700">
+              {renderTextWithBold(resolvedData.summaryText)}
+              
+              {/* Pinagsama ang top products sa iisang paragraph */}
+              {topProducts.length > 0 && (
+                <>
+                  {' '}
+                  <span className="font-bold text-brand-900">Top products this week:</span>{' '}
+                  {topProducts.map((p) => `${p.name} (${p.qty} pcs)`).join(', ')}.
+                </>
+              )}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );
