@@ -140,27 +140,45 @@ export default function AnalyticsPage() {
           <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} height={180} />
         </div>
 
-        {/* Weekly Summary — sariling row, buong lapad. Wala nang loading damay effect */}
-        <Summary data={analyticsData?.summary} isLoading={isSummaryLoading} />
-
+        {/* AI-Driven Insights Section */}
+        {/* Adjusted gap-8 to gap-5 for tighter spacing[cite: 1] */}
         <div className="mt-4 pt-6 border-t border-[#e7ded4] flex flex-col gap-5 w-full">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full">
-            <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">Forecast & Recommendations</h2>
-            <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
+          <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">AI-Driven Insights</h2>
+
+          {/* Summarization Sub-section */}
+          {/* Adjusted gap-3 to gap-2[cite: 1] */}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Summarization</h3>
+            <Summary data={analyticsData?.summary} isLoading={isSummaryLoading} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 w-full items-stretch">
-            <SalesForecast 
-              view={forecastTimeframe} 
-              data={analyticsData?.salesForecast} 
-              insufficientData={analyticsData?.salesInsufficient}
-              message={analyticsData?.salesMessage}
-            />
-            <ProductForecasting view={forecastTimeframe} data={analyticsData?.productForecast} />
+          {/* Forecasting Sub-section (Wrapped Together) */}
+          {/* Adjusted p-5 to p-4, gap-4 to gap-3[cite: 1] */}
+          <div className="flex flex-col gap-3 bg-[#fdfbf9] p-4 rounded-xl border border-[#e7ded4]">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full mb-1">
+              <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Forecasting</h3>
+              <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
+            </div>
+            
+            {/* Adjusted gap-6 to gap-4[cite: 1] */}
+            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 w-full items-stretch">
+              <SalesForecast 
+                view={forecastTimeframe} 
+                data={analyticsData?.salesForecast} 
+                insufficientData={analyticsData?.salesInsufficient}
+                message={analyticsData?.salesMessage}
+              />
+              <ProductForecasting view={forecastTimeframe} data={analyticsData?.productForecast} />
+            </div>
           </div>
           
-          <div className="w-full">
-            <ActionableRecommendation recommendations={analyticsData?.recommendations} />
+          {/* Decision Support Sub-section */}
+          {/* Adjusted gap-3 to gap-2[cite: 1] */}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Decision Support Insights</h3>
+            <div className="w-full">
+              <ActionableRecommendation recommendations={analyticsData?.recommendations} />
+            </div>
           </div>
         </div>
       </div>

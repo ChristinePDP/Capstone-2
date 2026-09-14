@@ -1,5 +1,4 @@
 import {
-  Sparkles,
   TrendingUp,
   PackagePlus,
 } from 'lucide-react';
@@ -102,17 +101,9 @@ export default function ActionableRecommendation({ recommendations = {} }) {
   const dataByKey = { salesOptimization, inventoryOptimization };
 
   return (
-    <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full">
-      {/* Header — same sizing/spacing language as the rest of the dashboard */}
-      <div className="flex items-center gap-2 mb-6 shrink-0">
-        <Sparkles size={20} className="text-[#5C3317]" />
-        <div>
-          <h3 className="text-base font-bold text-[#3d2410]">Actionable Recommendations</h3>
-          <p className="text-sm text-[#5C3317]">AI-Driven Decision Support System</p>
-        </div>
-      </div>
-
-      {/* One row on desktop, stacked (2 rows) on mobile */}
+    // Binago ang bg-white to bg-[#fdfbf9], p-5 to p-4, at tinanggal ang shadow-sm para pumantay sa Forecasting wrapper[cite: 2]
+    <div className="w-full p-4 bg-[#fdfbf9] border border-[#e7ded4] rounded-xl flex flex-col h-full">
+      {/* One row on desktop, stacked (2 rows) on mobile[cite: 2] */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
         {SECTIONS.map((section) => (
           <Note key={section.key} section={section} items={dataByKey[section.key]} />

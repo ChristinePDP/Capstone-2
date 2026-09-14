@@ -1325,6 +1325,7 @@ CRITICAL RULES:
 4. HIGHLIGHT key figures by wrapping them in double asterisks so they become bold (e.g. **₱5,000**).
 5. Do NOT alter any numeric value.
 6. Preserve the exact topProducts array in the JSON response.
+7. You MUST explicitly state in your opening sentence that this analysis covers the "past 7 days" (or "this week"). This is a strict requirement so the reader immediately understands the exact timeframe being summarized, regardless of any other filters on their dashboard.
 
 Respond with ONLY valid JSON strictly following this exact shape:
 {
