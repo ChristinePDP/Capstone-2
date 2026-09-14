@@ -383,14 +383,22 @@ async function getPreviousRecommendationTitles(cacheKey) {
 // whichever horizon(s) ARE ready; if neither is ready, the caller must
 // no-op entirely instead of silently falling back to past data only.
 async function getForecastAvailability() {
-  const [sales30Cached, sales7Cached, productCombinedCached] = await Promise.all([
-    AiCacheModel.getByKey(buildSalesCacheKey("30d")),
-    AiCacheModel.getByKey(buildSalesCacheKey("7d")),
+  // Route sales data through the SAME precedence/derivation logic the
+  // dashboard reads use (getSalesForecastRead) instead of reading the
+  // raw sales_forecast:7d cache key directly. That raw 7d key is
+  // deliberately left untouched by refreshSalesForecast() whenever the
+  // 30d horizon is authoritative (see the note there) — so a direct
+  // read of it can silently return a stale snapshot from a much earlier
+  // run, even though it still "looks ready" (insufficientData === false,
+  // has chartData). Going through getSalesForecastRead guarantees this
+  // reasons over EXACTLY the same sales numbers the dashboard shows —
+  // never a stale leftover sitting under a different key.
+  const [sales30, sales7, productCombinedCached] = await Promise.all([
+    getSalesForecastRead("30d"),
+    getSalesForecastRead("7d"),
     AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY),
   ]);
 
-  const sales30 = sales30Cached?.payload;
-  const sales7 = sales7Cached?.payload;
   const productSeven = productCombinedCached?.payload?.sevenDay;
   const productThirty = productCombinedCached?.payload?.thirtyDay;
 
@@ -1168,11 +1176,22 @@ async function refreshSalesForecast() {
       insufficientSalesPayload(resolution.thirtyDayMessage),
       SF_CACHE_TTL_MS
     );
+  } else {
+    // validTimeframe === "30d": also keep the standalone "7d" cache key
+    // in sync (sliced from this same 30d result), instead of leaving it
+    // untouched. Previously we relied entirely on read-time derivation
+    // (getSalesForecastRead / getForecastAvailability) to paper over the
+    // untouched key — but that left a visibly stale row sitting in
+    // ai_cache indefinitely, and anything reading sales_forecast:7d
+    // directly (bypassing the derivation helpers) would see old data.
+    // Writing it here means there is no stale copy left anywhere after
+    // a 30d refresh.
+    await AiCacheModel.upsert(
+      buildSalesCacheKey("7d"),
+      { chartData: finalPayload.chartData.slice(0, 7), insufficientData: finalPayload.insufficientData },
+      SF_CACHE_TTL_MS
+    );
   }
-  // NOTE: when validTimeframe === "30d" we deliberately do NOT touch the
-  // "7d" cache key — the read path below always prefers a ready 30d
-  // cache and derives 7d from it, so a stale standalone 7d cache is
-  // simply never consulted while 30d stays sufficient.
 
   return finalPayload;
 }
@@ -1288,7 +1307,7 @@ async function getSummaryContext() {
 
   // Updated: Removed the old "deltas" calculation so the AI comparison reads more naturally
   return {
-    periodInfo: "Comparing the current 7-day period (the last 7 days including today) against the prior 7-day period (the 7 days before that).",
+    periodInfo: "Comparing the current 7-day period (the past 7 days excluding today) against the prior 7-day period (the 7 days before that).",
     current: currentMetrics,
     prior: priorMetrics,
     topProducts,
@@ -1297,7 +1316,7 @@ async function getSummaryContext() {
 
 function buildSummaryPrompt(context) {
   const systemPrompt = `You are a meticulous business report analyst speaking directly to the owner of a bake shop, like a trusted advisor giving the boss a quick briefing.
-You are given ALREADY-COMPUTED figures comparing the business's current 7-day performance (the last 7 days including today) against the prior 7-day period (the 7 days before that).
+You are given ALREADY-COMPUTED figures comparing the business's current 7-day performance (the past 7 days excluding today) against the prior 7-day period (the 7 days before that).
 
 CRITICAL RULES:
 1. Write a 2 to 3 sentence executive summary in clear, simple, friendly English describing the performance. Address the reader directly as the owner (e.g. "boss", "you") — never refer to the business by a system or platform name.

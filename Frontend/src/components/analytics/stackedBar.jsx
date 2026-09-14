@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { BarChart2 } from 'lucide-react';
 
-export default function StackedBar({ period = 'Last 7 Days', height = 220, data: propData }) {
+export default function StackedBar({ period = 'Past 7 Days', height = 220, data: propData }) {
   const chartWrapRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
 

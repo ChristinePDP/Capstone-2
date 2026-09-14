@@ -74,11 +74,31 @@ const getDateRange = (period) => {
       return { startDate: phBoundaryISO(ymd, false), endDate: phBoundaryISO(ymd, true) };
     }
 
-    case 'Last 7 Days': {
-      const startCal = new Date(todayCal);
+    // "Past" presets deliberately EXCLUDE today — endDate is the end of
+    // yesterday, and startDate is exactly N days before that (so the
+    // window always contains N full, already-closed days).
+    case 'Past 7 Days': {
+      const endCal = new Date(todayCal);
+      endCal.setUTCDate(endCal.getUTCDate() - 1); // yesterday
+      const endYMD = fromCalendarDate(endCal);
+
+      const startCal = new Date(endCal);
       startCal.setUTCDate(startCal.getUTCDate() - 6);
       const startYMD = fromCalendarDate(startCal);
-      return { startDate: phBoundaryISO(startYMD, false), endDate: phBoundaryISO(todayYMD, true) };
+
+      return { startDate: phBoundaryISO(startYMD, false), endDate: phBoundaryISO(endYMD, true) };
+    }
+
+    case 'Past 30 Days': {
+      const endCal = new Date(todayCal);
+      endCal.setUTCDate(endCal.getUTCDate() - 1); // yesterday
+      const endYMD = fromCalendarDate(endCal);
+
+      const startCal = new Date(endCal);
+      startCal.setUTCDate(startCal.getUTCDate() - 29);
+      const startYMD = fromCalendarDate(startCal);
+
+      return { startDate: phBoundaryISO(startYMD, false), endDate: phBoundaryISO(endYMD, true) };
     }
 
     case 'Last Month': {

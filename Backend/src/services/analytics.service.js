@@ -122,13 +122,25 @@ async function getStackedBarByTimeframe(timeframe) {
         const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         groupedData[label] = { label, Sales: 0, Expenses: 0, sortKey: d.getTime() };
       }
-    } else if (timeframe === 'Last 7 Days') {
-      for (let i = 6; i >= 0; i--) {
+    } else if (timeframe === 'Past 7 Days' || timeframe === 'Past 30 Days') {
+      // "Past" presets exclude today, so `end` (from getDateRange) already
+      // resolves to the end of YESTERDAY — counting backward from it lands
+      // the loop's last bucket (i === 0) on yesterday, never today.
+      const numDays = timeframe === 'Past 7 Days' ? 7 : 30;
+      for (let i = numDays - 1; i >= 0; i--) {
         const d = new Date(end);
         d.setDate(d.getDate() - i);
-        const day = d.toLocaleDateString('en-US', { weekday: 'short' });
-        const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        groupedData[`${day} (${date})`] = { label: `${day} (${date})`, Sales: 0, Expenses: 0, sortKey: d.getTime() };
+
+        let label;
+        if (numDays <= 7) {
+          const day = d.toLocaleDateString('en-US', { weekday: 'short' });
+          const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          label = `${day} (${date})`;
+        } else {
+          label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        groupedData[label] = { label, Sales: 0, Expenses: 0, sortKey: d.getTime() };
       }
     } else {
       let curr = new Date(start);
@@ -150,7 +162,7 @@ async function getStackedBarByTimeframe(timeframe) {
         if (h > 17) h = 17; 
         if (h % 2 === 0) h -= 1; 
         return h === 12 ? '12 PM' : h > 12 ? `${h - 12} PM` : `${h} AM`;
-      } else if (period === 'Last 7 Days') {
+      } else if (period === 'Past 7 Days') {
         const day = d.toLocaleDateString('en-US', { weekday: 'short' });
         const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         return `${day} (${date})`;

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Filter, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 
-const PRESETS = ['Today', 'Yesterday', 'Last 7 Days', 'Last 30 Days'];
+const PRESETS = ['Today', 'Yesterday', 'Past 7 Days', 'Past 30 Days'];
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAY_LABELS = ['S','M','T','W','T','F','S'];
