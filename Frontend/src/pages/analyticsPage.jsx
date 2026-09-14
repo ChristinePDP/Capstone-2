@@ -9,15 +9,8 @@ import ProductForecasting from '../components/analytics/productForecast';
 import ActionableRecommendation from '../components/analytics/actionableRecommendation';
 import Summary from '../components/analytics/summary';
 
-// Ang Analytics endpoints ay naka-mount sa ROOT ng API bilang `/api/analytics`
-// (HINDI sa ilalim ng `/inventory`), kaya kailangan ng buong absolute URL dito
-// para ma-bypass ang `/inventory` baseURL ng `apiClient` — parehong pattern
-// gaya ng ORDERS_API_URL sa AppContext.jsx. Ginagamit pa rin ang parehong
-// `apiClient` axios instance (may withCredentials cookie auth at 401
-// auto-logout interceptor), kaya consistent na ito sa buong app.
 const ANALYTICS_API_URL = `${import.meta.env.VITE_API_URL}/analytics`;
 
-// Inilabas ang helper para magamit ng bawat useEffect nang hindi pabalik-balik ginagawa
 const safeFetch = async (url) => {
   try {
     const res = await apiClient.get(url);
@@ -31,15 +24,11 @@ const safeFetch = async (url) => {
 export default function AnalyticsPage() {
   const [perfTimeframe, setPerfTimeframe] = useState('Today');
   const [forecastTimeframe, setForecastTimeframe] = useState('30d');
-
   const [analyticsData, setAnalyticsData] = useState({});
-  
-  // Hinati ang loading states para hindi sabay-sabay naglo-load kapag isa lang ang nagbago
   const [isPerfLoading, setIsPerfLoading] = useState(true);
   const [isForecastLoading, setIsForecastLoading] = useState(true);
   const [isSummaryLoading, setIsSummaryLoading] = useState(true);
 
-  // 1. Fetch Performance Data (Nakadepende sa perfTimeframe)
   useEffect(() => {
     const fetchPerf = async () => {
       setIsPerfLoading(true);
@@ -50,7 +39,6 @@ export default function AnalyticsPage() {
       ]);
 
       const rawKpi = kpiRes.ok ? (kpiRes.data?.data || kpiRes.data) : null;
-      
       const mappedKpi = rawKpi ? {
         sales: rawKpi.totalSales || 0,
         expenses: rawKpi.totalExpenses || 0,
@@ -76,7 +64,6 @@ export default function AnalyticsPage() {
     fetchPerf();
   }, [perfTimeframe]);
 
-  // 2. Fetch Forecast Data (Nakadepende sa forecastTimeframe)
   useEffect(() => {
     const fetchForecast = async () => {
       setIsForecastLoading(true);
@@ -104,7 +91,6 @@ export default function AnalyticsPage() {
     fetchForecast();
   }, [forecastTimeframe]);
 
-  // 3. Fetch Summary Data (Isang beses lang maglo-load dahil fixed naman)
   useEffect(() => {
     const fetchSummary = async () => {
       setIsSummaryLoading(true);
@@ -119,49 +105,39 @@ export default function AnalyticsPage() {
     };
     
     fetchSummary();
-  }, []); // Empty array kaya hindi mauulit kapag nagpalit ng timeframe
+  }, []); 
 
   return (
-    <div className="space-y-6 overflow-x-hidden w-full max-w-full">
-      <div className="flex flex-col gap-5 w-full">
+    <div className="overflow-x-hidden w-full max-w-full">
+      <div className="flex flex-col gap-4 sm:gap-5 w-full">
+        
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full">
           <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">Business Performance</h2>
           <PerformanceTimeframe value={perfTimeframe} onChange={setPerfTimeframe} />
         </div>
 
-        {/* KPI grid (2x2) sa kaliwa, StackedBar sa kanan. 
-            Tumaas ng kaunti ang height ng StackedBar (mula 140 naging 180) 
-            dahil naka-stretch ang parent container nila, sasabay din 
-            lumaki ang KPI grid para pumantay. */}
-        <div className="grid grid-cols-1 lg:grid-cols-[440px_1fr] gap-4 sm:gap-5 w-full items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-[440px_1fr] gap-3 sm:gap-5 w-full lg:items-stretch">
           <div className="h-full w-full">
             <PerformanceKpis kpi={analyticsData?.kpi} isLoading={isPerfLoading} />
           </div>
           <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} height={180} />
         </div>
 
-        {/* AI-Driven Insights Section */}
-        {/* Adjusted gap-8 to gap-5 for tighter spacing[cite: 1] */}
-        <div className="mt-4 pt-6 border-t border-[#e7ded4] flex flex-col gap-5 w-full">
+        <div className="pt-4 sm:pt-6 border-t border-[#e7ded4] flex flex-col gap-4 sm:gap-5 w-full">
           <h2 className="text-base sm:text-xl font-bold text-[#3d2410] min-w-0">AI-Driven Insights</h2>
 
-          {/* Summarization Sub-section */}
-          {/* Adjusted gap-3 to gap-2[cite: 1] */}
           <div className="flex flex-col gap-2">
             <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Summarization</h3>
             <Summary data={analyticsData?.summary} isLoading={isSummaryLoading} />
           </div>
 
-          {/* Forecasting Sub-section (Wrapped Together) */}
-          {/* Adjusted p-5 to p-4, gap-4 to gap-3[cite: 1] */}
-          <div className="flex flex-col gap-3 bg-[#fdfbf9] p-4 rounded-xl border border-[#e7ded4]">
+          <div className="flex flex-col gap-3 bg-[#fdfbf9] p-3 sm:p-4 rounded-xl border border-[#e7ded4]">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full mb-1">
               <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Forecasting</h3>
               <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
             </div>
             
-            {/* Adjusted gap-6 to gap-4[cite: 1] */}
-            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 w-full items-stretch">
+            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3 sm:gap-4 w-full lg:items-stretch">
               <SalesForecast 
                 view={forecastTimeframe} 
                 data={analyticsData?.salesForecast} 
@@ -172,14 +148,13 @@ export default function AnalyticsPage() {
             </div>
           </div>
           
-          {/* Decision Support Sub-section */}
-          {/* Adjusted gap-3 to gap-2[cite: 1] */}
           <div className="flex flex-col gap-2">
             <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Decision Support Insights</h3>
             <div className="w-full">
               <ActionableRecommendation recommendations={analyticsData?.recommendations} />
             </div>
           </div>
+
         </div>
       </div>
     </div>
