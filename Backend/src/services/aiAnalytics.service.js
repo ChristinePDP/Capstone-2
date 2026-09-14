@@ -7,6 +7,7 @@ import { RecipeModel } from "../model/recipe.model.js";
 
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { getLookbackDateRange } from "../utils/analytics/ForecastTimeframe.utils.js";
+import { getDateRange } from "../utils/analytics/PerformancetTimeframeHelper.utils.js";
 
 const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 
@@ -1290,9 +1291,19 @@ async function getTopProductsForRange(startDate, endDate, limit = PS_TOP_PRODUCT
 }
 
 async function getSummaryContext() {
-  const { startDate: currentStart, endDate: currentEnd } = getLookbackDateRange(PS_PERIOD_DAYS);
-  const { startDate: priorStart } = getLookbackDateRange(PS_PERIOD_DAYS * 2);
-  const priorEnd = currentStart;
+  // 1. Fetch current boundaries exactly how the KPI does
+  const { startDate: currentStart, endDate: currentEnd } = getDateRange('Past 7 Days');
+  
+  // 2. Calculate prior boundaries using the exact same duration math as FourKpiService
+  const start = new Date(currentStart);
+  const end = new Date(currentEnd);
+  const duration = end.getTime() - start.getTime(); 
+  
+  const priorEndDate = new Date(start.getTime() - 1); 
+  const priorStartDate = new Date(start.getTime() - duration);
+
+  const priorStart = priorStartDate.toISOString();
+  const priorEnd = priorEndDate.toISOString();
 
   const [currentOrders, currentInventoryLogs, priorOrders, priorInventoryLogs, topProducts] = await Promise.all([
     OrdersModel.getByDateRange(currentStart, currentEnd, { columns: "grand_total, created_at", excludeCancelled: true }),
@@ -1305,7 +1316,6 @@ async function getSummaryContext() {
   const currentMetrics = sumSalesAndExpenses(currentOrders, currentInventoryLogs);
   const priorMetrics = sumSalesAndExpenses(priorOrders, priorInventoryLogs);
 
-  // Updated: Removed the old "deltas" calculation so the AI comparison reads more naturally
   return {
     periodInfo: "Comparing the current 7-day period (the past 7 days excluding today) against the prior 7-day period (the 7 days before that).",
     current: currentMetrics,
