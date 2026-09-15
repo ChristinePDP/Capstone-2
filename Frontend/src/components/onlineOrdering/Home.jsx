@@ -412,24 +412,8 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
       </button>
 
       {hasOverflow && (
-        <div className="flex sm:hidden justify-center items-center gap-4 mt-2">
-          <button
-            onClick={() => scrollByAmount(-1)}
-            disabled={atStart}
-            aria-label="Previous bundles"
-            className="w-9 h-9 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all"
-          >
-            <ChevronLeft size={16} />
-          </button>
+        <div className="flex sm:hidden justify-center items-center mt-2">
           <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#8A7264]">Swipe for more</span>
-          <button
-            onClick={() => scrollByAmount(1)}
-            disabled={atEnd}
-            aria-label="Next bundles"
-            className="w-9 h-9 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md disabled:opacity-30 transition-all"
-          >
-            <ChevronRight size={16} />
-          </button>
         </div>
       )}
     </div>

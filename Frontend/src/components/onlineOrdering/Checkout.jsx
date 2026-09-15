@@ -657,7 +657,7 @@ if (data.success && data.checkoutUrl) {
                           </div>
                       </div>
 
-                      <div className="mb-4 pb-6 invisible pointer-events-none select-none" aria-hidden="true">
+                      <div className="hidden lg:block mb-4 pb-6 invisible pointer-events-none select-none" aria-hidden="true">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
                           <input
                             type="text"
