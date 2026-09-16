@@ -7,8 +7,18 @@ import { getDateRange } from "../utils/analytics/PerformancetTimeframeHelper.uti
 // ==========================================
 // 1. FOUR KPI SERVICE
 // ==========================================
+// FIX: "Total Sales" dapat ang aktwal na PERANG NATANGGAP (amount_paid), HINDI
+// ang buong committed value ng order (grand_total). Bago ito, ang isang
+// Confirmed order na 50% Deposit pa lang ang bayad ay nabibilang na agad na
+// BUONG grand_total sa "Sales" — kaya laging mismatch ang dashboard laban sa
+// aktwal na laman ng `orders` table sa DB (halimbawa: grand_total 5000 pero
+// amount_paid pa lang 2500 habang naka-Confirmed). Ngayon, ang binibilang ay
+// eksaktong kung magkano na ang natanggap na bayad sa oras na iyon — deposit
+// lang habang Confirmed/Ready, buo na kapag Completed (pagkatapos ng
+// balance-settlement fix sa orders.model.js/orders.service.js/pos.service.js/
+// onlineOrdering.service.js).
 function calculateMetrics(orders, inventoryLogs) {
-  const totalSales = (orders || []).reduce((sum, order) => sum + Number(order.grand_total || 0), 0);
+  const totalSales = (orders || []).reduce((sum, order) => sum + Number(order.amount_paid || 0), 0);
   const totalExpenses = (inventoryLogs || []).reduce((sum, log) => {
     if (log.transaction_type === 'IN') return sum + Number(log.cost || 0);
     return sum;
@@ -44,9 +54,9 @@ async function getKpiByTimeframe(timeframe) {
     const priorEndStr = formatDateForDB(priorEndDate);
 
     const [currentOrders, currentInventoryLogs, priorOrders, priorInventoryLogs] = await Promise.all([
-      OrdersModel.getByDateRange(startDate, endDate, { columns: "grand_total, status, created_at", excludeCancelled: true }),
+      OrdersModel.getByDateRange(startDate, endDate, { columns: "amount_paid, status, created_at", excludeCancelled: true }),
       InventoryLogsModel.getByDateRange(startDate, endDate),
-      OrdersModel.getByDateRange(priorStartStr, priorEndStr, { columns: "grand_total, status, created_at", excludeCancelled: true }),
+      OrdersModel.getByDateRange(priorStartStr, priorEndStr, { columns: "amount_paid, status, created_at", excludeCancelled: true }),
       InventoryLogsModel.getByDateRange(priorStartStr, priorEndStr)
     ]);
 
@@ -82,7 +92,7 @@ async function getStackedBarByTimeframe(timeframe) {
     const { startDate, endDate } = getDateRange(timeframe);
 
     const [orders, inventoryLogs] = await Promise.all([
-      OrdersModel.getByDateRange(startDate, endDate, { columns: "grand_total, status, updated_at", excludeCancelled: true, ascending: true }),
+      OrdersModel.getByDateRange(startDate, endDate, { columns: "amount_paid, status, updated_at", excludeCancelled: true, ascending: true }),
       InventoryLogsModel.getByDateRange(startDate, endDate, { ascending: true })
     ]);
 
@@ -181,7 +191,9 @@ async function getStackedBarByTimeframe(timeframe) {
 
       if (groupedData[label]) {
         if (type === 'sales') {
-          groupedData[label].Sales += Number(item.grand_total || 0);
+          // FIX: amount_paid (aktwal na natanggap), hindi grand_total —
+          // same rationale gaya ng sa calculateMetrics sa itaas.
+          groupedData[label].Sales += Number(item.amount_paid || 0);
         } else if (type === 'expenses') {
           if (item.transaction_type === 'IN') {
             groupedData[label].Expenses += Number(item.cost || 0);

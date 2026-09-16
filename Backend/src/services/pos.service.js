@@ -31,6 +31,28 @@ const getStockLimitField = (product) => {
   return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
 };
 
+// I-deduct ang stock ng bawat item ng isang order. Ginagamit ito ng
+// createPosOrder (kapag Buy Now, fully paid, walk-out agad) at ng
+// confirmPosOrderPickup (kapag na-scan ang e-receipt QR sa pickup counter)
+// — pareho itong "completion" moments, kaya dapat parehong logic ang
+// tumatakbo.
+async function deductStockForOrderItems(items) {
+  for (const item of items) {
+    if (!item.product_id) continue;
+    try {
+      const product = await ProductModel.findById(item.product_id);
+      if (product) {
+        const limitField = getStockLimitField(product);
+        const currentValue = Number(product[limitField]) || 0;
+        const newValue = Math.max(0, currentValue - item.quantity);
+        await ProductModel.update(item.product_id, { [limitField]: newValue });
+      }
+    } catch (err) {
+      console.error(`[POS SERVICE] Error updating stock for product ${item.product_id}:`, err);
+    }
+  }
+}
+
 export const getPosProducts = async (filters = {}) => {
   try {
     const result = await ProductModel.findAll(filters);
@@ -87,8 +109,24 @@ export const createPosOrder = async (payload) => {
   }
 
   // 2. Create the Order
+  // FIX: dating basta "Buy Now" = agad na "Completed" ang status, kahit pa
+  // pumili ang cashier ng "50% Deposit" (walang bumabawal dito sa UI kahit
+  // Buy Now ang order type). Resulta: order na "Completed" na agad sa
+  // pagkakagawa, pero may natitira pang balance na walang sinumang
+  // babalikan pa para i-settle — kasi ang settlement logic ay tumatakbo
+  // lang tuwing may STATUS CHANGE papuntang "Completed" (sa
+  // confirmPosOrderPickup sa ibaba), hindi sa mismong paggawa ng order.
+  // Kaya nananatiling frozen sa deposit lang ang amount_paid magpakailanman.
+  //
+  // Ngayon: "Completed" agad lang kapag Buy Now AT walang natitirang
+  // balance (fully paid na talaga sa counter — walang matitira pang
+  // i-settle sa hinaharap). Kung may balance pa (deposit), "Confirmed"
+  // muna ito — sasettle-han lang ito pagka-confirm ng pickup (QR scan) o
+  // sa Orders.jsx admin page.
   const isBuyNow = payload.orderType === 'Buy Now';
-  const orderStatus = isBuyNow ? 'Completed' : 'Confirmed';
+  const hasOutstandingBalance = Number(payload.payment?.balance || 0) > 0;
+  const shouldCompleteImmediately = isBuyNow && !hasOutstandingBalance;
+  const orderStatus = shouldCompleteImmediately ? 'Completed' : 'Confirmed';
 
   let dbPaymentType = 'full';
   if (payload.payment?.type === '50% Deposit') {
@@ -152,21 +190,13 @@ export const createPosOrder = async (payload) => {
   }
 
   // 4. Stock Deduction Logic
-  if (isBuyNow) {
-    for (const item of itemsToInsert) {
-      if (!item.product_id) continue;
-      try {
-        const product = await ProductModel.findById(item.product_id);
-        if (product) {
-          const limitField = getStockLimitField(product);
-          const currentValue = Number(product[limitField]) || 0;
-          const newValue = Math.max(0, currentValue - item.quantity);
-          await ProductModel.update(item.product_id, { [limitField]: newValue });
-        }
-      } catch (err) {
-        console.error(`[POS SERVICE] Error updating stock for product ${item.product_id}:`, err);
-      }
-    }
+  // FIX: kasabay ng ayos sa itaas — sumasalamin na rin dito ang
+  // `shouldCompleteImmediately` (hindi na basta `isBuyNow`), para hindi
+  // agad mabawasan ang stock ng isang Buy Now order na may natitira pang
+  // balance (deposit). Ang order na iyon ay ide-deduct na lang pagdating
+  // ng aktwal na completion (confirmPosOrderPickup / Orders.jsx).
+  if (shouldCompleteImmediately) {
+    await deductStockForOrderItems(itemsToInsert);
   }
 
   // BAGO: idinagdag ang receiptToken sa response. Ginagamit ito ng frontend
@@ -177,17 +207,54 @@ export const createPosOrder = async (payload) => {
   };
 };
 
-// BAGO: para sa hinaharap na "confirm at pickup" scanner — hindi pa ginagamit
-// ngayon dahil litrato na lang muna ang approach, pero handa na ito kapag
-// gusto mo nang mag-set up ng scanner sa counter.
+// Para sa "confirm at pickup" scanner sa pickup counter — isu-scan ng owner
+// ang QR mula sa e-receipt (Pre-Order man o naka-iskedyul na Buy Now) para
+// i-verify at i-Complete ang order.
 export const confirmPosOrderPickup = async (orderId, token) => {
   if (token !== makeReceiptToken(orderId)) {
     throw new Error('Invalid confirmation code');
   }
   const order = await OrdersModel.findById(orderId);
   if (!order) throw new Error('Order not found');
+  // FIX (idempotency guard): kung na-scan na dati ang parehong QR (na-double
+  // scan, o na-Complete na dati via Orders.jsx admin page), huwag nang
+  // ulitin ang settlement/deduction sa ibaba.
   if (order.status === 'Completed') throw new Error('Order already marked as completed');
+
   // FIX: walang generic `update()` sa OrdersModel — `updateStatus(id, status)`
   // lang ang meron, kaya ito ang tamang gamitin dito.
-  return await OrdersModel.updateStatus(orderId, 'Completed');
+  let updatedOrder = await OrdersModel.updateStatus(orderId, 'Completed');
+
+  // Settle any outstanding balance — same rule as the online-ordering
+  // completion flow: a POS deposit order (e.g. 50% paid at order time, the
+  // remainder collected in cash/GCash at pickup) should show as fully paid
+  // once the order is marked Completed, instead of permanently logging as
+  // only the original deposit amount.
+  if (Number(updatedOrder.balance) > 0) {
+    try {
+      updatedOrder = await OrdersModel.updatePayment(orderId, {
+        amount_paid: updatedOrder.grand_total,
+        balance: 0,
+        // FIX: dapat din ma-update ang payment_type papuntang 'full' —
+        // dati'y amount_paid/balance lang ang na-a-update.
+        payment_type: 'full',
+      });
+    } catch (settleError) {
+      console.error('[POS SERVICE] Error settling balance on pickup confirmation:', settleError);
+    }
+  }
+
+  // Deduct stock now that pickup is confirmed — this order was created as
+  // "Confirmed" (not yet deducted) precisely so this is the single moment
+  // that actually removes it from inventory.
+  try {
+    const items = await OrderItemsModel.findByOrderId(orderId);
+    if (items && items.length > 0) {
+      await deductStockForOrderItems(items);
+    }
+  } catch (itemsError) {
+    console.error('[POS SERVICE] Error fetching items to deduct stock on pickup confirmation:', itemsError);
+  }
+
+  return updatedOrder;
 };

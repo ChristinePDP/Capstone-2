@@ -96,11 +96,23 @@ function TypeCell({ order, orderType }) {
 }
 // Single line only: "Fully Paid" or "Deposit: ₱X,XXX.XX" — no color,
 // no balance line underneath, and never wraps to a second line.
+//
+// FIX: hindi na basta `payment_type === 'deposit'` lang ang tinitignan.
+// Ang settlement (pag-Complete ng order) ay nagpapa-update ng amount_paid/
+// balance sa backend, pero kung sakaling may laganap pang lumang order na
+// dumaan sa Completed BAGO pa naitama ang payment_type field (hal. mga
+// orders na nasa DB na bago i-deploy ang backend fix), maling "Deposit: ₱X"
+// pa rin ang lalabas kahit fully paid na talaga ito. Kaya dito, kung ang
+// natitirang balance ay 0 (o wala nang laman), palaging "Fully Paid" na
+// ang ipapakita anuman ang laman ng payment_type — ang balance/amount_paid
+// mismo (hindi ang label na `payment_type`) ang pinagbabatayan kung talagang
+// "Deposit" pa ba dapat ipakita.
 function PaymentDisplay({ order }) {
   const payType = order.paymentType || order.payment_type;
   const amtPaid = order.amountPaid  || order.amount_paid;
-  const grandTotal = order.grandTotal || order.grand_total;
-  if (payType === 'deposit') {
+  const balance = order.balance ?? order.remainingBalance ?? 0;
+  const isFullyPaid = payType !== 'deposit' || Number(balance) <= 0;
+  if (!isFullyPaid) {
     return <p className="text-slate-700 font-semibold text-[13.5px] whitespace-nowrap">Deposit: {fmt(amtPaid)}</p>;
   }
   return <p className="text-slate-700 font-semibold text-[13.5px] whitespace-nowrap">Fully Paid</p>;
@@ -121,7 +133,14 @@ function PickupCell({ date, time, timeEnd }) {
 
 const COLUMNS = [
   { label: 'Order ID' }, { label: 'Customer' }, { label: 'Type' },
-  { label: 'Amount' }, { label: 'Payment' }, { label: 'Pick-up / Date' },
+  // FIX: Total Amount ay numero/currency — dapat right-aligned ang column
+  // na ito (header + cells) para magka-tugma ang mga digit/decimal
+  // pababa sa column, na mas madaling i-scan/i-compare ang mga amount.
+  // Text columns (Customer, Type, Payment, Pick-up) ay nananatiling
+  // left-aligned (default), at ang Action ay center-aligned na dati pa
+  // (compact/symmetrical na element, hindi something na dapat i-scan
+  // ayon sa magnitude).
+  { label: 'Total Amount', align: 'right' }, { label: 'Payment' }, { label: 'Pick-up / Date' },
   { label: 'Status' }, { label: 'Action', align: 'center' },
 ];
 
@@ -356,7 +375,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
                   </div>
                 </Td>
                 <Td><TypeCell order={order} orderType={orderType} /></Td>
-                <Td className="font-semibold text-slate-900 text-[14px] whitespace-nowrap">{fmt(grandTotal)}</Td>
+                <Td align="right" className="font-semibold text-slate-900 text-[14px] whitespace-nowrap">{fmt(grandTotal)}</Td>
                 <Td><PaymentDisplay order={order} /></Td>
                 <Td><PickupCell date={pickupDate} time={pickupTime} timeEnd={pickupTimeEnd} /></Td>
                 <Td className="whitespace-nowrap"><Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none whitespace-nowrap">{order.status}</Badge></Td>

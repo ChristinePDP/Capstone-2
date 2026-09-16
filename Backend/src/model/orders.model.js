@@ -115,7 +115,30 @@ const OrdersModel = {
 
     if (error) throw error;
     return data;
-  }
+  },
+
+    async updatePayment(id, { amount_paid, balance, payment_type }) {
+    // FIX: dating `amount_paid`/`balance` lang ang ina-update dito, kaya
+    // kahit na-settle na ang balance (0 na, buo na ang amount_paid), ang
+    // `payment_type` column mismo ay nananatiling 'deposit' magpakailanman
+    // — kaya ang Orders.jsx admin page ay patuloy pa ring nagpapakita ng
+    // "Deposit: ₱X" sa isang order na Completed at fully paid na talaga.
+    // Ngayon, opsyonal na tinatanggap din nito ang `payment_type` (ipinapasa
+    // bilang 'full' ng mga completion flow sa orders.service.js/
+    // pos.service.js/onlineOrdering.service.js kapag na-settle ang balance)
+    // para ma-update din ito kasabay ng amount_paid/balance.
+    const updatePayload = { amount_paid, balance };
+    if (payment_type) updatePayload.payment_type = payment_type;
+
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
 };
 
 export { OrdersModel };

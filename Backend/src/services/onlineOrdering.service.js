@@ -353,6 +353,30 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
 export const completeOrderAndDeductStock = async (orderId) => {
   console.log(`\n[SERVICE] 1. Starting completeOrderAndDeductStock for Order ID: ${orderId}`);
 
+  // FIX (idempotency guard): kung "Completed" na ang order BAGO pa man ito
+  // tawagin (hal. na-double click ang "Mark Completed" button, o parallel
+  // na request), hindi na dapat ulitin ang settlement/deduction — hahantong
+  // lang ito sa DALAWANG BESES na pagbawas ng stock para sa parehong order.
+  // Ito ang parehong idempotency rule na dinagdag din ngayon sa
+  // orders.service.js at pos.service.js, para magkatugma ang tatlo sa
+  // paggawi tuwing may order na nagiging Completed.
+  let existingOrder;
+  try {
+    existingOrder = await OrdersModel.findById(orderId);
+  } catch (findError) {
+    console.error('[SERVICE] Error fetching order before completion:', findError);
+    throw new Error(`Failed to fetch order: ${findError.message}`);
+  }
+  if (!existingOrder) {
+    const err = new Error('Order not found');
+    err.status = 404;
+    throw err;
+  }
+  if (existingOrder.status === 'Completed') {
+    console.log('[SERVICE] Order already Completed — skipping duplicate settlement/deduction.');
+    return existingOrder;
+  }
+
   let updatedOrder;
   try {
     updatedOrder = await OrdersModel.updateStatus(orderId, 'Completed');
@@ -363,6 +387,35 @@ export const completeOrderAndDeductStock = async (orderId) => {
 
   console.log('[SERVICE] 2. Successfully updated order status to:', updatedOrder.status);
   console.log('[SERVICE] 3. Order Type is:', updatedOrder.order_type);
+
+  // NEW: Settle any outstanding balance now that the order is Completed.
+  // "Completed" means the customer already picked up the product — for
+  // deposit orders (50% paid upfront via PayMongo or at the POS), the
+  // remaining balance is always collected in person at pickup. Before this
+  // fix, `amount_paid` stayed frozen at the original deposit forever, so
+  // sales reports kept showing the order as only 50% paid (e.g. 2.5k on a
+  // 5k order) even after the customer had actually paid the rest and
+  // walked out with the product. Completing the order now also settles the
+  // balance to 0 and raises amount_paid to the full grand_total.
+  if (Number(updatedOrder.balance) > 0) {
+    console.log(`[SERVICE] 3b. Order has an outstanding balance of ${updatedOrder.balance} — settling it now that pickup is complete.`);
+    try {
+      updatedOrder = await OrdersModel.updatePayment(orderId, {
+        amount_paid: updatedOrder.grand_total,
+        balance: 0,
+        // FIX: dapat din ma-update ang payment_type papuntang 'full' —
+        // dati'y amount_paid/balance lang ang na-a-update, kaya
+        // nananatiling nagpapakita ng "Deposit: ₱X" sa listahan ng orders
+        // kahit fully paid na talaga.
+        payment_type: 'full',
+      });
+      console.log('[SERVICE] 3c. Balance settled. amount_paid is now:', updatedOrder.amount_paid);
+    } catch (settleError) {
+      // Don't block completion/stock deduction over this — the order is
+      // already handed over. Log loudly so it can be fixed manually.
+      console.error('[SERVICE] Error settling balance on completion:', settleError);
+    }
+  }
 
   console.log('[SERVICE] 4. Fetching order items to deduct stock permanently...');
   
