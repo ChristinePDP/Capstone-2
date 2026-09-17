@@ -336,7 +336,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 
           {hasFields && (
             <div className={`flex flex-col gap-4 mb-6 ${isVariable ? 'border-t border-[#EAE4E0] pt-6' : ''}`}>
-              <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Customization Details</p>
+              <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Order Slip</p>
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.order_slip_fields.map((field, index) => {
                   const isOptional = field.optional === true || field.isOptional === true || field.required === false;

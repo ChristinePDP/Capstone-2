@@ -1260,8 +1260,15 @@ const PS_MASTER_CACHE_KEY = "performance_summary_master";
 const PS_PERIOD_DAYS = 7;
 const PS_TOP_PRODUCTS_COUNT = 3;
 
+// FIX: gamitin ang amount_paid (aktwal na natanggap na bayad), hindi ang
+// grand_total (buong committed value ng order) — parehong basehan gaya ng
+// ginagamit na ni FourKpiService.calculateMetrics sa analytics.service.js.
+// Kung hindi ito i-match, hindi tutugma ang "Total Sales" ng weekly AI
+// summary laban sa Total Sales KPI card kahit magkaparehong "Past 7 Days"
+// window ang ginagamit ng dalawa (halimbawa: Confirmed order na 50%
+// Deposit pa lang ang bayad — grand_total 5000 pero amount_paid 2500).
 function sumSalesAndExpenses(orders, inventoryLogs) {
-  const totalSales = (orders || []).reduce((sum, order) => sum + Number(order.grand_total || 0), 0);
+  const totalSales = (orders || []).reduce((sum, order) => sum + Number(order.amount_paid || 0), 0);
   const totalExpenses = (inventoryLogs || []).reduce((sum, log) => {
     if (log.transaction_type === 'IN') return sum + Number(log.cost || 0);
     return sum;
@@ -1306,9 +1313,9 @@ async function getSummaryContext() {
   const priorEnd = priorEndDate.toISOString();
 
   const [currentOrders, currentInventoryLogs, priorOrders, priorInventoryLogs, topProducts] = await Promise.all([
-    OrdersModel.getByDateRange(currentStart, currentEnd, { columns: "grand_total, created_at", excludeCancelled: true }),
+    OrdersModel.getByDateRange(currentStart, currentEnd, { columns: "amount_paid, created_at", excludeCancelled: true }),
     InventoryLogsModel.getByDateRange(currentStart, currentEnd),
-    OrdersModel.getByDateRange(priorStart, priorEnd, { columns: "grand_total, created_at", excludeCancelled: true }),
+    OrdersModel.getByDateRange(priorStart, priorEnd, { columns: "amount_paid, created_at", excludeCancelled: true }),
     InventoryLogsModel.getByDateRange(priorStart, priorEnd),
     getTopProductsForRange(currentStart, currentEnd),
   ]);

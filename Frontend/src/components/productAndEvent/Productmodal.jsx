@@ -354,7 +354,9 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   } : BLANK_PRODUCT;
 
   const [form, setForm] = useState(initialFormState);
-  const [fields, setFields] = useState(product?.order_slip_fields || []);
+  const [fields, setFields] = useState(
+    product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || []
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [selectedFile, setSelectedFile] = useState(null);
@@ -391,7 +393,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         eventTags: product.event_tags || []
       } : BLANK_PRODUCT);
       
-      setFields(product?.order_slip_fields || []);
+      setFields(product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || []);
       setPricingMode(product?.pricing_mode || 'fixed');
       setPriceGroups(product?.price_groups?.map(g => ({ id: crypto.randomUUID(), name: g.name, options: g.options.join(', ') })) || []);
       setPriceMatrix(product?.price_matrix || []);
@@ -533,13 +535,15 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             id: f.id,
             label: f.label.trim(),
             type: f.type,
-            options: NEEDS_OPTIONS.includes(f.type) ? f.options.split(',').map(o => o.trim()).filter(Boolean) : [],
+            options: NEEDS_OPTIONS.includes(f.type)
+                ? (Array.isArray(f.options) ? f.options : (f.options || '').split(',')).map(o => o.trim()).filter(Boolean)
+                : [],
         }));
         
-        cleanFields.unshift({
+        cleanFields.push({
             id: 'fixed-special-instructions',
             label: 'Special Instructions',
-            type: 'Textarea',
+            type: 'Text',
             options: []
         });
 
@@ -651,16 +655,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </p>
 
           <div className="flex flex-col gap-2.5">
-            {/* Fixed Special Instructions Field */}
-            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
-              <input value="Special Instructions" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
-              <select value="Textarea" disabled className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed">
-                <option value="Textarea">Textarea</option>
-              </select>
-              <input value="—" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
-              <div className="p-2 shrink-0 self-end sm:self-auto w-[30px]"></div>
-            </div>
-
             {fields.filter(f => f.label.toLowerCase() !== 'special instructions').map(field => (
               <div key={field.id} className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
                 <input value={field.label} onChange={e => updateField(field.id, 'label', e.target.value)} placeholder="Field Label (e.g. Cake Message)" className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
@@ -671,6 +665,16 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                 <button type="button" onClick={() => removeField(field.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors self-end sm:self-auto"><Trash2 size={14} /></button>
               </div>
             ))}
+
+            {/* Fixed Special Instructions Field — always pinned last so it renders at the bottom of the order slip */}
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
+              <input value="Special Instructions" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
+              <select value="Text" disabled className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed">
+                <option value="Text">Text</option>
+              </select>
+              <input value="—" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
+              <div className="p-2 shrink-0 self-end sm:self-auto w-[30px]"></div>
+            </div>
           </div>
 
           <button type="button" onClick={addField} className="mt-4 w-full border border-dashed border-[#DED4CC] rounded-2xl py-2.5 text-xs font-bold text-[#5A453C] bg-white flex items-center justify-center gap-1.5 hover:bg-[#F5EFEB] transition-colors">
