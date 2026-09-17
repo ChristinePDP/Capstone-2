@@ -11,6 +11,22 @@ import { getDateRange } from "../utils/analytics/PerformancetTimeframeHelper.uti
 
 const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 
+// FIX: hiwalay na constant 'to sa REQUIRED_HISTORY_DAYS sa baba.
+// REQUIRED_HISTORY_DAYS ay isang "gate" lang — sinasagot niya ang tanong
+// na "meron ba akong sapat na datos para tumakbo AT ALL ang forecast?"
+// Ang PRODUCT_TREND_WINDOW_DAYS naman ang sumasagot sa ibang tanong:
+// "ilang ARAW ang dapat kong tignan para makita kung TUMATAAS o
+// BUMABABA ang isang produkto NGAYON?" Dating pareho silang ginagamit
+// (REQUIRED_HISTORY_DAYS["7d"] = 120 ang ginamit bilang "recent window"
+// sa sliceRecentDays), kaya ang "recent half vs earlier half" comparison
+// ng bawat produkto ay 60 araw vs 60 araw — sobrang laki para
+// makapagpakita ng anumang tunay na kamakailang trend, kaya laging
+// walang laman (growth: [], risk: []) ang resulta kahit may totoong
+// pagbabago. Ang laki ng window dito ay 2x ng forecast horizon mismo
+// (katulad ng ginagawa ng Sales Forecast: "most recent 7 days vs 7 days
+// before" — 14 days total — hardcoded sa loob ng prompt nito).
+const PRODUCT_TREND_WINDOW_DAYS = { "7d": 14, "30d": 60 };
+
 // ==========================================
 // SHARED: PRE-GEMINI DATA SUFFICIENCY GATE
 // ==========================================
@@ -168,11 +184,15 @@ const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
 const AR_CACHE_KEY = "actionable_recommendations_v5";
 const AR_MAX_PER_CATEGORY = 2;
 
+// FIX: amount_paid (aktwal na natanggap na bayad), hindi grand_total —
+// parehong basehan na ngayon ng FourKpiService/PerformanceSummaryService,
+// para consistent ang "Sales" figure sa buong dashboard (KPI, Summary,
+// AT Forecast/Recommendations).
 async function getRecentSalesTrend(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
 
   const orders = await OrdersModel.getByDateRange(startDate, endDate, {
-    columns: "grand_total, created_at",
+    columns: "amount_paid, created_at",
     excludeCancelled: true,
     ascending: true,
   });
@@ -180,7 +200,7 @@ async function getRecentSalesTrend(days) {
   const totalsByDate = {};
   for (const order of orders) {
     const day = order.created_at.slice(0, 10);
-    totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.grand_total || 0);
+    totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.amount_paid || 0);
   }
 
   return Object.keys(totalsByDate)
@@ -898,8 +918,14 @@ async function refreshProductForecast() {
     return payload;
   }
 
-  const sevenDayHistory = sliceRecentDays(fullHistory, REQUIRED_HISTORY_DAYS["7d"]);
-  const thirtyDayHistory = includeThirty ? fullHistory : null;
+  // FIX: dating REQUIRED_HISTORY_DAYS["7d"] (120) ang ginagamit dito —
+  // 'yun ang minimum-data GATE, hindi ang tamang laki ng "recent trend"
+  // window. Ngayon, PRODUCT_TREND_WINDOW_DAYS ang gamit — mas maikli at
+  // recency-weighted talaga ang window, kaya may pagkakataon nang
+  // lumabas ang tunay na short-term na paggalaw ng bawat produkto
+  // (dating nalulunod ito sa napakahabang averaging window).
+  const sevenDayHistory = sliceRecentDays(fullHistory, PRODUCT_TREND_WINDOW_DAYS["7d"]);
+  const thirtyDayHistory = includeThirty ? sliceRecentDays(fullHistory, PRODUCT_TREND_WINDOW_DAYS["30d"]) : null;
 
   let payload;
   try {
@@ -984,11 +1010,15 @@ function buildSalesCacheKey(timeframe) {
   return `sales_forecast:${timeframe}`;
 }
 
+// FIX: amount_paid (aktwal na natanggap na bayad), hindi grand_total —
+// parehong basehan na ngayon ng FourKpiService/PerformanceSummaryService,
+// para consistent ang "Sales" figure sa buong dashboard (KPI, Summary,
+// AT Forecast/Recommendations).
 async function getRawSalesHistory(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
 
   const orders = await OrdersModel.getByDateRange(startDate, endDate, {
-    columns: "grand_total, created_at", // Now using created_at
+    columns: "amount_paid, created_at", // Now using created_at
     excludeCancelled: true,
     ascending: true,
   });
@@ -996,7 +1026,7 @@ async function getRawSalesHistory(days) {
   const totalsByDate = {};
   for (const order of orders) {
     const day = order.created_at.slice(0, 10); // Now using created_at
-    totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.grand_total || 0);
+    totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.amount_paid || 0);
   }
 
   const todayDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
