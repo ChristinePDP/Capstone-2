@@ -664,6 +664,78 @@ Respond with ONLY valid JSON strictly following this exact shape:
   return { systemPrompt, userPrompt };
 }
 
+// ==========================================
+// RELIABILITY LAYER — deterministic checks, not just prompt wording.
+// normalizeActionablePayload() above only checks SHAPE (does it have a
+// title/desc/valid type). It says nothing about CONTENT quality — so a
+// Gemini response that is well-formed JSON but full of vague, passive
+// filler ("plan carefully", "keep things steady") or that silently
+// skipped a required job (like the slow-mover + best-seller bundle
+// pairing) would sail straight through and get cached as-is. This is
+// why low-quality output could repeat run after run without anything
+// ever catching it. validateActionablePayload() below re-checks the
+// ACTUAL text against the same rules we gave Gemini, so failures are
+// caught in code — not just hoped away by prompt wording.
+// ==========================================
+
+const AR_BANNED_PASSIVE_PHRASES = [
+  "plan your prep carefully",
+  "plan carefully",
+  "keep an eye on",
+  "monitor",
+  "stay mindful",
+  "watch closely",
+  "be cautious",
+  "keep things steady",
+  "keep it steady",
+  "stay consistent",
+  "prepare accordingly",
+  "adjust accordingly",
+];
+
+function findBannedPassivePhrase(text) {
+  const lower = String(text || "").toLowerCase();
+  return AR_BANNED_PASSIVE_PHRASES.find((phrase) => lower.includes(phrase)) || null;
+}
+
+// Re-derives, in plain code, whether job 1.b (the slow-mover +
+// best-seller bundle pairing) was actually mandatory for this run's
+// context — mirrors the "MANDATORY whenever..." rule given to Gemini in
+// buildActionablePrompt, so we can verify Gemini actually followed it.
+function validateActionablePayload(payload, context) {
+  const issues = [];
+  const salesRecs = payload?.salesOptimization || [];
+  const invRecs = payload?.inventoryOptimization || [];
+
+  for (const rec of [...salesRecs, ...invRecs]) {
+    const bannedHit = findBannedPassivePhrase(rec.desc);
+    if (bannedHit) {
+      issues.push(`"${rec.title}" leans on a passive/vague phrase ("${bannedHit}") instead of stating a concrete action.`);
+    }
+    if (!/\d/.test(rec.desc)) {
+      issues.push(`"${rec.title}" doesn't cite any concrete number (%, ₱, quantity, or date) — too generic to be data-grounded.`);
+    }
+  }
+
+  const slowMovers = [
+    ...(context?.reconciledSignals?.slowMovers?.confirmedDecline || []),
+    ...(context?.reconciledSignals?.slowMovers?.otherSlowMovers || []),
+  ];
+  const bestSellers = context?.bundleContext?.bestSellers || [];
+  if (slowMovers.length > 0 && bestSellers.length > 0) {
+    const bestSellerNames = bestSellers
+      .map((p) => String(p?.name || p?.product_name || "").toLowerCase())
+      .filter(Boolean);
+    const salesText = salesRecs.map((r) => r.desc).join(" ").toLowerCase();
+    const hasBundleMention = bestSellerNames.some((name) => name && salesText.includes(name));
+    if (!hasBundleMention) {
+      issues.push("Required bundle/pairing recommendation (slow mover + best seller, job 1.b) is missing from salesOptimization — both recommendations look like variations of the same decline-mitigation angle instead.");
+    }
+  }
+
+  return issues;
+}
+
 function normalizeActionablePayload(aiResult) {
   const normalizeArray = (arr) => {
     const list = Array.isArray(arr) ? arr : [];
@@ -727,12 +799,47 @@ const ActionableRecommendationService = {
       ]);
       const context = await getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability);
       const { systemPrompt, userPrompt } = buildActionablePrompt(context, previousTitles);
-      // Slightly higher than default: this call generates business advice,
-      // not a deterministic forecast, so some creative variance between
-      // refreshes is desirable (paired with the anti-repeat instruction
-      // above, which keeps it from just being noise).
-      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.7 });
-      const payload = normalizeActionablePayload(aiResult);
+
+      // RELIABILITY LOOP: up to 3 attempts. Each attempt is checked with
+      // validateActionablePayload() (real content rules, not just JSON
+      // shape). If an attempt fails, the NEXT attempt is told exactly
+      // what was wrong and asked to fix it — and temperature is lowered
+      // on retries to reduce variance and push Gemini toward the
+      // instructions rather than a "creative" reinterpretation of them.
+      const MAX_ATTEMPTS = 3;
+      let payload = null;
+      let issues = [];
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const retryNote = attempt > 1
+          ? `\n\nIMPORTANT — YOUR PREVIOUS ATTEMPT FAILED THESE SPECIFIC CHECKS. FIX THEM THIS TIME:\n${issues.map((i) => `- ${i}`).join("\n")}\n`
+          : "";
+        const temperature = attempt === 1 ? 0.5 : 0.25;
+        const aiResult = await callGeminiJSON({ systemPrompt, userPrompt: userPrompt + retryNote, temperature });
+        const candidate = normalizeActionablePayload(aiResult);
+        issues = validateActionablePayload(candidate, context);
+        payload = candidate; // keep the latest attempt as the best-so-far fallback
+
+        if (issues.length === 0) break;
+        console.warn(`[ActionableRecommendationService] Attempt ${attempt}/${MAX_ATTEMPTS} failed validation:`, issues);
+      }
+
+      if (issues.length > 0) {
+        // All attempts still failed content validation. Do NOT overwrite
+        // a previously good cached result with something we know is
+        // low-quality — keep serving the last known-good set instead,
+        // and log loudly so this is visible in cron logs (not just
+        // discovered later by eyeballing the dashboard).
+        console.error(
+          "[ActionableRecommendationService] All attempts failed validation — keeping previous cached recommendations instead of overwriting with low-quality output:",
+          issues
+        );
+        const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY);
+        if (existingCache && existingCache.payload) {
+          return { recommendations: existingCache.payload, insufficientData: false };
+        }
+        // No previous good cache to fall back to (e.g. first-ever run) —
+        // serve the best-effort payload anyway rather than an empty one.
+      }
 
       await AiCacheModel.upsert(AR_CACHE_KEY, payload, AR_CACHE_TTL_MS);
       return { recommendations: payload, insufficientData: false };
@@ -1105,12 +1212,45 @@ Respond with ONLY valid JSON:
 // UPDATED: removed the random jitter fallback. When Gemini returns fewer
 // days than requested, we now carry forward the last known forecasted
 // value instead of injecting random noise.
-function normalizeSalesPayload(aiResult, timeframeDays) {
+//
+// RELIABILITY: also added an output-side sanity CEILING (not just the
+// existing Math.max(0, ...) floor). The floor alone only rejects
+// negative numbers — it does nothing to catch a forecast value that is
+// wildly, implausibly HIGH (a hallucinated ₱500,000 day when the shop's
+// real history sits at ₱2,000–8,000/day would sail straight through
+// before this change). The ceiling is derived from the ACTUAL
+// historicalSales fed into this run — never a hardcoded constant — so
+// it naturally scales to whatever size this specific shop really is.
+// Any value Gemini returns above the ceiling is clamped down to it
+// (rather than silently trusted), and logged so it's visible when it
+// happens instead of quietly warping the chart.
+//
+// Also replaced the old hardcoded `4500` fallback (used when Gemini
+// returns literally nothing) with the shop's own real historical daily
+// average — a fabricated guess is never an acceptable stand-in for a
+// business's actual numbers, even as a last-resort fallback.
+function normalizeSalesPayload(aiResult, timeframeDays, historicalSales = []) {
   const rawChartData = Array.isArray(aiResult?.chartData) ? aiResult.chartData : [];
   const todayDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
 
+  const historicalValues = (historicalSales || [])
+    .map((d) => Number(d.totalSales))
+    .filter((v) => Number.isFinite(v));
+  const historicalAvg = historicalValues.length
+    ? historicalValues.reduce((a, b) => a + b, 0) / historicalValues.length
+    : 4500; // only reached if there is truly zero historical data to derive from
+  const historicalMax = historicalValues.length ? Math.max(...historicalValues) : historicalAvg;
+  // A forecast is allowed to run meaningfully above the historical max
+  // (real growth, a payday spike) — but not by an implausible multiple.
+  // 3x the highest real day this shop has ever recorded is a generous
+  // ceiling for genuine growth while still catching hallucinated spikes.
+  const sanityCeiling = Math.max(historicalMax * 3, historicalAvg * 5, 1000);
+
   const finalChartData = [];
-  let lastKnownForecast = rawChartData[0]?.forecastSales != null ? Number(rawChartData[0].forecastSales) : 4500;
+  let lastKnownForecast = rawChartData[0]?.forecastSales != null
+    ? Number(rawChartData[0].forecastSales)
+    : Math.round(historicalAvg);
+  let clampedCount = 0;
 
   for (let i = 0; i < timeframeDays; i++) {
     const d = new Date(todayDate);
@@ -1119,7 +1259,13 @@ function normalizeSalesPayload(aiResult, timeframeDays) {
 
     let val;
     if (i < rawChartData.length && rawChartData[i].forecastSales != null) {
-      val = Math.max(0, Math.round(Number(rawChartData[i].forecastSales)));
+      const raw = Math.max(0, Math.round(Number(rawChartData[i].forecastSales)));
+      if (raw > sanityCeiling) {
+        val = Math.round(sanityCeiling);
+        clampedCount += 1;
+      } else {
+        val = raw;
+      }
       lastKnownForecast = val;
     } else {
       val = lastKnownForecast;
@@ -1130,6 +1276,10 @@ function normalizeSalesPayload(aiResult, timeframeDays) {
       isToday: i === 0,
       forecastSales: val,
     });
+  }
+
+  if (clampedCount > 0) {
+    console.warn(`[SalesForecastService] Sanity ceiling clamped ${clampedCount} implausible day(s) (ceiling: ₱${Math.round(sanityCeiling).toLocaleString()}, based on this shop's real historical data).`);
   }
 
   return { chartData: finalChartData };
@@ -1201,7 +1351,7 @@ async function refreshSalesForecast() {
     // UPDATED: lowered temperature (0.4 -> 0.1) to reduce sampling
     // randomness and make output more reproducible given the same data.
     const aiResult = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.1 });
-    const payload = normalizeSalesPayload(aiResult, requestedDays);
+    const payload = normalizeSalesPayload(aiResult, requestedDays, historicalSales);
     finalPayload = { ...payload, insufficientData: false };
   } catch (err) {
     console.error("[SalesForecastService] Gemini forecast failed:", err.message);
