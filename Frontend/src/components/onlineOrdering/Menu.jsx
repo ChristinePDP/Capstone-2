@@ -682,6 +682,8 @@ function hasDailyLimitSet(item) {
 function isQuantityTracked(item) {
   if (!item) return false;
   if (item.type === 'bundle') return item.is_tracked; 
+  if (item.is_celebration_material && item.order_type === 'Pre-order') return false;
+  if (item.is_celebration_material) return true;
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 

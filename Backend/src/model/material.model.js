@@ -4,12 +4,28 @@ import { convertUnit } from '../utils/unitConversion.js';
 const MaterialModel = {
   findAll: () => supabase.from('celebration_materials').select('*').order('name'),
   findById: (id) => supabase.from('celebration_materials').select('*').eq('id', id).single(),
+  findByProductId: (productId) => supabase.from('celebration_materials').select('*').eq('product_id', productId).maybeSingle(),
   findByName: (name) => supabase.from('celebration_materials').select('stock_quantity, unit').eq('name', name).single(),
   create: (data) => supabase.from('celebration_materials').insert(data).select().single(),
   update: (id, data) => supabase.from('celebration_materials').update(data).eq('id', id).select().single(),
   delete: (id) => supabase.from('celebration_materials').delete().eq('id', id),
   setStock: (id, stock_quantity) =>
     supabase.from('celebration_materials').update({ stock_quantity }).eq('id', id).select().single(),
+
+  deductById: async (id, qty) => {
+    const { data, error } = await supabase
+      .from('celebration_materials')
+      .select('stock_quantity')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    if (!data) return;
+
+    return supabase
+      .from('celebration_materials')
+      .update({ stock_quantity: Math.max(0, Number(data.stock_quantity || 0) - Number(qty)) })
+      .eq('id', id);
+  },
 
   deductByName: async (name, qty, fromUnit) => {
     const { data } = await supabase.from('celebration_materials').select('stock_quantity, unit').eq('name', name).single();

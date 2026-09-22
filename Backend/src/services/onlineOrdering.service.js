@@ -6,6 +6,7 @@ import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 import { PendingOrdersModel } from '../model/pendingOrders.model.js';
+import { MaterialModel } from '../model/material.model.js';
 import { notifyNewOrder } from './notification.service.js';
 import { getBundleById } from './productAndEvent.service.js';
 
@@ -58,6 +59,14 @@ export const fetchMenuProducts = async (filters = {}) => {
   } catch (itemsError) {
     throw new Error(`Fetch Reservations Error: ${itemsError?.message || itemsError}`);
   }
+
+  const materialsResult = await MaterialModel.findAll();
+  if (materialsResult.error) throw materialsResult.error;
+  const materialByProductId = new Map(
+    (materialsResult.data || [])
+      .filter(material => material.product_id)
+      .map(material => [material.product_id, material])
+  );
   
   const reservedMap = {};
   
@@ -83,13 +92,20 @@ export const fetchMenuProducts = async (filters = {}) => {
   }
 
   const productsWithStock = products.map(p => {
+    const celebrationMaterial = materialByProductId.get(p.id);
     const limitField = getStockLimitField(p);
-    const baseStock = Number(p[limitField]) || 0;
+    const baseStock = celebrationMaterial
+      ? Number(celebrationMaterial.stock_quantity) || 0
+      : Number(p[limitField]) || 0;
     const reserved = reservedMap[p.id] || 0;
     const available = Math.max(0, baseStock - reserved);
 
     return {
       ...p,
+      stock: baseStock,
+      stock_quantity: baseStock,
+      is_celebration_material: Boolean(celebrationMaterial),
+      celebration_material_id: celebrationMaterial?.id || null,
       stock_basis_field: limitField, // 'daily_limit' o 'stock_quantity' — para malaman ng frontend/consumer kung saan galing ang bilang
       available_stock: available
     };
@@ -288,12 +304,39 @@ export const resolveOrderItems = async (items = []) => {
   return resolved;
 };
 
+export const validateCelebrationMaterialAvailability = async (items = [], orderType) => {
+  if (orderType !== 'Buy Now') return;
+
+  const requestedByMaterial = new Map();
+  for (const item of items) {
+    const materialResult = await MaterialModel.findByProductId(item.product_id);
+    if (materialResult.error) throw materialResult.error;
+    const material = materialResult.data;
+    if (!material) continue;
+
+    requestedByMaterial.set(
+      material.id,
+      (requestedByMaterial.get(material.id) || 0) + Number(item.quantity || 0)
+    );
+  }
+
+  for (const [materialId, requested] of requestedByMaterial) {
+    const materialResult = await MaterialModel.findById(materialId);
+    if (materialResult.error) throw materialResult.error;
+    const material = materialResult.data;
+    if (Number(material?.stock_quantity || 0) < requested) {
+      throw new Error(`"${material?.name || 'Celebration material'}" is Unavailable or Out of Stock.`);
+    }
+  }
+};
+
 export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => {
   // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
   let resolvedItems;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
+    await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
     throw new Error(`Items Error: ${itemsError.message}`);
   }
@@ -437,6 +480,13 @@ export const completeOrderAndDeductStock = async (orderId) => {
 
       try {
         const product = await ProductModel.findById(item.product_id);
+        const materialResult = await MaterialModel.findByProductId(item.product_id);
+        if (materialResult.error) throw materialResult.error;
+        if (materialResult.data) {
+          await MaterialModel.deductById(materialResult.data.id, item.quantity);
+          console.log(`[SERVICE] Deducted ${item.quantity} from ${materialResult.data.name}'s celebration material stock.`);
+          continue;
+        }
         
         if (product) {
           // Same priority rule gaya ng availability computation: kung may

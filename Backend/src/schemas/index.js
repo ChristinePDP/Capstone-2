@@ -119,6 +119,7 @@ const UpdateOrderStatusSchema = z.object({
 
 const StockItemSchema = z.object({
   name:           z.string().min(1),
+  product_id:     z.string().uuid().nullable().optional(),
   unit:           z.string().min(1),
   stock_quantity: z.coerce.number().min(0),
   minimum_stock:  z.coerce.number().min(0),

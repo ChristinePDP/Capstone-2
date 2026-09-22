@@ -2,6 +2,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
+import { MaterialModel } from '../model/material.model.js';
 // Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
 // Ordering (resolveBundleLineItem + resolveProductLineItem, na parehong
 // naka-wrap sa resolveOrderItems). Ito ang gumagawa ng maayos na product_id
@@ -9,7 +10,7 @@ import { CustomersModel } from '../model/customers.model.js';
 // nagpapasa rin ng order_slip_details / selected_price_options / customer_reference_url
 // papunta sa bawat resolved row — dating wala nito ang POS, kaya nawawala
 // ang order slip answers pagdating sa DB.
-import { resolveOrderItems } from './onlineOrdering.service.js';
+import { resolveOrderItems, validateCelebrationMaterialAvailability } from './onlineOrdering.service.js';
 
 // BAGO: ginagamit para gumawa ng token na naka-encode sa QR ng e-receipt.
 // Ito ang isu-scan ng owner sa pickup counter para i-verify/complete ang order.
@@ -40,6 +41,13 @@ async function deductStockForOrderItems(items) {
   for (const item of items) {
     if (!item.product_id) continue;
     try {
+      const materialResult = await MaterialModel.findByProductId(item.product_id);
+      if (materialResult.error) throw materialResult.error;
+      if (materialResult.data) {
+        await MaterialModel.deductById(materialResult.data.id, item.quantity);
+        continue;
+      }
+
       const product = await ProductModel.findById(item.product_id);
       if (product) {
         const limitField = getStockLimitField(product);
@@ -60,6 +68,13 @@ export const getPosProducts = async (filters = {}) => {
     
     const itemsResult = await OrderItemsModel.getPendingItems();
     const pendingItems = Array.isArray(itemsResult?.data) ? itemsResult.data : Array.isArray(itemsResult) ? itemsResult : [];
+    const materialsResult = await MaterialModel.findAll();
+    if (materialsResult.error) throw materialsResult.error;
+    const materialByProductId = new Map(
+      (materialsResult.data || [])
+        .filter(material => material.product_id)
+        .map(material => [material.product_id, material])
+    );
 
     const reservedMap = {};
     pendingItems.forEach(item => {
@@ -67,10 +82,17 @@ export const getPosProducts = async (filters = {}) => {
     });
 
     return products.map(p => {
+      const celebrationMaterial = materialByProductId.get(p.id);
       const limitField = getStockLimitField(p);
-      const baseStock = Number(p[limitField]) || 0;
+      const baseStock = celebrationMaterial
+        ? Number(celebrationMaterial.stock_quantity) || 0
+        : Number(p[limitField]) || 0;
       return {
         ...p,
+        stock: baseStock,
+        stock_quantity: baseStock,
+        is_celebration_material: Boolean(celebrationMaterial),
+        celebration_material_id: celebrationMaterial?.id || null,
         stock_basis_field: limitField,
         available_stock: Math.max(0, baseStock - (reservedMap[p.id] || 0))
       };
@@ -89,6 +111,7 @@ export const createPosOrder = async (payload) => {
   let resolvedItems;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
+    await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
     throw new Error(`Items Error: ${itemsError.message}`);
   }

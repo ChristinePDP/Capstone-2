@@ -14,6 +14,7 @@ export default function CelebrationTab() {
   const context = useApp() || {};
   const { addMaterial, updateMaterial, deleteMaterial, restockMaterial } = context;
   const materials = context.materials || [];
+  const products = (context.products || []).filter(product => product.category === 'Celebration Material');
   const isLoading = !!context.loading;
 
   const { show: showToast } = useToast();
@@ -183,6 +184,7 @@ export default function CelebrationTab() {
         key={currentEditMat?.id ?? 'new'}  
         isOpen={modalOpen}
         material={currentEditMat}
+        products={products}
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
       />
@@ -196,7 +198,7 @@ export default function CelebrationTab() {
   );
 }
 
-function MaterialModal({ isOpen, onClose, material, onSave }) {
+function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
   const { show: showToast } = useToast();
 
   const [name, setName] = useState(material?.name ?? '');
@@ -205,6 +207,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
   const [min, setMin] = useState(material?.min ?? '');
   const [cost, setCost] = useState(''); 
   const [expiry, setExpiry] = useState(''); // 👈 BAGONG DAGDAG
+  const [productId, setProductId] = useState(material?.productId || material?.product_id || '');
 
   const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
   const [editingDetails, setEditingDetails] = useState(false);
@@ -226,6 +229,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     unit !== (material?.unit ?? 'pcs') ||
     String(min) !== String(material?.min ?? '') ||
     String(detailsCost) !== String(material?.costPerUnit ?? '')
+    || productId !== (material?.productId || material?.product_id || '')
   );
 
   const handleDetailsHeaderClick = () => {
@@ -249,6 +253,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     setUnit(material?.unit ?? 'pcs');
     setMin(material?.min ?? '');
     setDetailsCost(String(material?.costPerUnit ?? ''));
+    setProductId(material?.productId || material?.product_id || '');
     setEditingDetails(false);
   };
 
@@ -269,6 +274,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
         isNew: true,
         newData: { 
           name: name.trim(), 
+          product_id: productId || null,
           unit, 
           stock_quantity: addedQty, 
           minimum_stock: parseFloat(min), 
@@ -303,7 +309,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
     }
 
     const detailsPayload = isDetailsModified || editingDetails
-      ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
+      ? { name: name.trim(), product_id: productId || null, unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
       : null;
       
     // 👈 BAGONG DAGDAG SA RESTOCK PAYLOAD
@@ -393,7 +399,17 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">1. Basic Information</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Material Name" required value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Tarpaulin (2x3 ft)" />
+                  <div>
+                    <Input label="Material Name" required list="celebration-material-products" value={name} onChange={e => {
+                      const nextName = e.target.value;
+                      const linkedProduct = products.find(product => product.name === nextName);
+                      setName(nextName);
+                      setProductId(linkedProduct?.id || '');
+                    }} placeholder="e.g. Tarpaulin (2x3 ft)" />
+                    <datalist id="celebration-material-products">
+                      {products.map(product => <option key={product.id} value={product.name} />)}
+                    </datalist>
+                  </div>
                   <div>
                     <Select label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
                       {STOCK_UNIT_CATEGORIES.map(cat => (
@@ -524,7 +540,15 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
                   ) : (
                     <>
                       <div>
-                        <Input label="Name" required value={name} onChange={e => setName(e.target.value)} />
+                        <Input label="Name" required list="celebration-material-products" value={name} onChange={e => {
+                          const nextName = e.target.value;
+                          const linkedProduct = products.find(product => product.name === nextName);
+                          setName(nextName);
+                          setProductId(linkedProduct?.id || '');
+                        }} />
+                        <datalist id="celebration-material-products">
+                          {products.map(product => <option key={product.id} value={product.name} />)}
+                        </datalist>
                       </div>
                       <div>
                         <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>

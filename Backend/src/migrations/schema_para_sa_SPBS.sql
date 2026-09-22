@@ -133,6 +133,7 @@ create table raw_ingredients (
 create table celebration_materials (
   id             uuid primary key default gen_random_uuid(),
   name           text not null unique,
+  product_id     uuid unique references products(id) on delete set null,
   unit           text not null,
   stock_quantity numeric(12,4) not null default 0 check (stock_quantity >= 0),
   minimum_stock  numeric(12,4) not null default 0 check (minimum_stock >= 0),
@@ -226,6 +227,7 @@ create index idx_orders_pickup      on orders(pickup_date);
 create index idx_orders_created     on orders(created_at desc);
 create index idx_items_order        on order_items(order_id);
 create index idx_items_product      on order_items(product_id);
+create index idx_materials_product  on celebration_materials(product_id);
 create index idx_prod_logs_at       on production_logs(produced_at desc);
 create index idx_waste_logs_at      on waste_logs(logged_at desc);
 create index idx_cache_key          on analytics_cache(cache_key);

@@ -213,6 +213,7 @@ export default function PosPage() {
             setActiveCategory={setActiveCategory}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            cart={cart}
             onAddToCart={handleAddToCart}
           />
          )}

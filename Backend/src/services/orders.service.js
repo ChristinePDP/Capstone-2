@@ -2,6 +2,7 @@
 import { OrdersModel } from '../model/orders.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
+import { MaterialModel } from '../model/material.model.js';
 
 // Pinapayagang statuses lang — ito yung ginagamit talaga ng
 // AllOrdersPage.jsx (ORDER_STATUSES filter pills + nextStatus map),
@@ -122,6 +123,14 @@ const OrdersService = {
             if (!item.product_id) continue;
 
             const product = await ProductModel.findById(item.product_id);
+
+            const materialResult = await MaterialModel.findByProductId(item.product_id);
+            if (materialResult.error) throw materialResult.error;
+            if (materialResult.data) {
+              await MaterialModel.deductById(materialResult.data.id, item.quantity);
+              console.log(`[ADMIN SERVICE] Deducted ${item.quantity} from ${materialResult.data.name}'s celebration material stock.`);
+              continue;
+            }
 
             if (product) {
               const limitField = getStockLimitField(product);

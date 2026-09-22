@@ -112,6 +112,8 @@ export function AppProvider({ children }) {
       const normalizedMaterials = (mat.data || []).map(item => ({
         id: item.id,
         name: item.name,
+        productId: item.product_id || null,
+        product_id: item.product_id || null,
         unit: item.unit,
         stock: Number(item.stock_quantity ?? 0),
         min: Number(item.minimum_stock ?? 0),
