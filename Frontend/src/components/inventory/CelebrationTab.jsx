@@ -37,7 +37,7 @@ export default function CelebrationTab() {
   const handleSave = async (payload) => {
     if (payload.isNew) {
       await addMaterial(payload.newData);
-      showToast('Celebration material added.');
+      showToast('Celebration / Product material added.');
       return;
     }
 
@@ -165,7 +165,7 @@ export default function CelebrationTab() {
 
               {!paged.length && (
                 <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {search ? 'Walang nahanap na material.' : 'Walang naka-record na celebration materials.'}
+                  {search ? 'Walang nahanap na material.' : 'Walang naka-record na celebration / product materials.'}
                 </div>
               )}
             </>
@@ -174,7 +174,7 @@ export default function CelebrationTab() {
 
         {filtered.length > PER_PAGE && (
            <div className="p-3 border-t border-brand-100">
-             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total=" celebration materials" onChange={setPage} />
+             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total=" celebration / product materials" onChange={setPage} />
            </div>
         )}
       </Card>
@@ -273,7 +273,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
           stock_quantity: addedQty, 
           minimum_stock: parseFloat(min), 
           cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
-          category: 'Celebration Material',
+          category: 'Celebration / Product Material',
           expiration_date: expiry || null // 👈 BAGONG DAGDAG
         },
         addedQty,
@@ -357,7 +357,7 @@ function MaterialModal({ isOpen, onClose, material, onSave }) {
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : 'Add New Celebration Material'}
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : 'Add New Celebration / Product Material'}
         subtitle={isEdit ? `Unit: ${material?.unit}` : 'Mag-record ng bagong bulto ng party add-ons.'}
         size="lg"
         footer={

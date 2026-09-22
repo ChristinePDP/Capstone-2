@@ -79,7 +79,7 @@ export default function IngredientsTab() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800">Raw Materials & Ingredients</h3>
+            <h3 className="font-bold text-brand-800">Ingredients</h3>
             <p className="text-xs text-brand-400 mt-0.5">I-monitor ang Flour, Sugar, Baking Powder, at iba pang pangunahing sangkap.</p>
           </div>
           <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
@@ -365,7 +365,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       <Modal
         isOpen={isOpen} 
         onClose={() => !isSaving && onClose()}
-        title={isEdit ? `Manage Stock — ${ingredient?.name}` : 'Add New Raw Ingredient'}
+        title={isEdit ? `Manage Stock — ${ingredient?.name}` : 'Add New Ingredient'}
         subtitle={isEdit ? `Unit: ${ingredient?.unit}` : 'I-record ang mga bagong biling sako o bultong sangkap.'}
         size="lg"
         footer={

@@ -13,8 +13,8 @@ const MAIN_TABS = [
 ];
 
 const STOCK_SUBTABS = [
-  { key: 'raw',     label: 'Raw Ingredients' },
-  { key: 'celeb',  label: 'Celebration Materials' },
+  { key: 'raw',     label: ' Ingredients' },
+  { key: 'celeb',  label: 'Celebration / Product Materials' },
   { key: 'recipe', label: 'Recipe Log' },
   { key: 'product', label: 'Product Log' },
 ];

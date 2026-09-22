@@ -327,7 +327,7 @@ export default function WasteTab() {
                 <Filter size={13} className="text-gray-400 shrink-0" />
                 <select className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1); }}>
                   <option value="All">All Categories</option>
-                  <option value="ingredient">Raw Ingredient</option>
+                  <option value="ingredient"> Ingredient</option>
                   <option value="product">Finished Product</option>
                   <option value="material">Celebration Material</option>
                 </select>
