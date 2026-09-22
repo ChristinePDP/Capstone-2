@@ -143,6 +143,7 @@ export default function Checkout({ cart, setCart }) {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+  const [errors, setErrors] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
@@ -277,27 +278,43 @@ export default function Checkout({ cart, setCart }) {
       return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
     }
 
-    // 2. Check if all required fields are filled out
+    // 2. Check if all required fields are filled out, and their formats.
     // NOTE: pickupDate is only user-selectable (and thus only required) for
     // Pre-Order ('later'). For 'now' orders the date is always "today" and is
     // derived live from getLiveNow() in the payload, so it isn't required here.
     const needsPickupDate = pickupType === 'later';
-    if (!form.name || !form.phone || (needsPickupDate && !form.pickupDate) || !form.pickupTime) {
-      return setToastMessage('Please complete all required fields (*)');
+    const phoneRegex = /^\d{11}$/;
+    const newErrors = {};
+
+    if (!form.name.trim()) {
+      newErrors.name = 'Full name is required.';
     }
 
-    // 3. Check number formats (Exactly 11 digits)
-    const phoneRegex = /^\d{11}$/;
-    
-    if (!phoneRegex.test(form.phone)) {
-      return setToastMessage('Your Contact Number must be exactly 11 digits.');
+    if (!form.phone) {
+      newErrors.phone = 'Contact number is required.';
+    } else if (!phoneRegex.test(form.phone)) {
+      newErrors.phone = 'Must be exactly 11 digits.';
     }
 
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
-      return setToastMessage('Your Alternative Number must be exactly 11 digits.');
+      newErrors.altPhone = 'Must be exactly 11 digits.';
+    }
+
+    if (needsPickupDate && !form.pickupDate) {
+      newErrors.pickupDate = 'Please select a pickup date.';
+    }
+
+    if (!form.pickupTime) {
+      newErrors.pickupTime = 'Please select a pickup time.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
     }
 
     // Passed all validations
+    setErrors({});
     setShowSummaryModal(true);
   };
 
@@ -483,6 +500,7 @@ if (data.success && data.checkoutUrl) {
                         const { dateStr } = getLiveNow();
                         setPickupType('now');
                         setForm({...form, pickupDate: dateStr, pickupTime: ''});
+                        setErrors(prev => ({...prev, pickupDate: false, pickupTime: false}));
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -493,6 +511,7 @@ if (data.success && data.checkoutUrl) {
                         if (hasPickUpToday && !hasPreOrder) return;
                         setPickupType('later');
                         setForm({...form, pickupDate: '', pickupTime: ''});
+                        setErrors(prev => ({...prev, pickupDate: false, pickupTime: false}));
                       }}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'later' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPickUpToday && !hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
@@ -503,49 +522,57 @@ if (data.success && data.checkoutUrl) {
                   <div className="flex flex-col gap-3.5 shrink-0">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                           <div>
-                              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Full Name <span className="text-red-500">*</span></label>
+                              <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
                                 placeholder="e.g. Juan Dela Cruz" 
                                 value={form.name}
-                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
-                                onChange={e => setForm({...form, name: e.target.value})} 
+                                className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                                onChange={e => {
+                                  setForm({...form, name: e.target.value});
+                                  setErrors(prev => ({...prev, name: false}));
+                                }} 
                               />
+                              {errors.name && <span className="text-[10px] text-red-500 mt-1 block">{errors.name}</span>}
                           </div>
                           <div>
-                              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Contact Number <span className="text-red-500">*</span></label>
+                              <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.phone ? 'text-red-500' : 'text-[#8A7264]'}`}>Contact Number <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
                                 placeholder="09xxxxxxxxx" 
                                 maxLength="11"
                                 value={form.phone}
-                                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
+                                className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   // Regex removes any non-digit character
                                   const onlyNums = e.target.value.replace(/\D/g, '');
                                   setForm({...form, phone: onlyNums});
+                                  setErrors(prev => ({...prev, phone: false}));
                                 }} 
                               />
+                              {errors.phone && <span className="text-[10px] text-red-500 mt-1 block">{errors.phone}</span>}
                           </div>
                       </div>
                       <div>
-                          <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Alternative Number</label>
+                          <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.altPhone ? 'text-red-500' : 'text-[#8A7264]'}`}>Alternative Number</label>
                           <input 
                             type="text" 
                             placeholder="Optional (09xxxxxxxxx)" 
                             maxLength="11"
                             value={form.altPhone}
-                            className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors" 
+                            className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                             onChange={e => {
                                 const onlyNums = e.target.value.replace(/\D/g, '');
                                 setForm({...form, altPhone: onlyNums});
+                                setErrors(prev => ({...prev, altPhone: false}));
                             }} 
                           />
+                          {errors.altPhone && <span className="text-[10px] text-red-500 mt-1 block">{errors.altPhone}</span>}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
                           <div className="relative" ref={calendarWrapRef}>
-                              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Date <span className="text-red-500">*</span></label>
+                              <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupDate ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Date <span className="text-red-500">*</span></label>
 
                               {pickupType === 'now' ? (
                                 <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
@@ -567,7 +594,7 @@ if (data.success && data.checkoutUrl) {
                                       }
                                       setShowCalendar(s => !s);
                                     }}
-                                    className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
+                                    className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
                                   >
                                     <span className={form.pickupDate ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
                                       {form.pickupDate ? formatDateLong(form.pickupDate) : 'Select pickup date'}
@@ -580,21 +607,28 @@ if (data.success && data.checkoutUrl) {
                                       minDate={minPreOrderDate}
                                       todayDate={getLiveNow().dateStr}
                                       openUpward={calendarOpenUpward}
-                                      onSelect={(dateStr) => setForm(f => ({...f, pickupDate: dateStr}))}
+                                      onSelect={(dateStr) => {
+                                        setForm(f => ({...f, pickupDate: dateStr}));
+                                        setErrors(prev => ({...prev, pickupDate: false}));
+                                      }}
                                       onClose={() => setShowCalendar(false)}
                                     />
                                   )}
-                                  <p className="text-[10px] text-[#8A7264] mt-1">Requires at least {PRE_ORDER_MIN_LEAD_DAYS} {PRE_ORDER_MIN_LEAD_DAYS === 1 ? 'day' : 'days'} advance notice (earliest: {formatDateLong(minPreOrderDate)})</p>
+                                  {errors.pickupDate ? (
+                                    <span className="text-[10px] text-red-500 mt-1 block">{errors.pickupDate}</span>
+                                  ) : (
+                                    <p className="text-[10px] text-[#8A7264] mt-1">Requires at least {PRE_ORDER_MIN_LEAD_DAYS} {PRE_ORDER_MIN_LEAD_DAYS === 1 ? 'day' : 'days'} advance notice (earliest: {formatDateLong(minPreOrderDate)})</p>
+                                  )}
                                 </>
                               )}
                           </div>
                           <div ref={timeDropdownRef}>
-                              <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Pickup Time <span className="text-red-500">*</span></label>
+                              <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupTime ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
                                 <button
                                   type="button"
                                   onClick={() => setShowTimeDropdown(s => !s)}
-                                  className={`w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                  className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors bg-white flex items-center justify-between text-left ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                                 >
                                   <span className="flex items-center gap-2 truncate">
                                     <Clock size={13} className="text-[#8A7264] shrink-0" />
@@ -629,6 +663,7 @@ if (data.success && data.checkoutUrl) {
                                               disabled={disabled}
                                               onClick={() => {
                                                 setForm(f => ({ ...f, pickupTime: slot.value }));
+                                                setErrors(prev => ({...prev, pickupTime: false}));
                                                 setShowTimeDropdown(false);
                                               }}
                                               className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
@@ -654,6 +689,7 @@ if (data.success && data.checkoutUrl) {
                                   document.body
                                 )}
                               </div>
+                              {errors.pickupTime && <span className="text-[10px] text-red-500 mt-1 block">{errors.pickupTime}</span>}
                           </div>
                       </div>
 

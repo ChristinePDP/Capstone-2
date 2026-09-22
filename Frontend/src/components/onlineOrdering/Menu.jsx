@@ -103,11 +103,12 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 // ─────────────────────────────────────────────────────────────
 // Bundle Stepper Modal (NEW)
 // ─────────────────────────────────────────────────────────────
-function BundleModal({ bundle, onClose, onAddToCart }) {
+function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
   const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
+  const [errors, setErrors] = useState({});
   const products = bundle.products || [];
 
   if (!bundle || products.length === 0) return null;
@@ -124,6 +125,10 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
         ...(prev[currentProduct.id] || {}),
         [label]: value
       }
+    }));
+    setErrors(prev => ({
+      ...prev,
+      [label]: false
     }));
   };
 
@@ -142,16 +147,21 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
 
   const handleNext = () => {
     if (hasFields) {
-      const missingFields = currentProduct.order_slip_fields.filter(
-        field => !bundleAnswers[currentProduct.id]?.[field.label] || bundleAnswers[currentProduct.id][field.label].trim() === ''
-      );
-      if (missingFields.length > 0) {
-        alert(`Mangyaring sagutan ang lahat ng fields para sa ${currentProduct.name}.`);
+      const newErrors = {};
+      currentProduct.order_slip_fields.forEach(field => {
+        const answer = bundleAnswers[currentProduct.id]?.[field.label];
+        if (!answer || answer.trim() === '') {
+          newErrors[field.label] = true;
+        }
+      });
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
         return;
       }
     }
 
     if (!isLastStep) {
+      setErrors({});
       setCurrentStep(prev => prev + 1);
     } else {
       const hasAnyImage = Object.values(bundleImages).some(Boolean);
@@ -168,7 +178,10 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
   };
 
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(prev => prev - 1);
+    if (currentStep > 0) {
+      setErrors({});
+      setCurrentStep(prev => prev - 1);
+    }
   };
 
   return (
@@ -209,9 +222,9 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
                 if (field.type === 'Select') {
                   return (
                     <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
                       <select 
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" 
+                        className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                         value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)}
                       >
@@ -220,33 +233,36 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
                           <option key={i} value={opt}>{opt}</option>
                         ))}
                       </select>
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
                     </div>
                   );
                 }
                 if (field.type === 'Textarea') {
                   return (
                     <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
                       <textarea 
                         placeholder={`Enter ${field.label}...`} 
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors" 
+                        className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none resize-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                         rows={3} 
                         value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)} 
                       />
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
                     </div>
                   );
                 }
                 return (
                   <div key={index} className="flex flex-col w-full">
-                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
+                    <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
                     <input 
                       type={field.type === 'Number' ? 'number' : 'text'} 
                       placeholder={`Enter ${field.label}...`} 
-                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" 
+                      className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                       value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
                       onChange={e => handleAnswerChange(field.label, e.target.value)} 
                     />
+                    {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
                   </div>
                 );
               })}
@@ -314,12 +330,13 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
 // ─────────────────────────────────────────────────────────────
 // Normal Product Modal (Preserved)
 // ─────────────────────────────────────────────────────────────
-function ProductModal({ product, onClose, onAddToCart }) {
+function ProductModal({ product, onClose, onAddToCart, showToast }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imageError, setImageError] = useState('');
   
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
+  const [errors, setErrors] = useState({});
 
   if (!product) return null;
 
@@ -365,26 +382,45 @@ function ProductModal({ product, onClose, onAddToCart }) {
       ...prev,
       [label]: value
     }));
+    setErrors(prev => ({
+      ...prev,
+      [label]: false
+    }));
   };
 
   const handleAdd = () => {
+    const newErrors = {};
+
     if (isVariable) {
-      if (!allGroupsSelected) {
-        alert(`Please select all options: ${product.price_groups.map(g => g.name).join(', ')}`);
-        return;
-      }
-      if (missingCombo) {
-        alert("This specific combination is currently unavailable.");
-        return;
-      }
+      product.price_groups.forEach(g => {
+        if (!selectedPriceOptions[g.name]) {
+          newErrors[g.name] = true;
+        }
+      });
+    }
+
+    if (isVariable && !allGroupsSelected) {
+      setErrors(newErrors);
+      return;
+    }
+
+    if (isVariable && missingCombo) {
+      // Kung missing combo, disabled na rin ang Add Button sa UI
+      return;
     }
 
     if (hasFields) {
-      const missingFields = product.order_slip_fields.filter(field => !slipAnswers[field.label] || slipAnswers[field.label].trim() === '');
-      if (missingFields.length > 0) {
-        alert(`Mangyaring sagutan ang: ${missingFields.map(f => f.label).join(', ')}`);
-        return;
-      }
+      product.order_slip_fields.forEach(field => {
+        const answer = slipAnswers[field.label];
+        if (!answer || answer.trim() === '') {
+          newErrors[field.label] = true;
+        }
+      });
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
     }
 
     onAddToCart({ 
@@ -404,8 +440,10 @@ function ProductModal({ product, onClose, onAddToCart }) {
 
         <div className="flex items-start justify-between gap-3 p-4 sm:p-6 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
           <div className="flex-1 min-w-0">
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1 truncate">{product.category}</span>
             <h2 className="text-xl sm:text-2xl font-serif text-[#3B1F0A] leading-tight mb-1.5 truncate">{product.name}</h2>
+            {product.inclusion && (
+              <p className="text-xs text-[#8A7264] mb-1.5 leading-snug">{product.inclusion}</p>
+            )}
             <p className="text-sm font-bold text-[#5A453C]">
               {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
             </p>
@@ -427,17 +465,21 @@ function ProductModal({ product, onClose, onAddToCart }) {
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.price_groups.map((group, index) => (
                   <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{group.name} *</label>
+                    <label className={`text-xs font-semibold mb-1.5 ${errors[group.name] ? 'text-red-500' : 'text-[#8A7264]'}`}>{group.name} *</label>
                     <select
-                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
+                      className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[group.name] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
                       value={selectedPriceOptions[group.name] || ''}
-                      onChange={e => setSelectedPriceOptions(prev => ({ ...prev, [group.name]: e.target.value }))}
+                      onChange={e => {
+                        setSelectedPriceOptions(prev => ({ ...prev, [group.name]: e.target.value }));
+                        setErrors(prev => ({ ...prev, [group.name]: false }));
+                      }}
                     >
                       <option value="" disabled>Select {group.name}...</option>
                       {group.options.map((opt, i) => (
                         <option key={i} value={opt}>{opt}</option>
                       ))}
                     </select>
+                    {errors[group.name] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                   </div>
                 ))}
               </div>
@@ -453,28 +495,31 @@ function ProductModal({ product, onClose, onAddToCart }) {
                   if (field.type === 'Select') {
                     return (
                       <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                        <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <select className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} defaultValue="">
+                        <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                        <select className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} onChange={e => handleAnswerChange(field.label, e.target.value)} defaultValue="">
                           <option value="" disabled>Select {field.label}...</option>
                           {field.options?.map((opt, i) => (
                             <option key={i} value={opt}>{opt}</option>
                           ))}
                         </select>
+                        {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                       </div>
                     );
                   }
                   if (field.type === 'Textarea') {
                     return (
                       <div key={index} className="flex flex-col w-full basis-full">
-                        <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                        <textarea placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors" rows={3} onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                        <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                        <textarea placeholder={`Enter ${field.label}...`} className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none resize-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} rows={3} onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                        {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                       </div>
                     );
                   }
                   return (
                     <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{field.label}</label>
-                      <input type={field.type === 'Number' ? 'number' : 'text'} placeholder={`Enter ${field.label}...`} className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors" onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                      <input type={field.type === 'Number' ? 'number' : 'text'} placeholder={`Enter ${field.label}...`} className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} onChange={e => handleAnswerChange(field.label, e.target.value)} />
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1">This field is required</span>}
                     </div>
                   );
                 })}
@@ -965,8 +1010,8 @@ export default function Menu({ cart, setCart }) {
                   </div>
                   <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                    <div className="flex-1 mb-1.5 lg:mb-1.5">
-                      <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug line-clamp-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.25rem]">{p.name}</h3>
+                    <div className="flex-1 mb-2">
+                      <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug line-clamp-2">{p.name}</h3>
 
                       {p.type === 'bundle' && (
                         <p
@@ -974,6 +1019,15 @@ export default function Menu({ cart, setCart }) {
                           title={getBundleDescription(p)}
                         >
                           {getBundleDescription(p)}
+                        </p>
+                      )}
+
+                      {p.type !== 'bundle' && p.inclusion && (
+                        <p
+                          className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug line-clamp-2 mt-1"
+                          title={p.inclusion}
+                        >
+                          {p.inclusion}
                         </p>
                       )}
                     </div>
@@ -1264,9 +1318,9 @@ export default function Menu({ cart, setCart }) {
 
       {/* RENDER MODAL BASED ON TYPE */}
       {modal && modal.type === 'bundle' ? (
-        <BundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={addToCart} />
+        <BundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={addToCart} showToast={showToast} />
       ) : modal ? (
-        <ProductModal product={modal} onClose={() => setModal(null)} onAddToCart={addToCart} />
+        <ProductModal product={modal} onClose={() => setModal(null)} onAddToCart={addToCart} showToast={showToast} />
       ) : null}
 
       {previewImage && <ImagePreviewModal product={previewImage} onClose={() => setPreviewImage(null)} />}

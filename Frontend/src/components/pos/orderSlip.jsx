@@ -137,6 +137,9 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
           <div className="flex-1 min-w-0">
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1 truncate">{product.category}</span>
             <h2 className="text-xl sm:text-2xl font-serif text-[#3B1F0A] leading-tight mb-1.5 truncate">{product.name}</h2>
+            {product.inclusion && (
+              <p className="text-xs text-[#8A7264] mb-1.5 leading-snug">{product.inclusion}</p>
+            )}
             <p className="text-sm font-bold text-[#5A453C]">
               {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
             </p>

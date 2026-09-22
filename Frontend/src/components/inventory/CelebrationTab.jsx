@@ -78,7 +78,7 @@ export default function CelebrationTab() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800">Celebration Materials</h3>
+            <h3 className="font-bold text-brand-800"> Celebration/Product Materials</h3>
             <p className="text-xs text-brand-400 mt-0.5">Mag-manage ng Printed Balloons, Tarpaulin, at iba pang party add-ons.</p>
           </div>
           <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
@@ -174,7 +174,7 @@ export default function CelebrationTab() {
 
         {filtered.length > PER_PAGE && (
            <div className="p-3 border-t border-brand-100">
-             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="materials" onChange={setPage} />
+             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total=" celebration materials" onChange={setPage} />
            </div>
         )}
       </Card>

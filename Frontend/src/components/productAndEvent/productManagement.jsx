@@ -473,6 +473,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         product={editProduct}
         onSaveSuccess={handleSaveSuccess}
         onDelete={handleModalDelete}
+        showToast={showToast}
       />
 
       <ConfirmModal

@@ -109,11 +109,12 @@ function Button({ variant = 'secondary', size = 'md', className = '', children, 
   return <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} {...props}>{children}</button>;
 }
 
-function Input({ label, required, className = '', ...props }) {
+function Input({ label, required, error, className = '', ...props }) {
   return (
     <div className="w-full min-w-0">
-      {label && <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">{label} {required && <span className="text-red-500">*</span>}</label>}
-      <input className={`w-full border border-[#DED4CC] rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-[#5A453C] bg-white transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${className}`} {...props} />
+      {label && <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${error ? 'text-red-500' : 'text-[#8A7264]'}`}>{label} {required && <span className="text-red-500">*</span>}</label>}
+      <input className={`w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`} {...props} />
+      {error && <span className="text-[10px] text-red-500 mt-1 block">{error}</span>}
     </div>
   );
 }
@@ -139,7 +140,7 @@ function Textarea({ label, className = '', ...props }) {
 }
 
 const ProductDetailsForm = forwardRef(function ProductDetailsForm(
-  { form, onChange, previewUrl, fileInputRef, onFileSelect, onRemoveImage, availableTags = [], className = '' },
+  { form, onChange, previewUrl, fileInputRef, onFileSelect, onRemoveImage, availableTags = [], errors = {}, className = '' },
   ref
 ) {
   const hasImage = !!(previewUrl || form.image);
@@ -177,7 +178,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col gap-3">
-            <Input label="Product Name" required value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
+            <Input label="Product Name" required error={errors.name} value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="w-full min-w-0">
                 <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Image File</label>
@@ -242,105 +243,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   );
 });
 
-function MultiplePriceOptions({
-  pricingMode, onPricingModeChange, price, onPriceChange, priceGroups,
-  onAddPriceGroup, onUpdatePriceGroup, onRemovePriceGroup,
-  generatedCombos, priceMatrix, onMatrixPriceChange, className = '', style,
-}) {
-  return (
-    <div style={style} className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col ${className}`}>
-      <div className="flex items-center gap-3 mb-4 shrink-0">
-        <input
-          type="checkbox"
-          id="variablePriceToggle"
-          className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
-          checked={pricingMode === 'variable'}
-          onChange={e => onPricingModeChange(e.target.checked ? 'variable' : 'fixed')}
-        />
-        <label htmlFor="variablePriceToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] cursor-pointer select-none">
-          Multiple Price Options
-        </label>
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col">
-      {pricingMode === 'fixed' ? (
-        <Input label="Price" required type="number" min="0" value={price} onChange={e => onPriceChange(e.target.value)} placeholder="0" />
-      ) : (
-        <div className="flex flex-col flex-1 min-h-0 gap-4">
-          <div className="shrink-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">Price Groups (e.g. Size, Theme)</p>
-            <div className="flex flex-col gap-2">
-              {priceGroups.map(pg => (
-                <div key={pg.id} className="flex flex-row items-center gap-2 w-full">
-                  <input placeholder="Name (e.g. Size)" value={pg.name} onChange={e => onUpdatePriceGroup(pg.id, 'name', e.target.value)} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
-                  <input placeholder="Options (comma-separated)" value={pg.options} onChange={e => onUpdatePriceGroup(pg.id, 'options', e.target.value)} className="flex-[2] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
-                  <button type="button" onClick={() => onRemovePriceGroup(pg.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors"><Trash2 size={14} /></button>
-                </div>
-              ))}
-            </div>
-            <button type="button" onClick={onAddPriceGroup} className="mt-3 w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white flex items-center justify-center gap-1.5 hover:bg-[#F5EFEB] transition-colors">
-              <Plus size={14} /> Add Price Group
-            </button>
-          </div>
-
-          {generatedCombos.length > 0 && (
-            <div className="border-t border-[#EAE4E0] pt-4 flex flex-col flex-1 min-h-0">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 shrink-0">Price Matrix</p>
-              <div className="flex flex-col gap-2 pr-1 overflow-y-auto scrollbar-thin flex-1 min-h-0">
-                {generatedCombos.map((combo, idx) => {
-                  const comboLabel = Object.values(combo).join(' / ');
-                  const currentPrice = priceMatrix.find(p => JSON.stringify(p.combo) === JSON.stringify(combo))?.price || '';
-
-                  return (
-                    <div key={idx} className="flex items-center justify-between text-xs bg-white p-2.5 rounded-xl border border-[#DED4CC] gap-3">
-                      <span className="font-semibold text-[#5A453C] truncate">{comboLabel}</span>
-                      <div className="flex items-center gap-2 shrink-0 bg-[#FCFAF9] border border-[#DED4CC] rounded-xl px-3 py-1.5 focus-within:border-[#5A453C]">
-                        <span className="font-bold text-[#8A7264] select-none">₱</span>
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={currentPrice}
-                          onChange={e => onMatrixPriceChange(combo, e.target.value)}
-                          className="w-16 outline-none text-[#3B1F0A] font-semibold text-right bg-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      </div>
-    </div>
-  );
-}
-
-function getCartesianProduct(groups) {
-  const validGroups = groups.filter(g => g.name.trim() && g.options.trim());
-  if (validGroups.length === 0) return [];
-  
-  const parsedGroups = validGroups.map(g => ({
-      name: g.name.trim(),
-      options: g.options.split(',').map(o => o.trim()).filter(Boolean)
-  })).filter(g => g.options.length > 0);
-
-  if (parsedGroups.length === 0) return [];
-
-  return parsedGroups.reduce((acc, currGroup) => {
-      const newAcc = [];
-      acc.forEach(combo => {
-          currGroup.options.forEach(opt => {
-              newAcc.push({ ...combo, [currGroup.name]: opt });
-          });
-      });
-      return newAcc;
-  }, [{}] ); 
-}
-
-export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete }) {
+export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete, showToast = () => {} }) {
   const initialFormState = product ? {
     name: product.name || '',
     category: product.category || PRODUCT_CATEGORIES[0],
@@ -358,6 +261,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || []
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
   
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -366,12 +270,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const [exceptionSlots, setExceptionSlots] = useState(0);
   const [exceptions, setExceptions] = useState(product?.dateExceptions || []);
   
-  const [pricingMode, setPricingMode] = useState(product?.pricing_mode || 'fixed');
-  const [priceGroups, setPriceGroups] = useState(
-    product?.price_groups?.map(g => ({ id: crypto.randomUUID(), name: g.name, options: g.options.join(', ') })) || []
-  );
-  const [priceMatrix, setPriceMatrix] = useState(product?.price_matrix || []);
-
   const [availableTags, setAvailableTags] = useState([]);
 
   const fileInputRef = useRef(null);
@@ -394,12 +292,10 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
       } : BLANK_PRODUCT);
       
       setFields(product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || []);
-      setPricingMode(product?.pricing_mode || 'fixed');
-      setPriceGroups(product?.price_groups?.map(g => ({ id: crypto.randomUUID(), name: g.name, options: g.options.join(', ') })) || []);
-      setPriceMatrix(product?.price_matrix || []);
       setExceptions(product?.dateExceptions || []);
       setPreviewUrl('');
       setSelectedFile(null);
+      setErrors({});
     }
   }, [product, isOpen]);
 
@@ -412,7 +308,10 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     }
   }, [isOpen]);
 
-  const handleChange = (field, val) => setForm(prev => ({ ...prev, [field]: val }));
+  const handleChange = (field, val) => {
+    setForm(prev => ({ ...prev, [field]: val }));
+    setErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  };
 
   useEffect(() => {
     return () => {
@@ -430,23 +329,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     setExceptionDate(''); setExceptionSlots(0);
   };
   const removeException = (date) => setExceptions(prev => prev.filter(e => e.date !== date));
-
-  const addPriceGroup = () => setPriceGroups(prev => [...prev, { id: crypto.randomUUID(), name: '', options: '' }]);
-  const updatePriceGroup = (id, key, value) => setPriceGroups(prev => prev.map(g => (g.id === id ? { ...g, [key]: value } : g)));
-  const removePriceGroup = (id) => setPriceGroups(prev => prev.filter(g => g.id !== id));
-  
-  const handleMatrixPriceChange = (combo, value) => {
-    setPriceMatrix(prev => {
-        const comboKey = JSON.stringify(combo);
-        const existingIdx = prev.findIndex(p => JSON.stringify(p.combo) === comboKey);
-        if (existingIdx >= 0) {
-            const next = [...prev];
-            next[existingIdx].price = value;
-            return next;
-        }
-        return [...prev, { combo, price: value }];
-    });
-  };
 
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
@@ -467,45 +349,22 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   };
 
   const handleSave = async () => {
-    if (!form.name) {
-        alert("Please fill in the Product Name.");
+    const newErrors = {};
+
+    if (!form.name.trim()) {
+        newErrors.name = 'Product name is required.';
+    }
+
+    if (form.price === '' || isNaN(Number(form.price)) || Number(form.price) < 0) {
+        newErrors.price = 'Please set a valid positive price.';
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
         return;
     }
-
-    let finalPriceMatrix = [];
-    let finalPriceGroups = [];
-    let derivedBasePrice = Number(form.price);
-
-    if (pricingMode === 'fixed') {
-        if (form.price === '' || isNaN(Number(form.price)) || Number(form.price) < 0) {
-            alert("Please set a valid positive Price for the product.");
-            return;
-        }
-    }
-
-    if (pricingMode === 'variable') {
-        const combos = getCartesianProduct(priceGroups);
-        if (combos.length === 0) {
-            alert("Please add at least one Price Group with valid options.");
-            return;
-        }
-
-        for (const combo of combos) {
-            const match = priceMatrix.find(p => JSON.stringify(p.combo) === JSON.stringify(combo));
-            if (!match || match.price === '' || isNaN(Number(match.price)) || Number(match.price) < 0) {
-                alert(`Please set a valid positive price for combination: ${Object.values(combo).join(' / ')}`);
-                return;
-            }
-            finalPriceMatrix.push({ combo, price: Number(match.price) });
-        }
-
-        finalPriceGroups = priceGroups.map(g => ({
-            name: g.name.trim(),
-            options: g.options.split(',').map(o => o.trim()).filter(Boolean)
-        }));
-
-        derivedBasePrice = Math.min(...finalPriceMatrix.map(m => m.price));
-    }
+    setErrors({});
+    const derivedBasePrice = Number(form.price);
 
     setIsSubmitting(true);
     let finalImageUrl = form.image; 
@@ -557,9 +416,9 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             daily_limit: Number(form.dailyLimit), 
             allow_file_upload: form.allowFileUpload,
             order_slip_fields: cleanFields, 
-            pricing_mode: pricingMode,
-            price_groups: finalPriceGroups,
-            price_matrix: finalPriceMatrix,
+            pricing_mode: 'fixed',
+            price_groups: [],
+            price_matrix: [],
             event_tags: form.eventTags || [] 
         };
 
@@ -576,7 +435,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         const data = await response.json();
 
         if (data.success) {
-            alert('Product saved successfully!');
             if (onSaveSuccess) onSaveSuccess(data.data); 
             if (onClose) onClose();
         } else {
@@ -584,13 +442,11 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         }
     } catch (error) {
         console.error("Save Error:", error);
-        alert(`Failed to save: ${error.message}`);
+        showToast(`Failed to save: ${error.message}`, 'warning');
     } finally {
         setIsSubmitting(false);
     }
   };
-
-  const generatedCombos = pricingMode === 'variable' ? getCartesianProduct(priceGroups) : [];
 
   const handleDeleteClick = () => {
     if (!isEditing || !onDelete) return;
@@ -624,22 +480,13 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             fileInputRef={fileInputRef}
             onFileSelect={handleFileSelect}
             onRemoveImage={handleRemoveImage}
-            availableTags={availableTags} 
+            availableTags={availableTags}
+            errors={errors}
           />
 
-          <MultiplePriceOptions
-            pricingMode={pricingMode}
-            onPricingModeChange={setPricingMode}
-            price={form.price}
-            onPriceChange={val => handleChange('price', val)}
-            priceGroups={priceGroups}
-            onAddPriceGroup={addPriceGroup}
-            onUpdatePriceGroup={updatePriceGroup}
-            onRemovePriceGroup={removePriceGroup}
-            generatedCombos={generatedCombos}
-            priceMatrix={priceMatrix}
-            onMatrixPriceChange={handleMatrixPriceChange}
-          />
+          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+            <Input label="Price" required type="number" min="0" error={errors.price} value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="0" />
+          </div>
         </div>
 
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
