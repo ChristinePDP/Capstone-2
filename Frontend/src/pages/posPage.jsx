@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import PosMenu from '../components/pos/posMenu';
 import PosCart from '../components/pos/posCart';
+import { invalidatePosBundlesCache } from '../components/pos/posMenu';
 import OrderSlip from '../components/pos/orderSlip';
 import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
 
@@ -112,9 +113,9 @@ export default function PosPage() {
   // minsan lang talaga ito tatawag sa backend habang bukas ang session (o
   // hangga't hindi ni-refresh manually). Loading spinner lang ang ipapakita
   // kapag talagang wala pang laman ang cache (unang buksan ng app).
-  const loadProducts = async (force = false) => {
+  const loadProducts = async (force = false, silent = false) => {
     try {
-      if (force || products.length === 0) setLoading(true);
+      if (!silent && (force || products.length === 0)) setLoading(true);
 
       const normalized = await fetchPosProducts(force);
       setProducts(normalized);
@@ -127,9 +128,41 @@ export default function PosPage() {
   };
 
   useEffect(() => {
-    loadProducts();
+    posProductsCache = null;
+    loadProducts(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (products.length === 0) return;
+
+    setCart(prev => prev.flatMap(item => {
+      const product = products.find(candidate => candidate.id === item.id);
+      if (!product) return [item];
+
+      const limit = orderType === 'Pre-Order'
+        ? product.pre_order_available_stock ?? product.available_stock
+        : product.buy_now_available_stock ?? product.available_stock;
+
+      if (limit === undefined || item.qty <= limit) return [item];
+      if (limit <= 0) return [];
+      return [{ ...item, qty: limit }];
+    }));
+  }, [products, orderType]);
+
+  useEffect(() => {
+    const handleDataChanged = (event) => {
+      const table = event.detail?.table;
+      if (table !== 'products' && table !== 'celebration_materials' && table !== 'orders' && table !== 'order_items' && table !== 'promo_bundles' && table !== 'bundle_products') return;
+
+      posProductsCache = null;
+      invalidatePosBundlesCache();
+      loadProducts(true, true).catch(error => console.error('Silent POS refresh failed:', error));
+    };
+
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => window.removeEventListener('cake:data-changed', handleDataChanged);
+  }, [products.length]);
 
   // I-call ito pagkatapos ng successful na Place Order, para agad ma-reflect
   // sa cashier ang bagong stock/available_stock (bawas na dahil sa order na
@@ -213,6 +246,7 @@ export default function PosPage() {
             setActiveCategory={setActiveCategory}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            orderType={orderType}
             cart={cart}
             onAddToCart={handleAddToCart}
           />

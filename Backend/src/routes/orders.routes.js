@@ -1,15 +1,16 @@
 // backend/routes/orders.routes.js
 import { Router } from 'express';
 import { OrdersController } from '../controller/orders.controller.js';
-// I-uncomment kung protected route:
-// import { authMiddlewareJwt } from '../middleware/auth.middleware.js';
+import { authMiddlewareJwt } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-// router.use(authMiddlewareJwt); // i-enable kapag gusto mong naka-login lang ang admin
+router.use(authMiddlewareJwt);
 
 // GET  /api/inventory/orders          -> lahat ng orders
 router.get('/', OrdersController.getAllOrders);
+
+router.get('/pending-celebration-materials', OrdersController.getPendingCelebrationMaterialRestock);
 
 // GET  /api/inventory/orders/:id      -> isang order (with customer + items)
 router.get('/:id', OrdersController.getOrderById);

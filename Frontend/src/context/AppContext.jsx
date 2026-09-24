@@ -22,6 +22,8 @@ const AppContext = createContext(null);
 // interceptors, credentials, atbp) — kapag absolute na ang URL na ipinasa
 // sa isang axios call, hindi na ito ipe-prepend ng axios sa baseURL nito.
 const ORDERS_API_URL = `${import.meta.env.VITE_API_URL}/allOrders`;
+const REALTIME_API_URL = `${import.meta.env.VITE_API_URL}/realtime/events`;
+const FULFILLMENT_API_URL = `${import.meta.env.VITE_API_URL}/allOrders/pending-celebration-materials`;
 
 const normalizeName = (value = '') => String(value).trim().toLowerCase();
 
@@ -90,13 +92,14 @@ export function AppProvider({ children }) {
   const [wasteLogs,      setWasteLogs]      = useState([]);
   const [products,       setProducts]       = useState([]);
   const [orders,         setOrders]         = useState([]);
+  const [pendingMaterialFulfillment, setPendingMaterialFulfillment] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
 
   // ── Network Fetch Loaders ──
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
 
     try {
       // Helper function para hindi mag-fail ang Promise.all kapag may error
@@ -110,7 +113,7 @@ export function AppProvider({ children }) {
         }
       };
 
-      const [ing, mat, rec, prodLog, wst, prd, ord] = await Promise.all([
+      const [ing, mat, rec, prodLog, wst, prd, ord, fulfillment] = await Promise.all([
         safeFetch('/ingredients'),
         safeFetch('/materials'),
         safeFetch('/recipes'),
@@ -118,6 +121,7 @@ export function AppProvider({ children }) {
         safeFetch('/waste'),
         safeFetch('/products'),
         safeFetch(ORDERS_API_URL), // /api/allOrders, hindi /inventory/orders
+        safeFetch(FULFILLMENT_API_URL),
       ]);
 
       const normalizedIngredients = (ing.data || []).map(item => ({
@@ -196,6 +200,7 @@ export function AppProvider({ children }) {
       setProductionLogs(normalizedProductionLogs);
       setProducts(normalizedProducts);
       setOrders(ord.data || []);
+      setPendingMaterialFulfillment(fulfillment.data || []);
 
       // Mapping para sa Waste
       setWasteLogs((wst.data || []).map(w => ({
@@ -211,7 +216,7 @@ export function AppProvider({ children }) {
     } catch (err) {
       console.error('fetchAll() encountered an unexpected error:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -223,6 +228,37 @@ export function AppProvider({ children }) {
     if (isAuthed) {
       fetchAll();
     }
+  }, [isAuthed, fetchAll]);
+
+  useEffect(() => {
+    if (!isAuthed) return undefined;
+
+    const source = new EventSource(REALTIME_API_URL, { withCredentials: true });
+    let refreshTimer = null;
+
+    const refreshFromEvent = (event) => {
+      let change;
+      try {
+        change = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      window.dispatchEvent(new CustomEvent('cake:data-changed', { detail: change }));
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        fetchAll({ silent: true }).catch(err => console.error('Realtime refresh failed:', err));
+      }, 150);
+    };
+
+    source.addEventListener('data-change', refreshFromEvent);
+    source.onerror = () => console.warn('[Realtime] Live updates disconnected; browser will retry automatically.');
+
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      source.close();
+    };
   }, [isAuthed, fetchAll]);
 
   // ── Auth actions ──
@@ -278,30 +314,6 @@ export function AppProvider({ children }) {
   // Ginamit ang `fetchOrders()` dito (hindi `fetchAll()`) dahil mas
   // magaan ito — orders lang ang kinukuha nito, hindi lahat ng
   // ingredients/materials/products/atbp.
-  useEffect(() => {
-    if (!isAuthed) return;
-
-    const POLL_INTERVAL_MS = 15000; // 15 seconds — pwede mong i-adjust
-
-    const safePoll = () => {
-      fetchOrders().catch((err) => console.error('Order polling failed:', err));
-    };
-
-    const intervalId = setInterval(safePoll, POLL_INTERVAL_MS);
-
-    const handleFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') safePoll();
-    };
-    document.addEventListener('visibilitychange', handleFocusOrVisible);
-    window.addEventListener('focus', safePoll);
-
-    return () => {
-      clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleFocusOrVisible);
-      window.removeEventListener('focus', safePoll);
-    };
-  }, [isAuthed, fetchOrders]);
-
   // Kinukuha ang isang order (with items + customer) — useful sa modal/detail view
   const fetchOrderById = useCallback(async (id) => {
     try {
@@ -502,6 +514,7 @@ export function AppProvider({ children }) {
   // ── Value Provider ────
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
+    pendingMaterialFulfillment,
     loading, error,
     isAuthed, authReady, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,

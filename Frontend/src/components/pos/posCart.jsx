@@ -17,14 +17,16 @@ function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
-function isQuantityTracked(item) {
+function isQuantityTracked(item, orderType = 'Buy Now') {
   if (!item || item.type === 'bundle') return false;
-  return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
+  return item.order_type === 'Pre-order' || orderType === 'Pre-Order'
+    || hasDailyLimitSet(item)
+    || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
-function getQuantityLimit(item) {
-  const basis = hasDailyLimitSet(item) ? item.daily_limit : item.stock_quantity;
-  return item.available_stock ?? basis ?? 0;
+function getQuantityLimit(item, orderType = 'Buy Now') {
+  if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
+  return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
@@ -85,11 +87,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const handleUpdateQty = (idx, delta) => {
     const item = cart[idx];
 
-    if (delta > 0 && isQuantityTracked(item)) {
+    if (delta > 0 && isQuantityTracked(item, orderType)) {
       const currentQtyInCart = cart
         .filter(i => i.id === item.id)
         .reduce((sum, i) => sum + i.qty, 0);
-      const limit = getQuantityLimit(item);
+      const limit = getQuantityLimit(item, orderType);
 
       if (currentQtyInCart + delta > limit) {
         showLimitToast(`Sorry, you've reached the available limit for "${item.name}".`);

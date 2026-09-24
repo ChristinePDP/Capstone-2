@@ -8,8 +8,10 @@ import {
   WasteController,
   InventoryLogController
 } from '../controller/inventory.controller.js';
+import { authMiddlewareJwt } from '../middleware/auth.middleware.js';
 
 const router = Router();
+router.use(authMiddlewareJwt);
 
 // ── INGREDIENTS ─────────────────────────────────────
 router.get('/ingredients', IngredientController.getAll); 

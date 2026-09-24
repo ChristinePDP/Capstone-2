@@ -94,9 +94,12 @@ export const fetchMenuProducts = async (filters = {}) => {
   const productsWithStock = products.map(p => {
     const celebrationMaterial = materialByProductId.get(p.id);
     const limitField = getStockLimitField(p);
-    const baseStock = celebrationMaterial
+    const physicalStock = celebrationMaterial
       ? Number(celebrationMaterial.stock_quantity) || 0
-      : Number(p[limitField]) || 0;
+      : Number(p.stock_quantity) || 0;
+    const baseStock = limitField === 'daily_limit'
+      ? Number(p.daily_limit) || 0
+      : physicalStock;
     const reserved = reservedMap[p.id] || 0;
     const available = Math.max(0, baseStock - reserved);
 
@@ -107,7 +110,11 @@ export const fetchMenuProducts = async (filters = {}) => {
       is_celebration_material: Boolean(celebrationMaterial),
       celebration_material_id: celebrationMaterial?.id || null,
       stock_basis_field: limitField, // 'daily_limit' o 'stock_quantity' — para malaman ng frontend/consumer kung saan galing ang bilang
-      available_stock: available
+      available_stock: available,
+      buy_now_available_stock: Math.max(0, physicalStock - reserved),
+      pre_order_available_stock: limitField === 'daily_limit'
+        ? available
+        : Math.max(0, physicalStock - reserved)
     };
   });
 

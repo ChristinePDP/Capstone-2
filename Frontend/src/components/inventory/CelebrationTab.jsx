@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
+import { useState, useRef, useMemo } from 'react';
+import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
@@ -13,7 +13,8 @@ const PER_PAGE = 10;
 export default function CelebrationTab() {
   const context = useApp() || {};
   const { addMaterial, updateMaterial, deleteMaterial, restockMaterial } = context;
-  const materials = context.materials || [];
+  const materials = useMemo(() => context.materials || [], [context.materials]);
+  const pendingFulfillment = context.pendingMaterialFulfillment || [];
   const products = (context.products || []).filter(product => product.category === 'Celebration Material');
   const isLoading = !!context.loading;
 
@@ -76,6 +77,24 @@ export default function CelebrationTab() {
 
   return (
     <div className="space-y-5">
+      {pendingFulfillment.length > 0 && (
+        <div className="border border-red-200 bg-white rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border-b border-red-200">
+            <ShoppingCart size={14} className="text-red-600 shrink-0" />
+            <p className="text-xs font-bold uppercase tracking-wider text-red-700 flex-1">Pending Material Fulfillment</p>
+            <span className="text-[10px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full">{pendingFulfillment.length} items</span>
+          </div>
+          <ul className="divide-y divide-gray-100 max-h-48 overflow-y-auto">
+            {pendingFulfillment.map((item, index) => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+                <span className="text-sm font-semibold text-gray-800">{index + 1}. {item.name}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{item.neededToRestock} {item.unit}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
@@ -139,7 +158,7 @@ export default function CelebrationTab() {
               ) : (
                 <Table columns={[
                   { label: 'Item Name' },
-                  { label: 'Current Stock' },
+                  { label: 'Available Stock' },
                   { label: 'Stock Level' },
                   { label: 'Status' },
                   { label: 'Actions', align: 'right' },

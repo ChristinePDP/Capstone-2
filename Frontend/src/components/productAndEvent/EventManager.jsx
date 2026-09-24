@@ -376,8 +376,8 @@ export default function EventManager() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Kunin lahat ng events mula sa backend
-  const fetchEvents = async (force = false) => {
-    if (force || events.length === 0) setIsLoading(true);
+  const fetchEvents = async (force = false, silent = false) => {
+    if (!silent && (force || events.length === 0)) setIsLoading(true);
     setError(null);
     try {
       const data = await fetchEventsFromApi(force);
@@ -391,7 +391,15 @@ export default function EventManager() {
   };
 
   useEffect(() => {
-    fetchEvents();
+    fetchEvents(true);
+  }, []);
+
+  useEffect(() => {
+    const handleDataChanged = () => fetchEvents(true, true);
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('cake:data-changed', handleDataChanged);
+    };
   }, []);
 
   const handleOpenAdd = () => {
@@ -420,6 +428,7 @@ export default function EventManager() {
       const isUpdate = isEditing && formData.id;
       const res = await fetch(`${API_BASE}/events${isUpdate ? `/${formData.id}` : ''}`, {
         method: isUpdate ? 'PUT' : 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       });
@@ -451,7 +460,7 @@ export default function EventManager() {
     setIsDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/events/${deleteTarget.id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/events/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
       await parseResponse(res);
       setEvents(prev => prev.filter(ev => ev.id !== deleteTarget.id));
       if (eventsCache) eventsCache = eventsCache.filter(ev => ev.id !== deleteTarget.id);

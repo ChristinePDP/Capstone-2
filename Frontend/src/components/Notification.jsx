@@ -86,8 +86,11 @@ export default function Notification() {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
+    const handleDataChanged = (event) => {
+      if (event.detail?.table === 'notifications') fetchNotifications();
+    };
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => window.removeEventListener('cake:data-changed', handleDataChanged);
   }, [fetchNotifications]);
 
   useEffect(() => {

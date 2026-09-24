@@ -290,8 +290,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   const [editProduct, setEditProduct] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const fetchProducts = async (force = false) => {
-    if (force || products.length === 0) setIsLoading(true);
+  const fetchProducts = async (force = false, silent = false) => {
+    if (!silent && (force || products.length === 0)) setIsLoading(true);
     setError(null);
     try {
       const data = await fetchProductsFromApi(force);
@@ -307,8 +307,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   // Fetch ng bundles para maisama sa "All" view. Hiwalay ito sa error state
   // ng products — kung mabigo lang ang bundles, huwag hadlangan ang buong
   // page (mananatiling makikita pa rin ang products).
-  const fetchBundles = async (force = false) => {
-    if (force || bundles.length === 0) setBundlesLoading(true);
+  const fetchBundles = async (force = false, silent = false) => {
+    if (!silent && (force || bundles.length === 0)) setBundlesLoading(true);
     try {
       const data = await fetchBundlesListFromApi(force);
       setBundles(data);
@@ -320,8 +320,19 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   };
 
   useEffect(() => {
-    fetchProducts();
-    fetchBundles();
+    fetchProducts(true);
+    fetchBundles(true);
+  }, []);
+
+  useEffect(() => {
+    const handleDataChanged = () => {
+      fetchProducts(true, true);
+      fetchBundles(true, true);
+    };
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('cake:data-changed', handleDataChanged);
+    };
   }, []);
 
   const filtered = products.filter(p => {

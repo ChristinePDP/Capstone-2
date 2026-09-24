@@ -269,6 +269,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const [exceptionDate, setExceptionDate] = useState('');
   const [exceptionSlots, setExceptionSlots] = useState(0);
   const [exceptions, setExceptions] = useState(product?.dateExceptions || []);
+  const [dailyLimitEnabled, setDailyLimitEnabled] = useState(Number(product?.daily_limit || 0) > 0);
   
   const [availableTags, setAvailableTags] = useState([]);
 
@@ -279,6 +280,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
   useEffect(() => {
     if (isOpen) {
+      const dailyLimit = Number(product?.daily_limit || 0);
       setForm(product ? {
         name: product.name || '',
         category: product.category || PRODUCT_CATEGORIES[0],
@@ -286,10 +288,11 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         price: product.price || '',
         inclusion: product.inclusion || '',
         image: product.image_url || '',
-        dailyLimit: product.daily_limit || 0,
+        dailyLimit,
         allowFileUpload: product.allow_file_upload || false,
         eventTags: product.event_tags || []
       } : BLANK_PRODUCT);
+      setDailyLimitEnabled(dailyLimit > 0);
       
       setFields(product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || []);
       setExceptions(product?.dateExceptions || []);
@@ -376,6 +379,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
             const uploadResponse = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/upload-image`, {
                 method: 'POST',
+              credentials: 'include',
                 body: formData,
             });
             const uploadData = await uploadResponse.json();
@@ -428,6 +432,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
         const response = await fetch(saveUrl, {
             method: isEditing ? 'PUT' : 'POST',
+          credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
@@ -531,7 +536,18 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
           <div className="flex items-center gap-3 mb-2">
-            <input type="checkbox" id="limitToggle" className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer" defaultChecked={form.dailyLimit > 0} />
+            <input
+              type="checkbox"
+              id="limitToggle"
+              checked={dailyLimitEnabled}
+              onChange={e => {
+                const enabled = e.target.checked;
+                setDailyLimitEnabled(enabled);
+                if (!enabled) handleChange('dailyLimit', 0);
+                else if (Number(form.dailyLimit) <= 0) handleChange('dailyLimit', 1);
+              }}
+              className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
+            />
             <label htmlFor="limitToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer">Pre-Order Limits</label>
           </div>
           <p className="text-xs text-[#8A7264] mb-4">
@@ -540,7 +556,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
             <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-              <Input label="Default Daily Capacity (Slots)" type="number" min="0" value={form.dailyLimit} onChange={e => handleChange('dailyLimit', e.target.value)} placeholder="0" />
+              <Input label="Default Daily Capacity (Slots)" type="number" min="0" disabled={!dailyLimitEnabled} value={form.dailyLimit} onChange={e => handleChange('dailyLimit', e.target.value)} placeholder="0" />
             </div>
 
             <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">

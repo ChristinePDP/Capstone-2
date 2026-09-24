@@ -23,6 +23,15 @@ const OrdersController = {
     }
   },
 
+  async getPendingCelebrationMaterialRestock(_req, res, next) {
+    try {
+      const materials = await OrdersService.getPendingCelebrationMaterialRestock();
+      return res.status(200).json({ success: true, data: materials });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   // PATCH /api/inventory/orders/:id/status
   // Body: { "status": "Completed" }
   async updateOrderStatus(req, res, next) {

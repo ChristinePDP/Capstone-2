@@ -76,25 +76,34 @@ export const getPosProducts = async (filters = {}) => {
         .map(material => [material.product_id, material])
     );
 
-    const reservedMap = {};
+    const reservedBuyNowMap = {};
+    const reservedPreOrderMap = {};
     pendingItems.forEach(item => {
-      reservedMap[item.product_id] = (reservedMap[item.product_id] || 0) + item.quantity;
+      const target = item.orders?.order_type === 'Pre-Order'
+        ? reservedPreOrderMap
+        : reservedBuyNowMap;
+      target[item.product_id] = (target[item.product_id] || 0) + Number(item.quantity || 0);
     });
 
     return products.map(p => {
       const celebrationMaterial = materialByProductId.get(p.id);
       const limitField = getStockLimitField(p);
-      const baseStock = celebrationMaterial
+      const physicalStock = celebrationMaterial
         ? Number(celebrationMaterial.stock_quantity) || 0
-        : Number(p[limitField]) || 0;
+        : Number(p.stock_quantity) || 0;
+      const preOrderCapacity = limitField === 'daily_limit'
+        ? Number(p.daily_limit) || 0
+        : physicalStock;
       return {
         ...p,
-        stock: baseStock,
-        stock_quantity: baseStock,
+        stock: physicalStock,
+        stock_quantity: physicalStock,
         is_celebration_material: Boolean(celebrationMaterial),
         celebration_material_id: celebrationMaterial?.id || null,
         stock_basis_field: limitField,
-        available_stock: Math.max(0, baseStock - (reservedMap[p.id] || 0))
+        available_stock: Math.max(0, physicalStock - (reservedBuyNowMap[p.id] || 0)),
+        buy_now_available_stock: Math.max(0, physicalStock - (reservedBuyNowMap[p.id] || 0)),
+        pre_order_available_stock: Math.max(0, preOrderCapacity - (reservedPreOrderMap[p.id] || 0)),
       };
     });
   } catch (error) {

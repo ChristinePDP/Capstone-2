@@ -14,6 +14,10 @@ const MAX_FILE_SIZE_LABEL = '5MB';
 let posBundlesCache = null;
 let posBundlesPromise = null;
 
+export function invalidatePosBundlesCache() {
+  posBundlesCache = null;
+}
+
 async function fetchPosBundles() {
   if (posBundlesCache) return posBundlesCache;
   if (posBundlesPromise) return posBundlesPromise;
@@ -158,18 +162,17 @@ function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
-function isQuantityTracked(item) {
+function isQuantityTracked(item, orderType = 'Buy Now') {
   if (!item) return false;
   if (item.type === 'bundle') return item.is_tracked; 
-  if (item.is_celebration_material && item.order_type === 'Pre-order') return false;
-  if (item.is_celebration_material) return true;
+  if (item.order_type === 'Pre-order' || orderType === 'Pre-Order') return true;
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
-function getQuantityLimit(item) {
+function getQuantityLimit(item, orderType = 'Buy Now') {
   if (item.type === 'bundle') return item.available_stock;
-  const basis = hasDailyLimitSet(item) ? item.daily_limit : item.stock_quantity;
-  return item.available_stock ?? basis ?? 0;
+  if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
+  return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
 
 // --- ORDER SLIP / OPTIONS MODAL ---
@@ -656,7 +659,8 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
   );
 }
 
-export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, cart = [] }) {
+export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [] }) {
+  const [orderTypeFilter, setOrderTypeFilter] = useState('All');
   const [modal, setModal] = useState(null);
   const [bundles, setBundles] = useState([]);
   const [showBackToTop, setShowBackToTop] = useState(false);
@@ -701,8 +705,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   // warning toast at bumabalik ng `false` — dapat itigil ng caller ang
   // pag-add. Ginagamit ito sa lahat ng entry point papunta sa cart.
   const checkAndWarnLimit = (item, addQty = 1) => {
-    if (!isQuantityTracked(item)) return true;
-    const limit = getQuantityLimit(item);
+    if (!isQuantityTracked(item, orderType)) return true;
+    const limit = getQuantityLimit(item, orderType);
     const currentQtyInCart = getCartQtyForId(item.id);
     if (currentQtyInCart + addQty > limit) {
       showLimitToast(`Sorry, you've reached the available limit for "${item.name}".`);
@@ -789,7 +793,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           price_matrix: []
         };
       });
-  }, [bundles, products]);
+  }, [bundles, products, orderType]);
 
   // Bundles ay hindi galing sa `/pos/products?search=` (hiwalay itong
   // endpoint), kaya i-filter na lang ito sa client side base sa searchQuery,
@@ -800,7 +804,11 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     return bundleItems.filter(b => b.name.toLowerCase().includes(q));
   }, [bundleItems, searchQuery]);
 
-  const displayItems = useMemo(() => [...visibleBundleItems, ...products], [visibleBundleItems, products]);
+  const displayItems = useMemo(() => {
+    const items = [...visibleBundleItems, ...products];
+    return items.filter(item => orderTypeFilter === 'All'
+      || (orderTypeFilter === 'Buy Now' ? item.order_type === 'Pick-up Today' : item.order_type === orderTypeFilter));
+  }, [visibleBundleItems, products, orderTypeFilter]);
 
   const categories = useMemo(() => {
     return bundleItems.length > 0
@@ -837,8 +845,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       // --- BAGONG CODE PARA SA SORTING ---
       // Ihihiwalay natin at ilalagay sa dulo ang mga sold out
       const sortedCatProducts = [...catProducts].sort((a, b) => {
-        const isSoldOutA = isQuantityTracked(a) && getQuantityLimit(a) <= 0;
-        const isSoldOutB = isQuantityTracked(b) && getQuantityLimit(b) <= 0;
+        const isSoldOutA = isQuantityTracked(a, orderType) && getQuantityLimit(a, orderType) <= 0;
+        const isSoldOutB = isQuantityTracked(b, orderType) && getQuantityLimit(b, orderType) <= 0;
         
         if (isSoldOutA && !isSoldOutB) return 1;  // Ilagay si A sa huli
         if (!isSoldOutA && isSoldOutB) return -1; // Ilagay si B sa huli
@@ -856,12 +864,12 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
-              const isStockTracked = isQuantityTracked(p);
+              const isStockTracked = isQuantityTracked(p, orderType);
               // RESTORED: ibinabawas na ngayon ang laman ng cart (getCartQtyForId)
               // sa available limit, kaya kung, halimbawa, 4 available at 4 na rin
               // ang laman ng cart, "Sold Out" na agad ang makikita imbes na
               // patuloy pa rin makaka-add ang cashier.
-              const currentStock = Math.max(0, getQuantityLimit(p) - getCartQtyForId(p.id));
+              const currentStock = Math.max(0, getQuantityLimit(p, orderType) - getCartQtyForId(p.id));
               const isSoldOut = isStockTracked && currentStock <= 0;
               
               const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
@@ -906,6 +914,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                   </div>
                   <div className="p-3 sm:p-4 lg:p-4 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
+                    {p.type !== 'bundle' && <span className="self-start mb-1 rounded-full bg-[#F5EFEB] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#5A453C]">{p.order_type === 'Pick-up Today' ? 'Buy Now' : p.order_type}</span>}
                     <div className="flex-1 mb-1.5 lg:mb-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.5rem]">
                       <h3 className={`font-bold text-xs sm:text-sm lg:text-sm text-[#3B1F0A] leading-snug ${isBundle ? 'line-clamp-1' : 'line-clamp-2'}`}>{p.name}</h3>
                       {isBundle && (
@@ -983,7 +992,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
             )}
           </div>
           
-          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'}`}>
+          <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-20 opacity-100'}`}>
             <div className="flex sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
               {categories.map(cat => {
                 const Icon = getCategoryIcon(cat);
@@ -1004,6 +1013,13 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                   </button>
                 );
               })}
+            </div>
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide pt-2">
+              {['All', 'Buy Now', 'Pre-order', 'Both'].map(type => (
+                <button key={type} type="button" onClick={() => setOrderTypeFilter(type)} className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold ${orderTypeFilter === type ? 'border-[#3B1F0A] bg-[#3B1F0A] text-white' : 'border-[#DED4CC] bg-white text-[#8A7264]'}`}>
+                  {type}
+                </button>
+              ))}
             </div>
           </div>
         </div>

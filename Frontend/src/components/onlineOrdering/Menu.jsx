@@ -682,7 +682,6 @@ function hasDailyLimitSet(item) {
 function isQuantityTracked(item) {
   if (!item) return false;
   if (item.type === 'bundle') return item.is_tracked; 
-  if (item.is_celebration_material && item.order_type === 'Pre-order') return false;
   if (item.is_celebration_material) return true;
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
@@ -740,6 +739,7 @@ export default function Menu({ cart, setCart }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(location.state?.category || 'All');
+  const [orderTypeFilter, setOrderTypeFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
@@ -917,9 +917,10 @@ export default function Menu({ cart, setCart }) {
   
   const displayItems = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(p => p.name.toLowerCase().includes(q));
-  }, [products, searchQuery]);
+    const typeMatches = item => orderTypeFilter === 'All'
+      || (orderTypeFilter === 'Buy Now' ? item.order_type === 'Pick-up Today' : item.order_type === orderTypeFilter);
+    return products.filter(p => typeMatches(p) && (!q || p.name.toLowerCase().includes(q)));
+  }, [products, searchQuery, orderTypeFilter]);
 
   const renderProductGrid = () => {
     const categoriesToRender = activeTab === 'All' 
@@ -1012,6 +1013,7 @@ export default function Menu({ cart, setCart }) {
                   </div>
                   <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
+                    {p.type !== 'bundle' && <span className="self-start mb-1 rounded-full bg-[#F5EFEB] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#5A453C]">{p.order_type === 'Pick-up Today' ? 'Buy Now' : p.order_type}</span>}
                     <div className="flex-1 mb-2">
                       <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug line-clamp-2">{p.name}</h3>
 
@@ -1106,7 +1108,7 @@ export default function Menu({ cart, setCart }) {
                 )}
               </div>
               
-              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-12 opacity-100'}`}>
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSearching ? 'max-h-0 opacity-0' : 'max-h-20 opacity-100'}`}>
                 <div className="flex w-full justify-between sm:justify-start gap-2 sm:gap-6 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] -mx-3 px-3 sm:mx-0 sm:px-0">
                   {['All', ...categories].map(cat => {
                     const Icon = getCategoryIcon(cat);
@@ -1127,6 +1129,13 @@ export default function Menu({ cart, setCart }) {
                       </button>
                     );
                   })}
+                </div>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide pt-2">
+                  {['All', 'Buy Now', 'Pre-order', 'Both'].map(type => (
+                    <button key={type} type="button" onClick={() => setOrderTypeFilter(type)} className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold ${orderTypeFilter === type ? 'border-[#3B1F0A] bg-[#3B1F0A] text-white' : 'border-[#DED4CC] bg-white text-[#8A7264]'}`}>
+                      {type}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>

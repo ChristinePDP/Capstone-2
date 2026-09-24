@@ -48,6 +48,51 @@ const OrdersService = {
     return order;
   },
 
+  async getPendingCelebrationMaterialRestock() {
+    const [orders, productsResult, materialsResult] = await Promise.all([
+      OrdersModel.findConfirmedPreOrdersWithItems(),
+      ProductModel.findAll({ activeOnly: false }),
+      MaterialModel.findAll(),
+    ]);
+
+    const productsById = new Map((productsResult.data || []).map(product => [product.id, product]));
+    const materialsByProductId = new Map(
+      (materialsResult.data || [])
+        .filter(material => material.product_id)
+        .map(material => [material.product_id, material])
+    );
+    const requestedByMaterialId = new Map();
+
+    for (const order of orders || []) {
+      for (const item of order.order_items || []) {
+        if (item.bundle_id) continue;
+
+        const product = productsById.get(item.product_id);
+        const material = materialsByProductId.get(item.product_id);
+        if (product?.category !== 'Celebration Material' || !material) continue;
+
+        requestedByMaterialId.set(
+          material.id,
+          (requestedByMaterialId.get(material.id) || 0) + Number(item.quantity || 0)
+        );
+      }
+    }
+
+    return [...requestedByMaterialId.entries()]
+      .map(([materialId, requested]) => {
+        const material = (materialsResult.data || []).find(item => item.id === materialId);
+        const neededToRestock = Math.max(0, requested - Number(material?.stock_quantity || 0));
+        return {
+          id: materialId,
+          name: material?.name,
+          unit: material?.unit,
+          neededToRestock,
+        };
+      })
+      .filter(item => item.neededToRestock > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+
   /**
    * I-validate at i-update ang status ng order.
    * Tumatanggap ng UUID (id) — pwede ring gumawa ng version na by order_number
@@ -89,6 +134,22 @@ const OrdersService = {
     const updated = await OrdersModel.updateStatus(id, status);
     let finalOrder = updated;
 
+    if (status === 'Ready' && existingOrder.status !== 'Ready' && updated.order_type === 'Pre-Order') {
+      const items = await OrderItemsModel.findByOrderId(id);
+
+      for (const item of items || []) {
+        if (item.bundle_id) continue;
+        const product = await ProductModel.findById(item.product_id);
+        if (product?.category !== 'Celebration Material') continue;
+
+        const materialResult = await MaterialModel.findByProductId(item.product_id);
+        if (materialResult.error) throw materialResult.error;
+        if (materialResult.data) {
+          await MaterialModel.deductById(materialResult.data.id, item.quantity);
+        }
+      }
+    }
+
     // --- DEDUCTION + BALANCE SETTLEMENT LOGIC KAPAG NAGING 'Completed' ---
     if (status === 'Completed') {
       // Settle any outstanding deposit balance — same rule as
@@ -127,6 +188,7 @@ const OrdersService = {
             const materialResult = await MaterialModel.findByProductId(item.product_id);
             if (materialResult.error) throw materialResult.error;
             if (materialResult.data) {
+              if (updated.order_type === 'Pre-Order' && existingOrder.status === 'Ready' && !item.bundle_id) continue;
               await MaterialModel.deductById(materialResult.data.id, item.quantity);
               console.log(`[ADMIN SERVICE] Deducted ${item.quantity} from ${materialResult.data.name}'s celebration material stock.`);
               continue;

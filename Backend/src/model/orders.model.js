@@ -48,6 +48,17 @@ const OrdersModel = {
     return data;
   },
 
+  async findConfirmedPreOrdersWithItems() {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('id, order_type, status, order_items(product_id, quantity, bundle_id)')
+      .eq('order_type', 'Pre-Order')
+      .eq('status', 'Confirmed');
+
+    if (error) throw error;
+    return data;
+  },
+
   async findById(id) {
     const { data, error } = await getSupabase()
       .from(TABLE)

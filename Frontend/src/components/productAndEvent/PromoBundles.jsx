@@ -507,7 +507,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
     try {
       const fd = new FormData();
       fd.append('image', file);
-      const res = await fetch(UPLOAD_IMAGE_API, { method: 'POST', body: fd });
+      const res = await fetch(UPLOAD_IMAGE_API, { method: 'POST', credentials: 'include', body: fd });
       const result = await res.json().catch(() => ({}));
       if (!res.ok || result.success === false || !result.url) {
         throw new Error(result.message || result.error || 'Upload failed.');
@@ -565,6 +565,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
       const isUpdate = Boolean(bundle?.id);
       const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${bundle.id}` : ''}`, {
         method: isUpdate ? 'PUT' : 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -890,8 +891,8 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
   const [editBundle, setEditBundle] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const fetchAll = async (force = false) => {
-    if (force || bundles.length === 0) setIsLoading(true);
+  const fetchAll = async (force = false, silent = false) => {
+    if (!silent && (force || bundles.length === 0)) setIsLoading(true);
     setError(null);
     try {
       const { bundles: b, allProducts: p, events: e } = await fetchBundlesPageFromApi(force);
@@ -907,7 +908,15 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
   };
 
   useEffect(() => {
-    fetchAll();
+    fetchAll(true);
+  }, []);
+
+  useEffect(() => {
+    const handleDataChanged = () => fetchAll(true, true);
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('cake:data-changed', handleDataChanged);
+    };
   }, []);
 
   // Kung galing tayo sa Product Catalog "All" view (na-click ang Edit sa
@@ -955,7 +964,7 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
 
   const confirmDelete = async () => {
     try {
-      const res = await fetch(`${BUNDLES_API}/${deleteTarget.id}`, { method: 'DELETE' });
+      const res = await fetch(`${BUNDLES_API}/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
       await parseResponse(res);
       setBundles(prev => prev.filter(b => b.id !== deleteTarget.id));
       if (bundlesPageCache) {
