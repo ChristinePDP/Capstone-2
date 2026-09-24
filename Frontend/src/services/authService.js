@@ -33,6 +33,13 @@ export async function logout() {
   }
 }
 
+export async function getProfile() {
+  const res = await axios.get(`${API_BASE}/me`, {
+    withCredentials: true,
+  });
+  return res.data;
+}
+
 // Send the logged-in user's current and new passwords to the protected backend endpoint.
 export async function changePassword(currentPassword, newPassword) {
   try {

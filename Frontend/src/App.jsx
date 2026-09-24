@@ -17,10 +17,14 @@ import { Layout } from './components/Sidebar.jsx';
 import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
 
 function ProtectedAdminRoute({ children }) {
-  const isAuthenticated = !!localStorage.getItem('isLoggedIn'); 
+  const { isAuthed, authReady } = useApp();
   const navigate = useNavigate();
 
-  if (!isAuthenticated) {
+  if (!authReady) {
+    return null;
+  }
+
+  if (!isAuthed) {
     // BAGO: kapag diretsong tinype ang isang protected route (hal. "/inventory")
     // nang hindi pa naka-login, "/unauthorized" na ang lalabas, hindi na
     // deretsong "/login" — para malinaw sa user na bawal siyang pumunta doon.
@@ -47,9 +51,13 @@ function ProtectedAdminRoute({ children }) {
 // kapag may active session ka na). Kung wala namang session, ipapasa lang
 // natin ang children (yung LoginRoute) nang normal.
 function GuestRoute({ children }) {
-  const isAuthenticated = !!localStorage.getItem('isLoggedIn');
+  const { isAuthed, authReady } = useApp();
 
-  if (isAuthenticated) {
+  if (!authReady) {
+    return null;
+  }
+
+  if (isAuthed) {
     return <Navigate to="/analytics" replace />;
   }
 

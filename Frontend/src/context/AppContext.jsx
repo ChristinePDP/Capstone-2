@@ -2,6 +2,7 @@
 // src/context/AppContext.jsx
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../services/apiClient';
+import { getProfile } from '../services/authService.js';
 
 export const formatPHP = (amount) => {
   return new Intl.NumberFormat('en-PH', {
@@ -54,9 +55,32 @@ export function AppProvider({ children }) {
   // dapat tawagin mula sa Login page pagka-success ng login — ito na ang
   // magse-set ng flag AT magpapa-trigger ng fetch, nang hindi na
   // aasa/naghihintay pa ng page refresh.
-  const [isAuthed, setIsAuthed] = useState(
-    () => localStorage.getItem('isLoggedIn') === 'true'
-  );
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    getProfile()
+      .then(() => {
+        if (active) {
+          localStorage.setItem('isLoggedIn', 'true');
+          setIsAuthed(true);
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('admin');
+        if (active) setIsAuthed(false);
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // ── State ──
   const [ingredients,    setIngredients]    = useState([]);
@@ -479,7 +503,7 @@ export function AppProvider({ children }) {
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     loading, error,
-    isAuthed, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
+    isAuthed, authReady, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,
     fetchOrders, fetchOrderById, updateOrderStatus,
     addProduct, updateProduct, deleteProduct, uploadProductImage,
