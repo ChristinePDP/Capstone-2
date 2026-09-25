@@ -112,6 +112,22 @@ const OrdersService = {
       throw err;
     }
 
+    // FIX (scope bug): dating naka-scope lang ang `existingOrder` sa loob ng
+    // `if (status === 'Completed')` block sa ibaba, pero ginagamit din ito sa
+    // ibang branches (status === 'Ready', at isa pang hiwalay na `if (status
+    // === 'Completed')` block pa) — dahil block-scoped ang `const`, nawawala
+    // ito sa labas ng orihinal na block kung saan siya na-declare, kaya
+    // "existingOrder is not defined" (ReferenceError) tuwing "Ready" ang
+    // pinipiling status, at posible ring mag-crash din sa "Completed" path.
+    // Kaya dito na lang kinukuha ONCE bago pa mag-branch sa status — para
+    // available na ito sa LAHAT ng gumagamit nito sa ibaba.
+    const existingOrder = await OrdersModel.findById(id);
+    if (!existingOrder) {
+      const err = new Error('Order not found');
+      err.status = 404;
+      throw err;
+    }
+
     // FIX (idempotency guard): kung "Completed" na ang order BAGO pa man
     // ito i-update ulit (hal. na-double click ang status dropdown, o
     // nag-scan nang dalawang beses ang QrScanner na naka-embed sa
@@ -119,16 +135,8 @@ const OrdersService = {
     // deduction sa ibaba — hahantong lang ito sa DALAWANG BESES na
     // pagbawas ng stock (at posibleng maling amount_paid) para sa
     // parehong order.
-    if (status === 'Completed') {
-      const existingOrder = await OrdersModel.findById(id);
-      if (!existingOrder) {
-        const err = new Error('Order not found');
-        err.status = 404;
-        throw err;
-      }
-      if (existingOrder.status === 'Completed') {
-        return existingOrder;
-      }
+    if (status === 'Completed' && existingOrder.status === 'Completed') {
+      return existingOrder;
     }
 
     const updated = await OrdersModel.updateStatus(id, status);
