@@ -99,6 +99,30 @@ function SearchBar({ value, onChange, placeholder, className = '' }) {
   );
 }
 
+// Same look as the Select/Input primitives in Productmodal.jsx — kept
+// identical here so the ported "Package Contents" UI below looks and behaves
+// exactly the way it did when it lived in the Product modal.
+function Select({ label, children, className = '', ...props }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">{label}</label>}
+      <select className={`w-full border border-[#DED4CC] rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-[#5A453C] bg-white transition-colors ${className}`} {...props}>
+        {children}
+      </select>
+    </div>
+  );
+}
+
+function Input({ label, required, error, className = '', ...props }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${error ? 'text-red-500' : 'text-[#8A7264]'}`}>{label} {required && <span className="text-red-500">*</span>}</label>}
+      <input className={`w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`} {...props} />
+      {error && <span className="text-[10px] text-red-500 mt-1 block">{error}</span>}
+    </div>
+  );
+}
+
 // Locks background page scroll while a modal is open. Without this, scrolling
 // inside the modal (or over the backdrop) also scrolls the page behind it —
 // the overlay alone doesn't stop that. Restores the exact scroll position on
@@ -362,14 +386,25 @@ const MONTH_OPTIONS = [
   { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' },
 ];
 
-// Bundles are capped at 2 products — pag naabot na ang max, awtomatikong
+// Bundles are capped at 3 products — pag naabot na ang max, awtomatikong
 // magsasara ang product picker pero puwede pa ring buksan ulit ("Edit
 // Products") kung kailangang baguhin ang napili.
-const MAX_BUNDLE_PRODUCTS = 2;
+const MAX_BUNDLE_PRODUCTS = 3;
+// Packages are capped at 8 different component products.
+const MAX_PACKAGE_PRODUCTS = 8;
+
+// BAGO: "category" dropdown — pumipili kung "Bundle" (dating gawi, discount-
+// based na 2 products) o "Package" (component products + quantity, hiwalay
+// na presyo). Ang buong "Package Contents" function/UI (product+qty picker,
+// computed components total, "Use this price") ay dito na inilipat mula sa
+// Product modal (Productmodal.jsx) — pareho pa rin ang UI/elements, dito na
+// lang ito ginagamit kapag "Package" ang napiling category.
+const BUNDLE_CATEGORIES = ['Bundle', 'Package'];
 
 const emptyForm = {
+  category: 'Bundle',
   bundle_name: '',
-  product_items: [], // Holds { productId, options }
+  product_items: [], // Holds { productId, options } — Bundle mode lang
   discount_percent: 0,
   custom_image_url: '',
   event_tag: '',
@@ -379,15 +414,38 @@ const emptyForm = {
   start_day: 1,
   end_month: 12,
   end_day: 31,
+  // Package mode lang (tingnan ang Productmodal.jsx dati):
+  price: '',
+  packageItems: [], // Holds { productId, name, quantity }
+  dailyLimit: 0, // Package mode lang — same "Pre-Order Limits" feature as Productmodal.jsx
 };
 
-function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved }) {
+function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
   const [form, setForm] = useState(emptyForm);
   const [productSearch, setProductSearch] = useState('');
   const [productListOpen, setProductListOpen] = useState(false);
+  const [pendingBundleProductId, setPendingBundleProductId] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formError, setFormError] = useState(null);
+
+  // ── Package Contents (category === 'Package') ──────────────────────
+  // Parehong dropdown-based picker na dati nasa Product modal: pumili ng
+  // isang existing product + quantity, "Add" para isama sa listahan. Hindi
+  // kasama ang ibang Package products (para maiwasan ang package-within-
+  // package) at ang sarili nitong record kapag Edit.
+  const [pendingPackageProductId, setPendingPackageProductId] = useState('');
+  const [pendingPackageQty, setPendingPackageQty] = useState(1);
+  const isEditingPackage = Boolean(editPackageProduct?.id) || (bundle?.category === 'Package' && Boolean(bundle?.id));
+
+  // ── Pre-Order Limits (category === 'Package') ──────────────────────
+  // Same toggle + "Default Daily Capacity" + "Date Exceptions" UI as the
+  // "Pre-Order Limits" card in Productmodal.jsx, ported here since Package
+  // records are now created/edited from this modal instead.
+  const [dailyLimitEnabled, setDailyLimitEnabled] = useState(false);
+  const [exceptionDate, setExceptionDate] = useState('');
+  const [exceptionSlots, setExceptionSlots] = useState(0);
+  const [exceptions, setExceptions] = useState([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -403,28 +461,137 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
          };
       });
 
-      setForm(
-        bundle
-          ? {
-              bundle_name: bundle.bundle_name || '',
-              product_items: initialItems,
-              discount_percent: bundle.discount_percent ?? 0,
-              custom_image_url: bundle.custom_image_url || '',
-              event_tag: bundle.event_tag || '',
-              is_active: bundle.is_active ?? true,
-              availabilityMode,
-              start_month: bundle.start_month || 1,
-              start_day: bundle.start_day || 1,
-              end_month: bundle.end_month || 12,
-              end_day: bundle.end_day || 31,
-            }
-          : emptyForm
-      );
+      // Package rows now live in the same promo_bundles table as Bundles, so
+      // the normal path here is `bundle` with category === 'Package' (e.g.
+      // opened from the Product Catalog "Package" tab). `editPackageProduct`
+      // is kept only as a legacy fallback and should no longer be hit in
+      // practice, since products can't have category 'Package' anymore.
+      const isBundleAsPackage = bundle?.category === 'Package';
+      const packageSource = isBundleAsPackage ? bundle : editPackageProduct;
+
+      const initialPackageItems = (packageSource?.package_items || []).map(pi => ({
+        productId: pi.product_id,
+        name: pi.name || '',
+        quantity: Number(pi.quantity) || 1,
+      }));
+
+      const initialDailyLimit = Number(packageSource?.daily_limit || 0);
+
+      if (isBundleAsPackage) {
+        setForm({
+          ...emptyForm,
+          category: 'Package',
+          bundle_name: bundle.bundle_name || '',
+          custom_image_url: bundle.custom_image_url || '',
+          is_active: bundle.is_active ?? true,
+          price: bundle.discounted_price ?? bundle.bundle_price ?? '',
+          packageItems: initialPackageItems,
+          dailyLimit: initialDailyLimit,
+        });
+        setDailyLimitEnabled(initialDailyLimit > 0);
+        setExceptions(bundle.date_exceptions || []);
+      } else if (editPackageProduct) {
+        setForm({
+          ...emptyForm,
+          category: 'Package',
+          bundle_name: editPackageProduct.name || '',
+          custom_image_url: editPackageProduct.image_url || '',
+          is_active: editPackageProduct.is_active ?? true,
+          price: editPackageProduct.price ?? '',
+          packageItems: initialPackageItems,
+          dailyLimit: initialDailyLimit,
+        });
+        setDailyLimitEnabled(initialDailyLimit > 0);
+        setExceptions(editPackageProduct.dateExceptions || editPackageProduct.date_exceptions || []);
+      } else if (bundle) {
+        setForm({
+          ...emptyForm,
+          category: 'Bundle',
+          bundle_name: bundle.bundle_name || '',
+          product_items: initialItems,
+          discount_percent: bundle.discount_percent ?? 0,
+          custom_image_url: bundle.custom_image_url || '',
+          event_tag: bundle.event_tag || '',
+          is_active: bundle.is_active ?? true,
+          availabilityMode,
+          start_month: bundle.start_month || 1,
+          start_day: bundle.start_day || 1,
+          end_month: bundle.end_month || 12,
+          end_day: bundle.end_day || 31,
+        });
+      } else {
+        setForm(emptyForm);
+        setDailyLimitEnabled(false);
+        setExceptions([]);
+      }
       setProductSearch('');
       setProductListOpen(false);
+      setPendingPackageProductId('');
+      setPendingPackageQty(1);
+      setPendingBundleProductId('');
+      setExceptionDate('');
+      setExceptionSlots(0);
       setFormError(null);
     }
-  }, [isOpen, bundle]);
+  }, [isOpen, bundle, editPackageProduct]);
+
+  // Component products na puwedeng idagdag sa Package Contents — hindi
+  // kasama ang ibang Package products (iwas package-within-package) at ang
+  // sarili nitong record kapag Edit, at hindi na rin puwedeng idagdag ulit
+  // ang produktong nasa listahan na.
+  const availablePackageProducts = (allProducts || []).filter(p =>
+    p.category !== 'Package' &&
+    (!isEditingPackage || p.id !== editPackageProduct?.id) &&
+    !form.packageItems.some(i => i.productId === p.id)
+  );
+
+  // Auto-computed suggested price — sum ng (price ng bawat component product
+  // x quantity nito sa package). Info/shortcut lang ito; hindi ito basta
+  // pinapalitan ang `form.price` — kailangan pa ring i-click ng admin ang
+  // "Use this price" kung gusto niyang gamitin ito.
+  const packageComputedTotal = form.packageItems.reduce((sum, item) => {
+    const componentProduct = (allProducts || []).find(p => String(p.id) === String(item.productId));
+    const unitPrice = Number(componentProduct?.price) || 0;
+    return sum + unitPrice * Number(item.quantity || 0);
+  }, 0);
+
+  const atMaxPackageProducts = form.packageItems.length >= MAX_PACKAGE_PRODUCTS;
+
+  const addPackageItem = () => {
+    if (!pendingPackageProductId) return;
+    if (form.packageItems.length >= MAX_PACKAGE_PRODUCTS) {
+      setFormError(`You can only add up to ${MAX_PACKAGE_PRODUCTS} products per package.`);
+      return;
+    }
+    const selected = (allProducts || []).find(p => String(p.id) === String(pendingPackageProductId));
+    if (!selected) return;
+    setForm(prev => ({
+      ...prev,
+      packageItems: [...prev.packageItems, { productId: selected.id, name: selected.name, quantity: Math.max(1, Number(pendingPackageQty) || 1) }]
+    }));
+    setFormError(null);
+    setPendingPackageProductId('');
+    setPendingPackageQty(1);
+  };
+
+  const removePackageItem = (productId) => {
+    setForm(prev => ({ ...prev, packageItems: prev.packageItems.filter(i => i.productId !== productId) }));
+  };
+
+  const updatePackageItemQty = (productId, qty) => {
+    setForm(prev => ({
+      ...prev,
+      packageItems: prev.packageItems.map(i => i.productId === productId ? { ...i, quantity: Math.max(1, Number(qty) || 1) } : i)
+    }));
+  };
+
+  const addException = () => {
+    if (!exceptionDate) return;
+    setExceptions(prev => [...prev.filter(e => e.date !== exceptionDate), { date: exceptionDate, slots: Number(exceptionSlots) }]);
+    setExceptionDate('');
+    setExceptionSlots(0);
+  };
+  const removeException = (date) => setExceptions(prev => prev.filter(e => e.date !== date));
 
   const filteredProducts = useMemo(() => {
     if (!productSearch) return allProducts;
@@ -456,10 +623,21 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
   const discountPercent = Number(form.discount_percent || 0);
   const computedPrice = Math.round(originalTotal * (1 - discountPercent / 100));
 
+  const availableBundleProducts = (allProducts || []).filter(p =>
+    !form.product_items.some(i => i.productId === p.id)
+  );
+
+  const addBundleProduct = () => {
+    const selected = (allProducts || []).find(p => String(p.id) === String(pendingBundleProductId));
+    if (!selected) return;
+    toggleProduct(selected);
+    setPendingBundleProductId('');
+  };
+
   const toggleProduct = (product) => {
     const exists = form.product_items.some(item => item.productId === product.id);
 
-    // Max 2 products lang per bundle — huwag payagang magdagdag kapag
+    // Max 3 products lang per bundle — huwag payagang magdagdag kapag
     // naabot na ang cap.
     if (!exists && form.product_items.length >= MAX_BUNDLE_PRODUCTS) {
       setFormError(`You can only select up to ${MAX_BUNDLE_PRODUCTS} products per bundle.`);
@@ -480,7 +658,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
       return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions }] };
     });
 
-    // Pagkatapos makapili at naabot na ang max (2), isasara na ang picker
+    // Pagkatapos makapili at naabot na ang max (3), isasara na ang picker
     // kasabay ng pag-display ng computed price sa itaas. Puwede pa ring
     // buksan ulit gamit ang "Edit Products" button kung magkakamali.
     if (!exists && form.product_items.length + 1 >= MAX_BUNDLE_PRODUCTS) {
@@ -520,9 +698,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
     }
   };
 
-  const handleSubmit = async () => {
-    setFormError(null);
-
+  const handleSubmitBundle = async () => {
     if (!form.bundle_name.trim()) {
       setFormError('Bundle name is required.');
       return;
@@ -571,7 +747,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
       });
       await parseResponse(res);
 
-      onSaved();
+      onSaved({ category: 'Bundle', isUpdate });
       onClose();
     } catch (err) {
       setFormError(err.message || 'Failed to save bundle.');
@@ -580,17 +756,100 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
     }
   };
 
+  // Package rows now live in the promo_bundles table (category: 'Package'),
+  // side by side with Bundle rows — kaya dito na rin ito papunta sa
+  // BUNDLES_API, hindi na sa PRODUCTS_API. Ito na rin ang dahilan kung bakit
+  // hindi na dapat lumalabas ang isang na-add na Package sa Promo Bundle tab:
+  // pareho lang sila ngayon ng table, pinaghihiwalay ng `category` field.
+  const handleSubmitPackage = async () => {
+    if (!form.bundle_name.trim()) {
+      setFormError('Package name is required.');
+      return;
+    }
+    if (form.price === '' || isNaN(Number(form.price)) || Number(form.price) < 0) {
+      setFormError('Please set a valid positive price.');
+      return;
+    }
+    if (form.packageItems.length === 0) {
+      setFormError('Add at least one product to this package so its stock can be deducted correctly.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const cleanPackageItems = form.packageItems
+        .filter(i => i.productId && Number(i.quantity) > 0)
+        .map(i => ({ product_id: i.productId, name: i.name, quantity: Number(i.quantity) }));
+
+      const payload = {
+        category: 'Package',
+        bundle_name: form.bundle_name.trim(),
+        price: Number(form.price),
+        custom_image_url: form.custom_image_url || null,
+        is_active: form.is_active,
+        package_items: cleanPackageItems,
+        daily_limit: dailyLimitEnabled ? Number(form.dailyLimit) : 0,
+        dateExceptions: dailyLimitEnabled ? exceptions : [],
+      };
+
+      // `bundle` carries the row being edited (category 'Package' or
+      // 'Bundle' — both come through the same prop now). `editPackageProduct`
+      // is a legacy fallback that should no longer trigger in practice.
+      const editId = (bundle?.category === 'Package' ? bundle.id : null) || editPackageProduct?.id || null;
+      const isUpdate = Boolean(editId);
+      const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${editId}` : ''}`, {
+        method: isUpdate ? 'PUT' : 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await parseResponse(res);
+
+      onSaved({ category: 'Package', isUpdate });
+      onClose();
+    } catch (err) {
+      setFormError(err.message || 'Failed to save package.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    setFormError(null);
+    return form.category === 'Package' ? handleSubmitPackage() : handleSubmitBundle();
+  };
+
+  // Category — chooses whether this is a discount Bundle or a stock-deducting
+  // Package. Locked once the record already exists, since a saved Bundle and a
+  // saved Package live in different tables and can't be converted.
+  const categorySelect = (
+    <Select
+      label="Category"
+      value={form.category}
+      onChange={e => setForm(prev => ({ ...emptyForm, category: e.target.value }))}
+      disabled={Boolean(bundle?.id) || isEditingPackage}
+    >
+      {BUNDLE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+    </Select>
+  );
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={bundle?.id ? 'Edit Promo Bundle' : 'Add Promo Bundle'}
+      title={
+        form.category === 'Package'
+          ? (isEditingPackage ? 'Edit Package' : 'Add Package')
+          : (bundle?.id ? 'Edit Promo Bundle' : 'Add Promo Bundle')
+      }
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button variant="dark" onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-            {bundle?.id ? 'Save Changes' : 'Create Bundle'}
+            {form.category === 'Package'
+              ? (isEditingPackage ? 'Save Changes' : 'Create Package')
+              : (bundle?.id ? 'Save Changes' : 'Create Bundle')}
           </Button>
         </div>
       }
@@ -602,10 +861,12 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
           </div>
         )}
 
-        {/* 1. Bundle Details & Image Section */}
+        {/* 1. Overview & Image Section */}
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Bundle Overview</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
+              {form.category === 'Package' ? 'Package Overview' : 'Bundle Overview'}
+            </p>
             <div className="flex flex-col sm:flex-row gap-4 items-start">
               
               <div className="relative shrink-0 flex flex-col gap-2">
@@ -613,7 +874,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
                   {form.custom_image_url ? (
                     <img
                         src={form.custom_image_url}
-                        alt="bundle preview"
+                        alt="preview"
                         className="w-full h-full object-cover"
                     />
                   ) : (
@@ -639,143 +900,252 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
               </div>
 
               <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Bundle Name</label>
-                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder="e.g. Christmas Sweet Deal" className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
-                </div>
-                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Discount %</label>
-                    <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
+                      {form.category === 'Package' ? 'Package Name' : 'Bundle Name'}
+                    </label>
+                    <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Bundle Price</label>
-                    <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center">
-                      {originalTotal > 0 ? (
-                        <>
-                          <span className="line-through text-[#8A7264] font-normal mr-1.5">₱{originalTotal.toLocaleString()}</span>
-                          ₱{computedPrice.toLocaleString()}
-                        </>
-                      ) : (
-                        'Select products first'
-                      )}
-                    </div>
-                  </div>
+                  {categorySelect}
                 </div>
 
-                <div className="mt-1">
-                  <label className="flex items-center gap-2 cursor-pointer w-fit">
-                    <input type="checkbox" checked={form.is_active} onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))} className="accent-[#3B1F0A] w-4 h-4 rounded" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#3B1F0A] select-none">Active (visible in online ordering)</span>
-                  </label>
-                </div>
+                {form.category === 'Package' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input label="Price" required type="number" min="0" value={form.price} onChange={e => setForm(prev => ({ ...prev, price: e.target.value }))} placeholder="0" />
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Package Price</label>
+                      <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center justify-between gap-2">
+                        {packageComputedTotal > 0 ? (
+                          <>
+                            <span>₱{packageComputedTotal.toLocaleString()}</span>
+                            <button
+                              type="button"
+                              onClick={() => setForm(prev => ({ ...prev, price: packageComputedTotal }))}
+                              className="text-[10px] font-bold uppercase tracking-wide text-[#3B1F0A] hover:underline shrink-0"
+                            >
+                              Use this price
+                            </button>
+                          </>
+                        ) : (
+                          <span className="font-normal text-[#8A7264]">Add products first</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Discount %</label>
+                        <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Bundle Price</label>
+                        <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center justify-between gap-2">
+                          {originalTotal > 0 ? (
+                            <>
+                              <span className="line-through text-[#8A7264] font-normal mr-1.5">₱{originalTotal.toLocaleString()}</span>
+                              ₱{computedPrice.toLocaleString()}
+                            </>
+                          ) : (
+                            <span className="font-normal text-[#8A7264]">Add products first</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-1">
+                      <label className="flex items-center gap-2 cursor-pointer w-fit">
+                        <input type="checkbox" checked={form.is_active} onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))} className="accent-[#3B1F0A] w-4 h-4 rounded" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#3B1F0A] select-none">Active (visible in online ordering)</span>
+                      </label>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
         </div>
 
         {/* 2. Product Selection Section */}
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">Bundle Products</p>
-          <button
-            type="button"
-            onClick={() => setProductListOpen(prev => !prev)}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 border border-[#DED4CC] rounded-xl bg-white text-left"
-          >
-            <span className="text-[11px] font-bold uppercase tracking-wide text-[#8A7264]">
-              Products in this Bundle ({form.product_items.length}/{MAX_BUNDLE_PRODUCTS} selected)
-            </span>
-            <ChevronDown
-              size={16}
-              className={`text-[#8A7264] transition-transform shrink-0 ml-2 ${productListOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
+        {form.category === 'Package' ? (
+          <>
+          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+            <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] mb-2">Package Contents</p>
+            <p className="text-xs text-[#8A7264] mb-4">
+              Pick 1 to {MAX_PACKAGE_PRODUCTS} products to include in this package ({form.packageItems.length}/{MAX_PACKAGE_PRODUCTS} added).
+            </p>
 
-          {!productListOpen && selectedProducts.length > 0 && (
-            <div className="flex flex-col gap-2 mt-3">
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setProductListOpen(true)}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-[#3B1F0A] hover:underline"
-                >
-                  <Edit2 size={11} /> Edit Products
-                </button>
+            <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
+              <Select label="Add a product" value={pendingPackageProductId} onChange={e => setPendingPackageProductId(e.target.value)} disabled={atMaxPackageProducts} className="sm:flex-[2]">
+                <option value="">{atMaxPackageProducts ? `Max of ${MAX_PACKAGE_PRODUCTS} products reached` : 'Select a product...'}</option>
+                {availablePackageProducts.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+              <div className="w-full sm:w-24 shrink-0">
+                <Input label="Qty" type="number" min="1" value={pendingPackageQty} onChange={e => setPendingPackageQty(e.target.value)} />
               </div>
-              {selectedProducts.map(p => {
-                const item = form.product_items.find(i => i.productId === p.id);
-                const currentPrice = getVariantPrice(p, item.options);
-                
-                return (
-                  <div key={p.id} className="flex flex-col gap-2 p-3 bg-[#F5EFEB] rounded-xl border border-[#DED4CC]">
-                    <div className="flex justify-between items-start">
-                       <span className="text-xs font-bold text-[#3B1F0A]">{p.name}</span>
-                       <button type="button" onClick={() => toggleProduct(p)} className="text-red-600 hover:bg-red-50 p-1.5 rounded-md"><X size={13}/></button>
-                    </div>
-                    
-                    {p.pricing_mode === 'variable' && p.price_groups && (
-                      <div className="flex flex-wrap gap-3">
-                        {p.price_groups.map(g => (
-                           <div key={g.name} className="flex-1 min-w-[100px]">
-                             <label className="block text-[9px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">{g.name}</label>
-                             <select 
-                               value={item.options[g.name] || ''}
-                               onChange={(e) => updateItemOption(p.id, g.name, e.target.value)}
-                               className="w-full text-xs px-2 py-1.5 rounded-lg border border-[#DED4CC] bg-white outline-none focus:border-[#5A453C]"
-                             >
-                               {g.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                             </select>
-                           </div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    <div className="text-[10px] font-semibold text-[#8A7264] text-right mt-1">
-                      Value: ₱{currentPrice.toLocaleString()}
-                    </div>
-                  </div>
-                )
-              })}
+              <Button variant="secondary" type="button" onClick={addPackageItem} disabled={!pendingPackageProductId || atMaxPackageProducts} className="w-full sm:w-auto">
+                <Plus size={14} /> Add
+              </Button>
             </div>
-          )}
 
-          {productListOpen && (
-            <div className="mt-2">
-              <SearchBar value={productSearch} onChange={setProductSearch} placeholder="Search product..." className="mb-2" />
-              <div className="border border-[#DED4CC] rounded-xl max-h-52 overflow-y-auto divide-y divide-[#EAE4E0]">
-                {filteredProducts.map(p => {
-                  const checked = form.product_items.some(item => item.productId === p.id);
-                  const disabled = !checked && atMaxProducts;
+            <div className="mt-3">
+              {form.packageItems.length === 0 ? (
+                <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
+                  No products added yet. Add 1 to {MAX_PACKAGE_PRODUCTS} products to create this package.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {form.packageItems.map(item => (
+                    <div key={item.productId} className="flex items-center gap-2.5 p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
+                      <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{item.name}</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={e => updatePackageItemQty(item.productId, e.target.value)}
+                        className="w-16 text-xs border border-[#DED4CC] rounded-lg px-2 py-1.5 outline-none focus:border-[#5A453C] bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <button type="button" onClick={() => removePackageItem(item.productId)} className="text-red-500 p-1.5 hover:bg-red-50 rounded-lg transition-colors">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pre-Order Limits — Package category lang, same UI/fields as the
+              "Pre-Order Limits" card sa Productmodal.jsx (Default Daily
+              Capacity + Date Exceptions). */}
+          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+            <div className="flex items-center gap-3 mb-2">
+              <input
+                type="checkbox"
+                id="packageLimitToggle"
+                checked={dailyLimitEnabled}
+                onChange={e => {
+                  const enabled = e.target.checked;
+                  setDailyLimitEnabled(enabled);
+                  if (!enabled) setForm(prev => ({ ...prev, dailyLimit: 0 }));
+                  else if (Number(form.dailyLimit) <= 0) setForm(prev => ({ ...prev, dailyLimit: 1 }));
+                }}
+                className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
+              />
+              <label htmlFor="packageLimitToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer">Pre-Order Limits</label>
+            </div>
+            <p className="text-xs text-[#8A7264] mb-4">
+              Set maximum order capacities per day or assign custom date exceptions.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
+              <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+                <Input
+                  label="Default Daily Capacity (Slots)"
+                  type="number"
+                  min="0"
+                  disabled={!dailyLimitEnabled}
+                  value={form.dailyLimit}
+                  onChange={e => setForm(prev => ({ ...prev, dailyLimit: e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+
+              <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
+                <div className="flex flex-row items-center gap-2 mb-3 w-full">
+                  <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} disabled={!dailyLimitEnabled} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB]" />
+                  <input type="number" min="0" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} disabled={!dailyLimitEnabled} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
+                </div>
+                <button type="button" onClick={addException} disabled={!dailyLimitEnabled} className="w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white hover:bg-[#F5EFEB] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                  + Add Date Exception
+                </button>
+                {exceptions.length > 0 && (
+                  <div className="mt-3 max-h-32 overflow-y-auto pr-1 scrollbar-thin flex flex-col gap-1.5">
+                    {exceptions.map(ex => (
+                      <div key={ex.date} className="flex items-center justify-between text-xs font-semibold text-[#3B1F0A] py-2 px-3 bg-white border border-[#DED4CC] rounded-xl">
+                        <span>{ex.date}</span>
+                        <span>{ex.slots} slots</span>
+                        <button type="button" onClick={() => removeException(ex.date)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"><Trash2 size={14} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          </>
+        ) : (
+        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+          <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] mb-2">Bundle Products</p>
+          <p className="text-xs text-[#8A7264] mb-4">
+            Pick 2 to {MAX_BUNDLE_PRODUCTS} products to include in this bundle ({form.product_items.length}/{MAX_BUNDLE_PRODUCTS} added).
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
+            <Select label="Add a product" value={pendingBundleProductId} onChange={e => setPendingBundleProductId(e.target.value)} disabled={atMaxProducts} className="sm:flex-[2]">
+              <option value="">{atMaxProducts ? `Max of ${MAX_BUNDLE_PRODUCTS} products reached` : 'Select a product...'}</option>
+              {availableBundleProducts.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}
+                </option>
+              ))}
+            </Select>
+            <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="w-full sm:w-auto">
+              <Plus size={14} /> Add
+            </Button>
+          </div>
+
+          <div className="mt-3">
+            {selectedProducts.length === 0 ? (
+              <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
+                No products added yet. Add 2 to {MAX_BUNDLE_PRODUCTS} products to create this bundle.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {selectedProducts.map(p => {
+                  const item = form.product_items.find(i => i.productId === p.id);
+                  const currentPrice = getVariantPrice(p, item?.options || {});
                   return (
-                    <label
-                      key={p.id}
-                      className={`flex items-center gap-3 px-3.5 py-2.5 text-xs transition-colors ${
-                        checked ? 'bg-[#F5EFEB] cursor-pointer' : disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:bg-[#FAF7F5]'
-                      }`}
-                    >
-                      <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleProduct(p)} className="accent-[#3B1F0A]" />
-                      <span className="flex-1 font-medium text-[#3B1F0A] truncate">{p.name}</span>
-                      <span className="text-[#8A7264]">
-                        {p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}
-                      </span>
-                    </label>
+                    <div key={p.id} className="flex flex-col gap-2 p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{p.name}</span>
+                        <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">₱{currentPrice.toLocaleString()}</span>
+                        <button type="button" onClick={() => toggleProduct(p)} className="text-red-500 p-1.5 hover:bg-red-50 rounded-lg transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      {p.pricing_mode === 'variable' && p.price_groups && (
+                        <div className="flex flex-wrap gap-3">
+                          {p.price_groups.map(g => (
+                            <div key={g.name} className="flex-1 min-w-[100px]">
+                              <label className="block text-[9px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">{g.name}</label>
+                              <select
+                                value={item?.options?.[g.name] || ''}
+                                onChange={(e) => updateItemOption(p.id, g.name, e.target.value)}
+                                className="w-full text-xs px-2 py-1.5 rounded-lg border border-[#DED4CC] bg-white outline-none focus:border-[#5A453C]"
+                              >
+                                {g.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
-                {atMaxProducts && (
-                  <p className="px-3.5 py-2.5 text-[10px] text-center text-[#8A7264] bg-[#FAF7F5]">
-                    Max of {MAX_BUNDLE_PRODUCTS} products reached. Remove one to add another.
-                  </p>
-                )}
-                {filteredProducts.length === 0 && (
-                  <p className="px-3.5 py-4 text-xs text-center text-[#8A7264]">No products found.</p>
-                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
+        )}
 
-        {/* 3. Availability UI Section */}
+        {/* 3. Availability UI Section — Bundle only; Packages don't have this. */}
+        {form.category !== 'Package' && (
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
           <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">
             When can this be purchased? (Choose one)
@@ -870,6 +1240,7 @@ function BundleFormModal({ isOpen, onClose, bundle, allProducts, events, onSaved
             )}
           </div>
         </div>
+        )}
       </div>
     </Modal>
   );
@@ -889,6 +1260,11 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editBundle, setEditBundle] = useState(null);
+  // BAGO: para sa pag-edit ng isang "Package" (isang product na may
+  // category: 'Package') — dito na rin ito ina-edit ngayon, tulad ng
+  // Bundles. Ito ang product object mismo (mula sa allProducts), hindi
+  // bundle.
+  const [editPackageProduct, setEditPackageProduct] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchAll = async (force = false, silent = false) => {
@@ -935,14 +1311,33 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, bundles]);
 
+  // Kapareho ng editBundleId sa itaas, pero para sa isang "Package" product
+  // (na-click ang Edit sa "Package" tab ng Product Catalog).
+  useEffect(() => {
+    const editProductId = location.state?.editProductId;
+    if (!editProductId || allProducts.length === 0) return;
+    const target = allProducts.find(p => p.id === editProductId && p.category === 'Package');
+    if (target) {
+      setEditPackageProduct(target);
+      setModalOpen(true);
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, allProducts]);
+
+  // "bundles" state has both categories (Bundle + Package) — old rows that
+  // predate the category column are treated as 'Bundle'. This page is the
+  // Promo Bundle tab specifically, so Package rows are excluded here; they
+  // display under the Product Catalog "Package" tab instead.
   const filtered = bundles.filter(b => {
+    if ((b.category || 'Bundle') !== 'Bundle') return false;
     if (!search) return true;
     return b.bundle_name.toLowerCase().includes(search.toLowerCase());
   });
 
-  const handleAdd = () => { setEditBundle(null); setModalOpen(true); };
-  const handleEdit = (bundle) => { setEditBundle(bundle); setModalOpen(true); };
-  const handleCloseModal = () => { setModalOpen(false); setEditBundle(null); };
+  const handleAdd = () => { setEditBundle(null); setEditPackageProduct(null); setModalOpen(true); };
+  const handleEdit = (bundle) => { setEditBundle(bundle); setEditPackageProduct(null); setModalOpen(true); };
+  const handleCloseModal = () => { setModalOpen(false); setEditBundle(null); setEditPackageProduct(null); };
 
   // Pinapayagan ang parent (ProductAndEventPage) na buksan ang "Add Bundle"
   // modal mula sa nakapirming header nito, kahit saang sub-tab pa ito
@@ -955,9 +1350,15 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenAdd]);
 
-  const handleSaved = async () => {
+  // `saveInfo` galing sa BundleFormModal mismo ({ category, isUpdate }) —
+  // hindi na ito basehan sa editBundle/editPackageProduct state (laging
+  // null pa rin ang mga iyon sa Add flow, kaya dati "Saved." na lang lagi
+  // ang toast pag nag-add, hindi "Bundle added." / "Package added.").
+  const handleSaved = async (saveInfo = {}) => {
     await fetchAll(true); // force: kailangan bagong datos, hindi stale cache
-    showToast(editBundle?.id ? 'Bundle updated.' : 'Bundle added.');
+    const { category, isUpdate } = saveInfo;
+    const noun = category === 'Package' ? 'Package' : 'Bundle';
+    showToast(isUpdate ? `${noun} updated.` : `${noun} added.`);
   };
 
   const handleDelete = (bundle) => setDeleteTarget(bundle);
@@ -985,7 +1386,11 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
   return (
     <div className="overflow-x-hidden w-full max-w-full">
       {toast && (
-        <div className="fixed top-4 right-4 z-[60] bg-[#3B1F0A] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg">
+        <div
+          className={`fixed bottom-4 right-4 z-[60] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg ${
+            toast.variant === 'warning' || toast.variant === 'error' ? 'bg-red-600' : 'bg-emerald-600'
+          }`}
+        >
           {toast.message}
         </div>
       )}
@@ -1017,7 +1422,7 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
           ))}
           {!filtered.length && (
             <div className="col-span-2 md:col-span-4 text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">
-              No promo bundles yet. Click "Add Bundle" to create one.
+              No promo bundles yet. Click "Add Package/Bundle" to create one.
             </div>
           )}
         </div>
@@ -1027,6 +1432,7 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
         isOpen={modalOpen}
         onClose={handleCloseModal}
         bundle={editBundle}
+        editPackageProduct={editPackageProduct}
         allProducts={allProducts}
         events={events}
         onSaved={handleSaved}

@@ -107,7 +107,7 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 // ─────────────────────────────────────────────────────────────
 function CartItemRow({
   item, index, changeQty, onRemove, expanded, onToggleExpand,
-  imageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage,
+  imageSrc, attachedImageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage,
 }) {
   const isMobile = variant === 'mobile';
   const swipeStartX = useRef(null);
@@ -125,28 +125,25 @@ function CartItemRow({
   };
   const handlePointerUp = () => { swipeStartX.current = null; };
 
-  // Buuin ang detail lines (price options + order slip answers) —
-  // isang listahan lang, kahit bundle o regular na item.
-  const detailLines = [];
-  if (item.selected_price_options) {
-    Object.entries(item.selected_price_options).forEach(([key, val]) => {
-      detailLines.push({ key: `opt-${key}`, label: key, value: val });
-    });
-  }
-  if (item.type === 'bundle' && item.order_slip_details) {
-    Object.entries(item.order_slip_details).forEach(([prodId, answers]) => {
-      const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-      Object.entries(answers).forEach(([key, val]) => {
-        detailLines.push({ key: `slip-${prodId}-${key}`, label: pName, sublabel: key, value: val });
-      });
-    });
-  } else if (item.order_slip_details) {
-    Object.entries(item.order_slip_details).forEach(([key, val]) => {
-      detailLines.push({ key: `slip-${key}`, label: key, value: val });
-    });
-  }
+  // Compact gaya ng POS cart: price options lang ang nakalista, tapos
+  // "Includes: ..." (bundle/package) o "Customized" (single item). Ang buong
+  // order slip ay makikita sa Order Summary sa checkout — para hindi humaba
+  // ang cart kapag madami ang customized na items.
+  const isMulti = item.type === 'bundle' || item.type === 'package';
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof File);
+  const displayVal = (v) => (Array.isArray(v) ? v.join(', ') : (v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')));
 
-  const imageCount = item.type === 'bundle' && item.inspiration_image
+  const optionLines = item.selected_price_options
+    ? Object.entries(item.selected_price_options).map(([key, val]) => ({ key: `opt-${key}`, label: key, value: displayVal(val) }))
+    : [];
+
+  const slipKeys = isPlainObject(item.order_slip_details) ? Object.keys(item.order_slip_details) : [];
+  const includesText = isMulti && slipKeys.length > 0
+    ? slipKeys.map(prodId => item.products?.find(p => p.id === prodId)?.name || 'Item').join(', ')
+    : null;
+  const isCustomized = !isMulti && slipKeys.length > 0;
+
+  const imageCount = isMulti && isPlainObject(item.inspiration_image)
     ? Object.values(item.inspiration_image).filter(Boolean).length
     : (item.inspiration_image ? 1 : 0);
 
@@ -178,28 +175,30 @@ function CartItemRow({
 
       {expanded && (
         <div className="mt-2.5 pl-0">
-          {detailLines.map(d => (
-            <p key={d.key} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">
-              {d.sublabel ? (
-                <><span className="font-semibold text-[#8A7264]">{d.label}</span> - {d.sublabel}: {d.value}</>
-              ) : (
-                <>{d.label}: {d.value}</>
-              )}
-            </p>
+          {optionLines.map(d => (
+            <p key={d.key} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">{d.label}: {d.value}</p>
           ))}
+
+          {includesText ? (
+            <p className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug line-clamp-2">
+              <span className="font-semibold text-[#8A7264]">Includes:</span>{' '}{includesText}
+            </p>
+          ) : (
+            isCustomized && <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
+          )}
 
           {imageCount > 0 && (
             <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5 flex items-center gap-2">
-              <span>{item.type === 'bundle' ? `Image Attached (${imageCount})` : 'Image Attached'}</span>
-              {imageSrc && (
-                <button type="button" onClick={() => onPreviewImage(imageSrc)} className="underline underline-offset-2 font-normal normal-case text-[#5A453C]">
+              <span>{isMulti ? `Image Attached (${imageCount})` : 'Image Attached'}</span>
+              {attachedImageSrc && (
+                <button type="button" onClick={() => onPreviewImage(attachedImageSrc)} className="underline underline-offset-2 font-normal normal-case text-[#5A453C]">
                   View
                 </button>
               )}
               {/* Palitan lang ang picture nang direkta rito — hindi na kailangang
                   ulitin ang buong modal (details, atbp.) para lang baguhin ang image.
                   Sa ngayon, non-bundle items lang muna (isang File slot). */}
-              {item.type !== 'bundle' && onReplaceImage && (
+              {!isMulti && onReplaceImage && (
                 <>
                   <button
                     type="button"
@@ -380,7 +379,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
 
   return (
     <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
-      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] rounded-2xl flex flex-col shadow-xl overflow-hidden">
+      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] max-h-[90vh] rounded-2xl flex flex-col shadow-xl overflow-hidden">
         
         <div className="flex flex-col gap-2 p-5 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
           <div className="flex items-start justify-between">
@@ -403,7 +402,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
           </p>
         </div>
 
-        <div className="p-5 flex-1 overflow-y-auto overscroll-contain scrollbar-thin max-h-[60vh]">
+        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           {!hasFields && !allowsImageUpload ? (
              <div className="flex flex-col items-center justify-center py-10 text-center">
                <Package size={32} className="text-[#DED4CC] mb-3" />
@@ -519,6 +518,244 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
             className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors shadow-sm bg-[#3B1F0A] text-white hover:bg-[#2A1608]"
           >
             {isLastStep ? 'Add Bundle to Cart' : 'Next Item'}
+            {!isLastStep && <ChevronRight size={14} />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// Package Stepper Modal (NEW)
+// Parehong stepper-per-component UX gaya ng BundleModal sa itaas — dinadaan
+// dito ang customer sa bawat product na LAMAN ng package (hal. cake, cupcake,
+// tarp) para masagutan ang ORDER SLIP FIELDS ng bawat isa (kinukuha mula sa
+// sariling record ng bawat component product — hindi ng package mismo, dahil
+// wala itong sariling order slip fields; tingnan ang Productmodal.jsx admin
+// form). Ganito rin dapat kasi ito ang binabasa ng backend
+// (resolvePackageLineItem sa onlineOrdering.services.js): `item.orderSlip`
+// keyed by componentProductId.
+// ─────────────────────────────────────────────────────────────
+function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [packageAnswers, setPackageAnswers] = useState({});
+  const [packageImages, setPackageImages] = useState({}); // { [productId]: File }
+  const [packageImageErrors, setPackageImageErrors] = useState({}); // { [productId]: string }
+  const [errors, setErrors] = useState({});
+  const components = pkg.package_components || [];
+
+  if (!pkg || components.length === 0) return null;
+
+  const currentProduct = components[currentStep];
+  const hasFields = currentProduct.order_slip_fields && currentProduct.order_slip_fields.length > 0;
+  const allowsImageUpload = Boolean(currentProduct.allow_file_upload);
+  const isLastStep = currentStep === components.length - 1;
+
+  const handleAnswerChange = (label, value) => {
+    setPackageAnswers(prev => ({
+      ...prev,
+      [currentProduct.id]: {
+        ...(prev[currentProduct.id] || {}),
+        [label]: value
+      }
+    }));
+    setErrors(prev => ({
+      ...prev,
+      [label]: false
+    }));
+  };
+
+  const handleImageChange = (file) => {
+    if (file && file.size > MAX_FILE_SIZE_BYTES) {
+      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setPackageImages(prev => ({ ...prev, [currentProduct.id]: null }));
+      return;
+    }
+    setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: '' }));
+    setPackageImages(prev => ({
+      ...prev,
+      [currentProduct.id]: file
+    }));
+  };
+
+  const handleNext = () => {
+    if (hasFields) {
+      const newErrors = {};
+      currentProduct.order_slip_fields.forEach(field => {
+        const answer = packageAnswers[currentProduct.id]?.[field.label];
+        if (!answer || answer.trim() === '') {
+          newErrors[field.label] = true;
+        }
+      });
+      if (Object.keys(newErrors).length > 0) {
+        setErrors(newErrors);
+        return;
+      }
+    }
+
+    if (!isLastStep) {
+      setErrors({});
+      setCurrentStep(prev => prev + 1);
+    } else {
+      const hasAnyImage = Object.values(packageImages).some(Boolean);
+      onAddToCart({
+        ...pkg,
+        qty: 1,
+        price: pkg.price,
+        type: 'package',
+        packageId: pkg.id,
+        products: components, // para sa cart/receipt display, gaya ng bundle.products
+        selected_price_options: null,
+        order_slip_details: packageAnswers,
+        inspiration_image: hasAnyImage ? packageImages : null
+      });
+      onClose();
+    }
+  };
+
+  const handleBack = () => {
+    if (currentStep > 0) {
+      setErrors({});
+      setCurrentStep(prev => prev - 1);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
+      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] max-h-[90vh] rounded-2xl flex flex-col shadow-xl overflow-hidden">
+
+        <div className="flex flex-col gap-2 p-5 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 min-w-0">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Package</span>
+              <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{pkg.name}</h2>
+              <p className="text-sm font-bold text-[#5A453C]">₱{Number(pkg.price).toLocaleString()}</p>
+              <p className="text-xs text-[#8A7264] leading-snug mt-1">{components.map(c => c.name).join(' + ')}</p>
+            </div>
+            <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
+          </div>
+
+          <div className="flex items-center gap-2 mt-2">
+            {components.map((_, idx) => (
+              <div key={idx} className={`h-1.5 flex-1 rounded-full ${idx <= currentStep ? 'bg-[#3B1F0A]' : 'bg-[#EAE4E0]'}`} />
+            ))}
+          </div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mt-1">
+            Item {currentStep + 1} of {components.length}: <span className="text-[#3B1F0A]">{currentProduct.name}</span>
+          </p>
+        </div>
+
+        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
+          {!hasFields && !allowsImageUpload ? (
+             <div className="flex flex-col items-center justify-center py-10 text-center">
+               <Package size={32} className="text-[#DED4CC] mb-3" />
+               <p className="text-sm font-semibold text-[#5A453C]">No customization needed for this item.</p>
+               <p className="text-xs text-[#8A7264] mt-1">You can proceed to the next item.</p>
+             </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {hasFields && currentProduct.order_slip_fields.map((field, index) => {
+                if (field.type === 'Select') {
+                  return (
+                    <div key={index} className="flex flex-col w-full">
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                      <select
+                        className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
+                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        onChange={e => handleAnswerChange(field.label, e.target.value)}
+                      >
+                        <option value="" disabled>Select {field.label}...</option>
+                        {field.options?.map((opt, i) => (
+                          <option key={i} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
+                    </div>
+                  );
+                }
+                if (field.type === 'Textarea') {
+                  return (
+                    <div key={index} className="flex flex-col w-full">
+                      <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                      <textarea
+                        placeholder={`Enter ${field.label}...`}
+                        className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none resize-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
+                        rows={3}
+                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        onChange={e => handleAnswerChange(field.label, e.target.value)}
+                      />
+                      {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={index} className="flex flex-col w-full">
+                    <label className={`text-xs font-semibold mb-1.5 ${errors[field.label] ? 'text-red-500' : 'text-[#8A7264]'}`}>{field.label}</label>
+                    <input
+                      type={field.type === 'Number' ? 'number' : 'text'}
+                      placeholder={`Enter ${field.label}...`}
+                      className={`w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${errors[field.label] ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
+                      value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                      onChange={e => handleAnswerChange(field.label, e.target.value)}
+                    />
+                    {errors[field.label] && <span className="text-[10px] text-red-500 mt-1 block">This field is required</span>}
+                  </div>
+                );
+              })}
+
+              {allowsImageUpload && (
+                <div className={hasFields ? 'border-t border-[#EAE4E0] pt-4' : ''}>
+                  <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+                  <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
+
+                  {!packageImages[currentProduct.id] ? (
+                    <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
+                      <span className="mr-3 py-1 px-3 rounded-lg border-0 text-[10px] font-bold uppercase bg-white text-[#4A3B36] shrink-0">Choose File</span>
+                      <span className="text-[#8A7264] truncate">No file chosen</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageChange(e.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-3 rounded-xl">
+                      <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{packageImages[currentProduct.id].name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleImageChange(null)}
+                        aria-label="Remove file"
+                        className="ml-3 w-6 h-6 rounded-full bg-white text-[#8A7264] flex items-center justify-center shrink-0 hover:bg-[#EAE4E0] hover:text-[#3B1F0A] transition-colors"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
+                  {packageImageErrors[currentProduct.id] && (
+                    <span className="text-[10px] text-red-500 mt-1 block">{packageImageErrors[currentProduct.id]}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 p-5 border-t border-[#EAE4E0] bg-white shrink-0">
+          <button
+            onClick={currentStep === 0 ? onClose : handleBack}
+            className="px-5 py-3 border border-[#DED4CC] rounded-xl text-xs font-bold text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
+          >
+            {currentStep === 0 ? 'Cancel' : 'Back'}
+          </button>
+
+          <button
+            onClick={handleNext}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors shadow-sm bg-[#3B1F0A] text-white hover:bg-[#2A1608]"
+          >
+            {isLastStep ? 'Add Package to Cart' : 'Next Item'}
             {!isLastStep && <ChevronRight size={14} />}
           </button>
         </div>
@@ -673,7 +910,7 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           {isVariable && (
             <div className="flex flex-col gap-4 mb-6">
               <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Product Options</p>
@@ -1027,7 +1264,32 @@ export default function Menu({ cart, setCart }) {
     const allProducts = rawProducts;
     const bundlesData = rawBundles;
 
-    if (bundlesData.length === 0) return allProducts;
+    // FIX: dating basta pinapasa ang "Package" products as-is, kaya walang
+    // ibang paraan ang cart-adding UI (PackageModal sa ibaba) na malaman
+    // ang order_slip_fields/allow_file_upload ng bawat COMPONENT ng
+    // package — ang `package_items` na dala ng backend ay minimal lang
+    // ({ product_id, quantity, name }), hindi kumpletong product record.
+    // Dito na natin ini-hydrate ang bawat package sa `package_components`:
+    // ang FULL product record (kasama ang order_slip_fields nito) ng bawat
+    // component, kinuha mula sa allProducts — parehong pattern gaya ng
+    // `bundleProducts` sa ibaba para sa Promo Bundle.
+    const hydratedProducts = allProducts.map(p => {
+      if (p.category !== 'Package' || !Array.isArray(p.package_items) || p.package_items.length === 0) {
+        return p;
+      }
+      const packageComponents = p.package_items
+        .map(pi => allProducts.find(cp => cp.id === pi.product_id))
+        .filter(Boolean);
+
+      return {
+        ...p,
+        type: 'package',
+        packageId: p.id,
+        package_components: packageComponents,
+      };
+    });
+
+    if (bundlesData.length === 0) return hydratedProducts;
 
     // Gaya ng sa admin Promo Bundles page: ipakita lang ang mga bundle na
     // active AT nasa loob ng promo date range nito (kung meron man).
@@ -1070,7 +1332,7 @@ export default function Menu({ cart, setCart }) {
        };
     });
 
-    return [...activeBundles, ...allProducts];
+    return [...activeBundles, ...hydratedProducts];
   }, [rawProducts, rawBundles]);
 
   const categories = useMemo(() => {
@@ -1152,24 +1414,32 @@ export default function Menu({ cart, setCart }) {
     };
   }, [cart]);
 
-  // Same fallback chain gaya ng ginagamit sa Checkout.jsx Order Summary —
-  // File -> blob URL, string -> URL/backend path, wala -> default product image.
-  const resolveCartImageSrc = (item, i) => {
+  const normalizeCartSrc = (src) => {
+    if (!src || typeof src !== 'string') return null;
+    if (!src.startsWith('http') && !src.startsWith('blob:') && !src.startsWith('data:')) {
+      return `${import.meta.env.VITE_API_URL}/uploads/${src.replace(/^\//, '')}`;
+    }
+    return src;
+  };
+
+  // Thumbnail sa cart = MISMONG larawan ng product/package/bundle (gaya ng
+  // POS Order Summary na `item.image_url`) — HINDI ang reference image na
+  // in-upload ng customer para sa isang component (hal. balloons).
+  const resolveCartImageSrc = (item) =>
+    normalizeCartSrc(item.custom_image_url || item.image_url || item.image);
+
+  // Ang in-upload na reference image ng customer (File -> blob URL, o
+  // string/URL galing backend) — para lang sa "View" link ng "Image Attached".
+  const resolveAttachedImageSrc = (item, i) => {
     let src = cartImageBlobUrls[i];
     if (!src) {
-      if (item.inspiration_image && typeof item.inspiration_image === 'string') {
+      if (typeof item.inspiration_image === 'string') {
         src = item.inspiration_image;
       } else if (item.inspiration_image && typeof item.inspiration_image === 'object') {
-        const strVal = Object.values(item.inspiration_image).find(v => typeof v === 'string');
-        if (strVal) src = strVal;
-      } else {
-        src = item.image || item.image_url;
+        src = Object.values(item.inspiration_image).find(v => typeof v === 'string');
       }
     }
-    if (src && !src.startsWith('http') && !src.startsWith('blob:') && !src.startsWith('data:')) {
-      src = `${import.meta.env.VITE_API_URL}/uploads/${src.replace(/^\//, '')}`;
-    }
-    return src || null;
+    return normalizeCartSrc(src);
   };
 
   const changeQty = (index, delta) => setCart(prev => {
@@ -1335,7 +1605,11 @@ export default function Menu({ cart, setCart }) {
                         if (isSoldOut) return;
                         // Para sa bundles, i-check kung may any custom fields sa mga products
                         // Laging idadaan sa modal kapag bundle para makita nila ang Stepper
-                        const needsModal = p.type === 'bundle' || isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
+                        // FIX: dating hindi kasama ang Package dito, kaya
+                        // deretso itong naidadagdag sa cart nang walang
+                        // pagkakataong sagutan ang order slip ng mga
+                        // components nito (BundleModal-style stepper).
+                        const needsModal = p.type === 'bundle' || p.type === 'package' || isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
                         
                         needsModal ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
@@ -1470,7 +1744,8 @@ export default function Menu({ cart, setCart }) {
                     onRemove={removeItem}
                     expanded={expandedCartIndexes.has(i)}
                     onToggleExpand={toggleCartItemExpanded}
-                    imageSrc={resolveCartImageSrc(item, i)}
+                    imageSrc={resolveCartImageSrc(item)}
+                    attachedImageSrc={resolveAttachedImageSrc(item, i)}
                     onPreviewImage={setCartImagePreviewSrc}
                     variant="desktop"
                     onReplaceImage={replaceCartItemImage}
@@ -1528,7 +1803,8 @@ export default function Menu({ cart, setCart }) {
                   onRemove={removeItem}
                   expanded={expandedCartIndexes.has(i)}
                   onToggleExpand={toggleCartItemExpanded}
-                  imageSrc={resolveCartImageSrc(item, i)}
+                  imageSrc={resolveCartImageSrc(item)}
+                  attachedImageSrc={resolveAttachedImageSrc(item, i)}
                   onPreviewImage={setCartImagePreviewSrc}
                   variant="mobile"
                   onReplaceImage={replaceCartItemImage}
@@ -1564,6 +1840,8 @@ export default function Menu({ cart, setCart }) {
       {/* RENDER MODAL BASED ON TYPE */}
       {modal && modal.type === 'bundle' ? (
         <BundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={addToCart} showToast={showToast} />
+      ) : modal && modal.type === 'package' ? (
+        <PackageModal pkg={modal} onClose={() => setModal(null)} onAddToCart={addToCart} showToast={showToast} />
       ) : modal ? (
         <ProductModal product={modal} onClose={() => setModal(null)} onAddToCart={addToCart} showToast={showToast} />
       ) : null}

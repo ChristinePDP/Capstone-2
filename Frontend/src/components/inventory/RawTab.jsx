@@ -21,6 +21,7 @@ export default function IngredientsTab() {
   const [containerRef, isCompact] = useIsCompact();
   const [page, setPage]             = useState(1);
   const [search, setSearch]         = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [modalOpen, setModalOpen]   = useState(false);
   const [editIng, setEditIng]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -30,9 +31,11 @@ export default function IngredientsTab() {
 
   const currentEditIng = ingredients.find(ing => ing.id === editIng?.id) || editIng;
 
-  const filtered = ingredients.filter(ing =>
-    ing.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = ingredients.filter(ing => {
+    const matchesSearch = ing.name.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || ingStatus(ing.stock, ing.min).label === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const handleSave = async (payload) => {
@@ -50,11 +53,11 @@ export default function IngredientsTab() {
     }
 
     if (payload.detailsPayload && payload.restockPayload) {
-      showToast(`Na-update ang detalye at +${payload.addedQty} ${currentEditIng.unit} na-add sa ${currentEditIng.name}.`);
+      showToast(`Details updated and +${payload.addedQty} ${currentEditIng.unit} added to ${currentEditIng.name}.`);
     } else if (payload.restockPayload) {
-      showToast(`+${payload.addedQty} ${currentEditIng.unit} na-add sa ${currentEditIng.name}.`);
+      showToast(`+${payload.addedQty} ${currentEditIng.unit} added to ${currentEditIng.name}.`);
     } else if (payload.detailsPayload) {
-      showToast('Naitama ang detalye ng ingredient.');
+      showToast('Ingredient details updated.');
     }
   };
 
@@ -80,7 +83,7 @@ export default function IngredientsTab() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
             <h3 className="font-bold text-brand-800">Ingredients</h3>
-            <p className="text-xs text-brand-400 mt-0.5">I-monitor ang Flour, Sugar, Baking Powder, at iba pang pangunahing sangkap.</p>
+            <p className="text-xs text-brand-400 mt-0.5">Keep track of Flour, Sugar, Baking Powder, and other key ingredients.</p>
           </div>
           <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
             <Plus size={14} /> Add New Ingredient
@@ -88,15 +91,27 @@ export default function IngredientsTab() {
         </div>
 
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
-          <div className="relative max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Search ingredient..."
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white"
-            />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="relative max-w-xs w-full">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
+                placeholder="Search ingredient..."
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+              className="px-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-full sm:w-auto"
+            >
+              <option value="all">All Status</option>
+              <option value="In Stock">In Stock</option>
+              <option value="Low Stock">Low Stock</option>
+              <option value="Out of Stock">Out of Stock</option>
+            </select>
           </div>
         </div>
 
@@ -166,7 +181,7 @@ export default function IngredientsTab() {
 
               {!paged.length && (
                 <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {search ? 'Walang nahanap na ingredient.' : 'Walang naka-record na raw materials.'}
+                  {(search || statusFilter !== 'all') ? 'No matching ingredient found.' : 'No ingredients recorded yet.'}
                 </div>
               )}
             </>
@@ -193,8 +208,8 @@ export default function IngredientsTab() {
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)} 
         onConfirm={handleDelete}
         title="Delete Ingredient" 
-        message={`I-delete ang "${deleteTarget?.name}" sa listahan?`}
-        confirmLabel={isDeleting ? 'Dinedelete...' : 'Delete'} 
+        message={`Remove "${deleteTarget?.name}" from the list?`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'} 
         variant="danger"
       />
     </div>
@@ -221,7 +236,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const finalizedStock = parseFractionInput(stock);
   const addedQty       = parseFloat(finalizedStock) || 0;
   
-  const qtyError         = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Dami na idadagdag' : 'Stock quantity' }) : '';
+  const qtyError         = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Quantity to add' : 'Stock quantity' }) : '';
   const minError         = getQtyError(min, { max: MAX_QTY, label: 'Minimum safety stock' });
   const costError        = getCostError(cost);
   const detailsCostError = getCostError(detailsCost);
@@ -267,7 +282,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       if (!min) { showToast('Minimum safety stock is required.', 'error'); return; }
       if (minError) { showToast(minError, 'error'); return; }
       if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total halaga/resibo is required.', 'error'); return; }
+      if (!cost) { showToast('Total amount / receipt is required.', 'error'); return; }
       if (costError) { showToast(costError, 'error'); return; }
 
       setConfirmPayload({
@@ -298,12 +313,12 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     if (stock) {
       if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
       if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total cost is required kapag nagdadagdag ng stock.', 'error'); return; }
+      if (!cost) { showToast('Total cost is required when adding stock.', 'error'); return; }
       if (costError) { showToast(costError, 'error'); return; }
     }
 
     if (!isDetailsModified && !stock) {
-      showToast('Walang binago o idinagdag. I-edit ang detalye o maglagay ng dami na idadagdag.', 'error');
+      showToast('Nothing was changed or added. Edit the details or enter a quantity to add.', 'error');
       return;
     }
 
@@ -347,18 +362,18 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   };
 
   const confirmTitle = confirmPayload?.isNew
-    ? 'Kumpirmahin ang Bagong Ingredient'
+    ? 'Confirm New Ingredient'
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-      ? 'Kumpirmahin ang Pagbabago at Restock'
+      ? 'Confirm Changes and Restock'
       : confirmPayload?.restockPayload
-        ? 'Kumpirmahin ang Restock'
-        : 'Kumpirmahin ang Pag-edit';
+        ? 'Confirm Restock'
+        : 'Confirm Changes';
 
   const confirmMessage = confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-    ? `I-sasave ang bagong detalye ng "${confirmPayload.itemName}" AT idadagdag ang ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Sigurado ka na?`
+    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''} to stock. Are you sure?`
     : confirmPayload?.restockPayload
-      ? `Sigurado ka bang idadagdag ang ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} sa ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` na may kabuuang halaga na ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
-      : `I-save ang bagong detalye ng "${confirmPayload?.itemName}"?`;
+      ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
+      : `Save the new details for "${confirmPayload?.itemName}"?`;
 
   return (
     <>
@@ -366,7 +381,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
         isOpen={isOpen} 
         onClose={() => !isSaving && onClose()}
         title={isEdit ? `Manage Stock — ${ingredient?.name}` : 'Add New Ingredient'}
-        subtitle={isEdit ? `Unit: ${ingredient?.unit}` : 'I-record ang mga bagong biling sako o bultong sangkap.'}
+        subtitle={isEdit ? `Unit: ${ingredient?.unit}` : 'Record a newly purchased sack or bulk ingredient.'}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -384,7 +399,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 <Wallet size={16} className="text-brand-500" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost ng Kasalukuyang Stock</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
                 <p className="text-lg font-black text-brand-800 leading-tight">
                   ₱{((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0)).toFixed(2)}
                   <span className="text-xs font-semibold text-brand-400 ml-1.5">({ingredient?.stock} {ingredient?.unit})</span>
@@ -426,11 +441,11 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="hal. 0.25 o 1/4" />
+                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="e.g. 0.25 or 1/4" />
                     {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
                   </div>
                   <div>
-                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="hal. 50" />
+                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="e.g. 50" />
                     {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
                   </div>
                 </div>
@@ -445,7 +460,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
+                    <Input label="Total Amount / Receipt" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
                     {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
                   </div>
                   <div>
@@ -565,21 +580,21 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 <div className="space-y-3">
                   <div>
                     <Input
-                      label="Dami na Idadagdag"
+                      label="Quantity to Add"
                       type="text" 
                       inputMode="decimal"
                       suffix={ingredient?.unit}
                       value={stock} 
                       onChange={e => setStock(sanitizeQtyText(e.target.value))}
                       onBlur={() => setStock(current => parseFractionInput(current))}
-                      placeholder="hal. 0.25 o 1/4"
+                      placeholder="e.g. 0.25 or 1/4"
                     />
                     {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
                   </div>
 
                   <div>
                     <Input 
-                      label="Total Halaga / Resibo" 
+                      label="Total Amount / Receipt" 
                       type="text" 
                       inputMode="decimal" 
                       value={formatPesoLive(cost)} 
@@ -614,7 +629,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
         onConfirm={executeSave}
         title={confirmTitle}
         message={confirmMessage}
-        confirmLabel={isSaving ? 'Sinasave...' : 'Oo, Sigurado Ako'}
+        confirmLabel={isSaving ? 'Saving...' : "Yes, I'm Sure"}
         variant="primary"
       />
     </>

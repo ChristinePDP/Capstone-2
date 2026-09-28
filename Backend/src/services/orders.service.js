@@ -135,8 +135,16 @@ const OrdersService = {
     // deduction sa ibaba — hahantong lang ito sa DALAWANG BESES na
     // pagbawas ng stock (at posibleng maling amount_paid) para sa
     // parehong order.
-    if (status === 'Completed' && existingOrder.status === 'Completed') {
-      return existingOrder;
+    if (status === 'Completed') {
+      const existingOrder = await OrdersModel.findById(id);
+      if (!existingOrder) {
+        const err = new Error('Order not found');
+        err.status = 404;
+        throw err;
+      }
+      if (existingOrder.status === 'Completed') {
+        return existingOrder;
+      }
     }
 
     const updated = await OrdersModel.updateStatus(id, status);

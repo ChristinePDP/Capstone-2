@@ -35,19 +35,19 @@
 // Raw Ingredient o Celebration Material (RawTab.jsx, CelebrationTab.jsx).
 export const STOCK_UNIT_CATEGORIES = [
   {
-    label: 'Timbang (Weight)',
+    label: 'Weight',
     units: ['kg', 'grams'],
   },
   {
-    label: 'Likido (Volume)',
+    label: 'Volume',
     units: ['Liters', 'ml'],
   },
   {
-    label: 'Bilang (Counting)',
+    label: 'Counting',
     units: ['pcs', 'dozen', 'packs', 'boxes', 'sets', 'sachets', 'bottles', 'cans', 'blocks', 'trays', 'bags'],
   },
   {
-    label: 'Haba (Length)',
+    label: 'Length',
     units: ['meters', 'yards'],
   },
 ];

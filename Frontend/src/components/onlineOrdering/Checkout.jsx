@@ -460,11 +460,17 @@ export default function Checkout({ cart, setCart }) {
           inspirationUrls: item.inspiration_urls || null,
           // Kailangan ito para malaman ng backend (onlineOrdering.services.js
           // resolveOrderItems) na dapat i-explode ang item na ito sa
-          // individual component products ng bundle, sa halip na ituring
-          // itong isang regular na product (na magre-resulta sa invalid
-          // product_id / walang laman na order_items).
-          type: item.type || null,
+          // individual component products ng bundle/package, sa halip na
+          // ituring itong isang regular na product (na magre-resulta sa
+          // invalid product_id / walang laman na order_items).
+          type: item.type || (item.category === 'Package' ? 'package' : null),
           bundleId: item.bundleId || null,
+          // packageId para sa PACKAGE lang — dati, `|| item.id` ang fallback
+          // para sa LAHAT ng item kaya pati regular na produkto ay napupunta
+          // sa package resolver ng backend.
+          packageId: (item.type === 'package' || item.category === 'Package')
+            ? (item.packageId || item.id || null)
+            : null,
         })),
         payment: {
           type: paymentType === 'half' ? 'deposit' : 'full',
@@ -925,22 +931,22 @@ if (data.success && data.checkoutUrl) {
                   <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
                   
                   {cart.map((item, i) => {
-                    // 1. Fallback sa default product image
-                    let imgSrc = item.image || item.image_url; 
+                    // Thumbnail = MISMONG larawan ng product/package/bundle (gaya ng
+                    // POS Order Summary na `item.image_url`) — HINDI ang reference
+                    // image na in-upload ng customer para sa isang component (hal.
+                    // balloons). Ang na-upload ay may "Image Attached" label na lang
+                    // sa ilalim. Wala ring URL.createObjectURL dito, kaya wala nang
+                    // memory leak tuwing nagre-render.
+                    let imgSrc = item.custom_image_url || item.image_url || item.image;
 
-                    // 2. Override kung may uploaded inspiration image (Pre-order custom cakes)
-                    if (item.inspiration_image instanceof File) {
-                      imgSrc = URL.createObjectURL(item.inspiration_image);
-                    } else if (item.inspiration_image && typeof item.inspiration_image === 'string') {
-                      imgSrc = item.inspiration_image;
-                    }
-
-                    // 3. Safety check: Kung relative path/filename lang ang item.image mula sa database, 
-                    // i-dudugtong natin ang backend URL para lumabas nang tama.
-                    if (imgSrc && !imgSrc.startsWith('http') && !imgSrc.startsWith('blob:') && !imgSrc.startsWith('data:')) {
+                    // Safety check: kung relative path/filename lang ang galing sa
+                    // database, idugtong ang backend URL para lumabas nang tama.
+                    if (imgSrc && typeof imgSrc === 'string' && !imgSrc.startsWith('http') && !imgSrc.startsWith('blob:') && !imgSrc.startsWith('data:')) {
                       // Note: I-adjust ang '/uploads/' kung iba ang folder name mo sa backend (e.g. '/images/')
                       imgSrc = `${import.meta.env.VITE_API_URL}/uploads/${imgSrc.replace(/^\//, '')}`;
                     }
+
+                    const isMultiItem = item.type === 'bundle' || item.type === 'package';
 
                     return (
                       <div key={i} className="flex gap-3.5 pb-3.5 border-b border-[#F1EBE6] last:border-0 last:pb-0">
@@ -970,15 +976,28 @@ if (data.success && data.checkoutUrl) {
                             </div>
                           )}
                           
-                          {item.type === 'bundle' && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
-                            <div className="flex flex-col gap-0.5 mt-1">
+                          {/* FIX (per-product slip): each component product of the
+                              bundle now gets its own small slip card — product name
+                              as the header, its own filled-out fields underneath —
+                              instead of repeating "ProductName - Label:" on every
+                              single line. */}
+                          {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
+                            <div className="flex flex-col gap-1.5 mt-1">
                               {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
                                 const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                                return Object.entries(answers || {}).map(([label, value]) => (
-                                  <p key={`slip-${prodId}-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                    <span className="font-medium">{pName} - {label}:</span> {value}
-                                  </p>
-                                ));
+                                if (!answers || Object.keys(answers).length === 0) return null;
+                                return (
+                                  <div key={`slip-${prodId}`} className="bg-[#F9F5F1] border border-[#F1EBE6] rounded-lg px-2.5 py-2">
+                                    <p className="text-[10px] sm:text-[11px] font-bold text-[#5A453C] uppercase tracking-wide mb-1">{pName}</p>
+                                    <div className="flex flex-col gap-0.5">
+                                      {Object.entries(answers).map(([label, value]) => (
+                                        <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                          <span className="font-medium">{label}:</span> {value}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
                               })}
                             </div>
                           ) : (
@@ -991,6 +1010,18 @@ if (data.success && data.checkoutUrl) {
                                 ))}
                               </div>
                             )
+                          )}
+
+                          {item.inspiration_image && (
+                            <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug mt-1">
+                              {isMultiItem && typeof item.inspiration_image === 'object' && !(item.inspiration_image instanceof File)
+                                ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
+                                : 'Image Attached'}
+                            </p>
+                          )}
+
+                          {item.details && (
+                            <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
                           )}
                         </div>
                       </div>

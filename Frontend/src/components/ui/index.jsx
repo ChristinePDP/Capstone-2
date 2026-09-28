@@ -197,8 +197,17 @@ export function FilterPills({ options, value, onChange }) {
 }
 
 export function LevelBar({ stock, min }) {
+  // Ang Minimum Safety Stock (`min`) mismo ang 100% dito — kaya 60% ay
+  // literal na 60% ng minimum na itinakda mo. PERO hindi na 100% (i.e.
+  // buong `min`) ang hinihintay bago tawaging "In Stock" — sa halip,
+  // 50% ng min na ang cutoff, para hindi nakaka-alarma agad kahit
+  // malapit ka na. Ganito rin ang ginagamit ng ingStatus() sa
+  // inventoryHelpers.js:
+  //   stock <= 0          -> Out of Stock (red)
+  //   0 < stock < min/2   -> Low Stock (orange)
+  //   stock >= min/2      -> In Stock (green)
   const pct = min > 0 ? Math.min(Math.round((stock / min) * 100), 100) : 100;
-  const color = pct < 50 ? 'bg-red-500' : pct < 100 ? 'bg-amber-500' : 'bg-green-500';
+  const color = stock <= 0 ? 'bg-red-500' : stock < min / 2 ? 'bg-amber-500' : 'bg-green-500';
   return (
     <div className="flex flex-col gap-0.5">
       <div className="h-1.5 w-20 bg-brand-100 rounded-full overflow-hidden">

@@ -130,6 +130,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       altPhone: '',
       pickupDate: orderType === 'Buy Now' ? getLiveNow().dateStr : '',
       pickupTime: '',
+      instructions: '',
     };
   });
 
@@ -259,6 +260,22 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           inspirationUrls: item.inspiration_urls || null
         };
       }
+      // FIX: dating walang branch para dito, kaya kahit "Package" ang
+      // category (may sariling components), nahuhulog ito sa generic
+      // branch sa ibaba — walang `type`/`packageId`, kaya hindi ito
+      // ine-explode ng backend (resolvePackageLineItem) papunta sa mga
+      // component product rows nito, at laging walang laman ang
+      // order_slip_details ng bawat component.
+      if (item.type === 'package') {
+        return {
+          type: 'package',
+          packageId: item.packageId,
+          quantity: item.qty,
+          orderSlip: item.order_slip_details || {},
+          specialInstructions: item.details || '',
+          inspirationUrls: item.inspiration_urls || null
+        };
+      }
       return {
         productId: item.id,
         name: item.name,
@@ -308,6 +325,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         timeSlot: form.pickupTime,
         timeLabel: selectedSlot?.label || ''
       },
+      // FIX: order-level Special Instructions (one field, buong order) —
+      // katulad ng payload.specialInstructions na ginagamit na ng Online
+      // Ordering (Checkout.jsx / onlineOrdering.service.js), hindi na per
+      // product/item.
+      specialInstructions: form.instructions || '',
       items: formattedItems
     };
 
@@ -369,7 +391,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       // products dito para agad ma-reflect ang bagong available_stock.
       if (typeof onOrderPlaced === 'function') onOrderPlaced();
 
-      setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '' });
+      setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '', instructions: '' });
       setAdditionalCharge('');
       setDiscountName('');
       setDiscountPercentage('');
@@ -562,27 +584,29 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                       </p>
                     ))}
 
-                    {item.type === 'bundle' && item.order_slip_details ? (
-                      // Bundle: nakagrupo per component product ID ang slip details
-                      Object.entries(item.order_slip_details).map(([prodId, answers]) => {
-                        const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                        return Object.entries(answers).map(([key, val]) => (
-                          <p key={`slip-${prodId}-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
-                            <span className="font-medium">{pName}</span> - {key}: {val}
-                          </p>
-                        ));
-                      })
+                    {/* FIX (cart declutter): dati, nakalista dito ang BAWAT field ng
+                        order slip (per component product pa) — sobrang dami kapag
+                        madami ang customized items sa isang package. Makikita naman
+                        ito nang buo sa Order Summary bago i-Place Order, kaya dito sa
+                        Cart, "Includes: ..." na lang na compact list ng mga product
+                        (para sa bundle/package) o "Customized" tag na lang (para sa
+                        single item na may sariling slip). */}
+                    {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
+                      <p className="text-[11px] text-[#8A7264] mt-0.5 leading-snug line-clamp-2">
+                        <span className="font-medium">Includes:</span>{' '}
+                        {Object.keys(item.order_slip_details)
+                          .map(prodId => item.products?.find(p => p.id === prodId)?.name || 'Item')
+                          .join(', ')}
+                      </p>
                     ) : (
-                      item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
-                        <p key={`slip-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
-                          <span className="font-medium">{key}:</span> {val}
-                        </p>
-                      ))
+                      item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                        <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
+                      )
                     )}
 
                     {item.inspiration_image && (
                       <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">
-                        {item.type === 'bundle'
+                        {(item.type === 'bundle' || item.type === 'package')
                           ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
                           : 'Image Attached'}
                       </p>

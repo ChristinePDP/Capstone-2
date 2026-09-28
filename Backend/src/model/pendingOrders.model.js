@@ -49,6 +49,37 @@ const PendingOrdersModel = {
     if (error) throw error;
   },
 
+  // ATOMIC CLAIM — para hindi madoble ang order kapag sabay na tumakbo ang
+  // webhook at ang status-poll fallback. Iisang caller lang ang makakakuha
+  // (yung unang nakapag-set ng `consumed_at` habang `pending` pa at wala
+  // pang consumed_at). Ang iba ay makakatanggap ng null. Sinadyang
+  // `consumed_at` ang gamit (hindi bagong status value) para hindi tamaan
+  // ng anumang CHECK constraint sa `status` column.
+  async claim(id) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .update({ consumed_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('status', 'pending')
+      .is('consumed_at', null)
+      .select();
+
+    if (error) throw error;
+    return Array.isArray(data) && data.length > 0 ? data[0] : null;
+  },
+
+  // Ibalik ang claim kapag pumalya ang paggawa ng order, para makapag-retry
+  // ang susunod na webhook/poll.
+  async releaseClaim(id) {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({ consumed_at: null })
+      .eq('id', id)
+      .eq('status', 'pending');
+
+    if (error) throw error;
+  },
+
   async getActivePending() {
     // Kunin lang ang pending orders sa loob ng huling 30 mins para hindi 
     // ma-stuck ang stock kung in-abandon ng customer ang PayMongo checkout nila.

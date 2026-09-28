@@ -32,6 +32,44 @@ const getStockLimitField = (product) => {
   return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
 };
 
+// I-deduct ang stock ng IISANG product/material — hiwalay na function
+// (recursive) para magamit din ito paulit-ulit sa bawat COMPONENT ng isang
+// "Package" product sa ibaba, hindi lang sa top-level na order item mismo.
+//
+// BAGO: kung "Package" ang product (may naka-link na component products,
+// hal. cake + cupcake + tarp — itinakda sa Product Management > Add/Edit
+// Product > Package Contents), HUWAG bawasan ang sarili nitong
+// stock_quantity/daily_limit — sa halip, ibawas ang order quantity sa
+// BAWAT component nito (pinarami sa quantity ng component sa loob ng
+// package). Dito naaayos ang audit trail: ang aktwal na nababawasan ay ang
+// stock ng mismong cake/cupcake/tarp, hindi lang ang "wrapper" package.
+async function deductSingleProductStock(productId, quantity) {
+  if (!productId || Number(quantity) <= 0) return;
+
+  const materialResult = await MaterialModel.findByProductId(productId);
+  if (materialResult.error) throw materialResult.error;
+  if (materialResult.data) {
+    await MaterialModel.deductById(materialResult.data.id, quantity);
+    return;
+  }
+
+  const product = await ProductModel.findById(productId);
+  if (!product) return;
+
+  if (product.category === 'Package' && Array.isArray(product.package_items) && product.package_items.length > 0) {
+    for (const component of product.package_items) {
+      const componentQty = Number(component.quantity || 0) * Number(quantity);
+      await deductSingleProductStock(component.product_id, componentQty);
+    }
+    return;
+  }
+
+  const limitField = getStockLimitField(product);
+  const currentValue = Number(product[limitField]) || 0;
+  const newValue = Math.max(0, currentValue - Number(quantity));
+  await ProductModel.update(productId, { [limitField]: newValue });
+}
+
 // I-deduct ang stock ng bawat item ng isang order. Ginagamit ito ng
 // createPosOrder (kapag Buy Now, fully paid, walk-out agad) at ng
 // confirmPosOrderPickup (kapag na-scan ang e-receipt QR sa pickup counter)
@@ -41,20 +79,7 @@ async function deductStockForOrderItems(items) {
   for (const item of items) {
     if (!item.product_id) continue;
     try {
-      const materialResult = await MaterialModel.findByProductId(item.product_id);
-      if (materialResult.error) throw materialResult.error;
-      if (materialResult.data) {
-        await MaterialModel.deductById(materialResult.data.id, item.quantity);
-        continue;
-      }
-
-      const product = await ProductModel.findById(item.product_id);
-      if (product) {
-        const limitField = getStockLimitField(product);
-        const currentValue = Number(product[limitField]) || 0;
-        const newValue = Math.max(0, currentValue - item.quantity);
-        await ProductModel.update(item.product_id, { [limitField]: newValue });
-      }
+      await deductSingleProductStock(item.product_id, item.quantity);
     } catch (err) {
       console.error(`[POS SERVICE] Error updating stock for product ${item.product_id}:`, err);
     }
@@ -210,9 +235,17 @@ export const createPosOrder = async (payload) => {
   // components (walang product_id kapag bundle dati, kaya hindi na-iinsert
   // nang tama). Bawat resolved row ay may kumpletong product_id na, kaya
   // gumagana rin ang stock deduction sa Step 4 sa ibaba.
+  //
+  // FIX: idinagdag ang `special_instructions` override dito, kinukuha mula
+  // sa BAGONG order-level na "Special Instructions" field sa Order Summary
+  // (`payload.specialInstructions`) — kapareho ng ginagawa na ng Online
+  // Ordering (`createDatabaseOrder`). Isang beses na lang ito para sa BUONG
+  // order (hindi na per-product default field), kaya parehong laman ito sa
+  // lahat ng exploded rows ng order na iyon.
   const itemsToInsert = resolvedItems.map(item => ({
     ...item,
-    order_id: newOrder.id
+    order_id: newOrder.id,
+    special_instructions: payload.specialInstructions || '',
   }));
 
   try {

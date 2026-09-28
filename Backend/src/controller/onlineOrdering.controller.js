@@ -7,7 +7,9 @@ import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder,
   createPendingOrder,
   attachCheckoutSessionToPendingOrder,
   getPendingOrder,
-  markPendingOrderPaid } from '../services/onlineOrdering.service.js';
+  markPendingOrderPaid,
+  finalizePendingOrder,
+  verifyCheckoutSessionPaid } from '../services/onlineOrdering.service.js';
 import { supabase } from '../config/supabase.js'; 
 
 export const getPublicConfig = async (req, res) => {
@@ -190,15 +192,24 @@ export const handlePaymongoWebhook = async (req, res) => {
 
       // 3. DITO lamang natin ginagawa ang TOTOONG order sa database —
       //    pagkatapos lang ma-confirm ng PayMongo na nabayaran na.
-      const newOrder = await createDatabaseOrder(pendingOrder.payload, paymentId);
-      await markPendingOrderPaid(pendingOrderId, paymentId, newOrder);
+      //    Dumadaan na ito sa `finalizePendingOrder` (may atomic claim) —
+      //    parehong function na ginagamit ng status-poll fallback sa
+      //    ibaba, kaya hindi madodoble ang order kahit sabay silang tumakbo.
+      const result = await finalizePendingOrder(pendingOrderId, paymentId);
 
-      console.log('[WEBHOOK] Order created after payment confirmation:', newOrder.order_number);
+      if (result.created) {
+        console.log('[WEBHOOK] Order created after payment confirmation:', result.order.order_number);
+      } else {
+        console.log('[WEBHOOK] Pending order already being/been processed:', pendingOrderId);
+      }
     }
 
     res.status(200).json({ received: true });
   } catch (error) {
-    console.error('Paymongo Webhook Error:', error);
+    // Kung dito babagsak ang paggawa ng order (hal. "Items Error: ..."),
+    // hindi ito makikita ng customer — kaya dito lang ito lalabas. Ibinalik
+    // na ang claim, kaya susubukan ulit ng status-poll fallback.
+    console.error('Paymongo Webhook Error:', error?.stack || error);
     // 200 pa rin ibalik para hindi tayo bombahin ng retries ng Paymongo dahil
     // sa sarili nating bug — mag-log lang para ma-follow up.
     res.status(200).json({ received: true, error: error.message });
@@ -210,10 +221,30 @@ export const handlePaymongoWebhook = async (req, res) => {
 export const getPendingOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const pendingOrder = await getPendingOrder(id);
+    let pendingOrder = await getPendingOrder(id);
 
     if (!pendingOrder) {
       return res.status(404).json({ success: false, message: 'Pending order not found' });
+    }
+
+    // FALLBACK: kung `pending` pa rin habang nagpo-poll ang Confirm.jsx,
+    // hindi natin hinihintay lang ang webhook — direktang itinatanong sa
+    // PayMongo kung bayad na ang checkout session, at kung oo, ginagawa na
+    // ang totoong order dito mismo (parehong `finalizePendingOrder` ng
+    // webhook, may atomic claim kaya walang duplicate). Sa ganitong paraan
+    // gumagana pa rin ang order kahit hindi maabot ng webhook ang backend.
+    if (pendingOrder.status === 'pending' && pendingOrder.paymongo_checkout_session_id) {
+      try {
+        const { paid, paymentId } = await verifyCheckoutSessionPaid(pendingOrder.paymongo_checkout_session_id);
+        if (paid) {
+          console.log('[PENDING STATUS] Payment confirmed via PayMongo lookup, finalizing order for:', id);
+          await finalizePendingOrder(id, paymentId);
+          pendingOrder = (await getPendingOrder(id)) || pendingOrder;
+        }
+      } catch (fallbackError) {
+        // Huwag ibagsak ang polling — susubukan ulit sa susunod na poll.
+        console.error('[PENDING STATUS] Fallback finalize failed:', fallbackError?.stack || fallbackError);
+      }
     }
 
     res.status(200).json({

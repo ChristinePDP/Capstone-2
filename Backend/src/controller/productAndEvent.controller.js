@@ -176,15 +176,29 @@ export const getBundle = async (req, res) => {
 export const addBundle = async (req, res) => {
   try {
     const bundleData = req.body;
+    const isPackage = bundleData.category === 'Package';
 
     if (!bundleData.bundle_name) {
       return res.status(400).json({
         success: false,
-        message: 'Bundle name is required.'
+        message: isPackage ? 'Package name is required.' : 'Bundle name is required.'
       });
     }
 
-    if (!Array.isArray(bundleData.product_ids) || bundleData.product_ids.length < 2) {
+    if (isPackage) {
+      if (bundleData.price === undefined || bundleData.price === null || isNaN(Number(bundleData.price)) || Number(bundleData.price) < 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'A valid package price is required.'
+        });
+      }
+      if (!Array.isArray(bundleData.package_items) || bundleData.package_items.length < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Add at least 1 product to this package so its stock can be deducted correctly.'
+        });
+      }
+    } else if (!Array.isArray(bundleData.product_ids) || bundleData.product_ids.length < 2) {
       return res.status(400).json({
         success: false,
         message: 'Pumili ng hindi bababa sa 2 products para sa isang bundle.'
@@ -212,8 +226,16 @@ export const editBundle = async (req, res) => {
   try {
     const { id } = req.params;
     const bundleData = req.body;
+    const isPackage = bundleData.category === 'Package';
 
-    if (bundleData.product_ids && bundleData.product_ids.length < 2) {
+    if (isPackage) {
+      if (bundleData.package_items && bundleData.package_items.length < 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Add at least 1 product to this package so its stock can be deducted correctly.'
+        });
+      }
+    } else if (bundleData.product_ids && bundleData.product_ids.length < 2) {
       return res.status(400).json({
         success: false,
         message: 'Pumili ng hindi bababa sa 2 products para sa isang bundle.'

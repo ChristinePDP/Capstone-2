@@ -235,7 +235,9 @@ function ProductCard({ product, onEdit, onDelete }) {
         <p className="font-bold text-[#3B1F0A] text-xs sm:text-sm mb-1 truncate">{product.name}</p>
 
         <p className="text-[10px] sm:text-[11px] text-[#8A7264] mb-3 truncate leading-relaxed">
-          {product.inclusion ? product.inclusion.replace(/\n/g, ' · ') : '\u00A0'}
+          {product.category === 'Package' && product.package_items?.length > 0
+            ? `Includes: ${product.package_items.map(i => `${i.name}${i.quantity > 1 ? ` x${i.quantity}` : ''}`).join(', ')}`
+            : (product.inclusion ? product.inclusion.replace(/\n/g, ' · ') : '\u00A0')}
         </p>
 
         <div className="mt-auto">
@@ -341,14 +343,28 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     return catOk && searchOk;
   });
 
-  // Bundles ay wala talagang iisang product category, kaya doon lang sila
-  // isinasama sa grid kapag "All" ang napili — sa ibang category tab
-  // (Cake, Pastry, atbp.) ay products lang gaya ng dati.
-  const filteredBundles = category === 'All'
-    ? bundles.filter(b => !search || (b.bundle_name || '').toLowerCase().includes(search.toLowerCase()))
-    : [];
+  const bundleSearchOk = (b) => !search || (b.bundle_name || '').toLowerCase().includes(search.toLowerCase());
 
-  const handleEdit = (product) => { setEditProduct(product); setModalOpen(true); };
+  // "bundles" (mula sa promo_bundles table) ay may dalawang category ngayon:
+  // 'Bundle' at 'Package' (dating hiwalay na product record ang Package,
+  // ngayon ay bundle row na rin ito). Sa "All" tab, pareho silang lumalabas
+  // kasama ng regular products. Sa "Package" tab, category: 'Package' na
+  // bundle rows lang — hindi na ito hinahanap sa `products` kasi wala nang
+  // product ang may category na 'Package'. Sa ibang category tab (Cake,
+  // Pastry, atbp.), products lang gaya ng dati.
+  const filteredBundles = category === 'All'
+    ? bundles.filter(bundleSearchOk)
+    : category === 'Package'
+      ? bundles.filter(b => b.category === 'Package' && bundleSearchOk(b))
+      : [];
+
+  // Package at Bundle ay parehong na-e-edit na sa Promo Bundles form (doon
+  // na ang Package Contents UI); ginagamit lang dito ang BundleCard grid
+  // kaya diretso na sa handleEditBundle ang Edit ng anumang bundle row.
+  const handleEdit = (product) => {
+    setEditProduct(product);
+    setModalOpen(true);
+  };
   const handleAdd = () => { setEditProduct(null); setModalOpen(true); };
   const handleCloseModal = () => { setModalOpen(false); setEditProduct(null); };
 
@@ -433,7 +449,11 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       <style>{`html { overflow-y: scroll; }`}</style>
 
       {toast && (
-        <div className="fixed top-4 right-4 z-[60] bg-[#3B1F0A] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg">
+        <div
+          className={`fixed bottom-4 right-4 z-[60] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg ${
+            toast.variant === 'warning' || toast.variant === 'error' ? 'bg-red-600' : 'bg-emerald-600'
+          }`}
+        >
           {toast.message}
         </div>
       )}
@@ -485,6 +505,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         onSaveSuccess={handleSaveSuccess}
         onDelete={handleModalDelete}
         showToast={showToast}
+        allProducts={products}
       />
 
       <ConfirmModal

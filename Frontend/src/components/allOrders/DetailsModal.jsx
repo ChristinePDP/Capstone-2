@@ -30,7 +30,6 @@ function formatDateTime(ts) {
   return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// Confirmed = Blue, Ready = Orange, Completed = Green, Cancelled = Red.
 const STATUS_STYLES = {
   Confirmed: 'bg-blue-50 text-blue-700',
   Ready: 'bg-orange-50 text-orange-700',
@@ -38,10 +37,6 @@ const STATUS_STYLES = {
   Cancelled: 'bg-red-50 text-red-600',
 };
 
-// Solid-color variants of the same palette, used on the "Mark as ..." action
-// button in the footer so the button's color always matches the status it's
-// moving the order INTO (e.g. clicking to advance into "Ready" shows an
-// orange button, into "Completed" shows a green button).
 const STATUS_BUTTON_STYLES = {
   Ready: 'bg-orange-500 hover:bg-orange-600',
   Completed: 'bg-green-600 hover:bg-green-700',
@@ -101,10 +96,6 @@ function itemLineTotal(item) {
   return Number(item.total ?? item.total_price ?? (item.unit_price * item.quantity) ?? 0) || 0;
 }
 
-// order_slip_details comes from order_items as jsonb — could arrive as an
-// object already, a JSON string, null, or an empty object ({}) when the
-// product has no slip. Treat null/undefined/non-object/empty-object as
-// "walang order slip".
 function parseSlipDetails(raw) {
   if (!raw) return null;
   let data = raw;
@@ -126,13 +117,6 @@ function formatSlipValue(value) {
   return String(value);
 }
 
-// The raw jsonb is nested one level deep, grouped under each product's own
-// id — e.g. { "<product_id_A>": { "Theme": "...", "Cake Message": "..." },
-// "<product_id_B>": { "Baloon Label": "...", ... } }. The same combined
-// object is stored on every order_item row in a bundle, so we must only
-// pull out the group whose key matches THIS item's product_id — otherwise
-// every product in the bundle ends up showing every other product's fields
-// too.
 function getItemSlipFields(item) {
   const slip = parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails);
   if (!slip) return null;
@@ -151,10 +135,8 @@ function getItemSlipFields(item) {
 
   if (!fields) {
     if (groupKeys.length === 0) {
-      // No nested groups at all — the object itself is already flat fields.
       fields = slip;
     } else if (groupKeys.length === 1 && groupKeys.length === Object.keys(slip).length) {
-      // Only one group and no product_id to match against — safe to use it.
       fields = slip[groupKeys[0]];
     }
   }
@@ -202,28 +184,24 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 // ── DETAILS MODAL ────────────────────────────────────────────
 export default function DetailsModal({ order, isOpen, onClose, onStatusChange }) {
   const [activeTab, setActiveTab] = useState('order');
-  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState(null);
 
   const items = order ? (order.items || order.order_items || []) : [];
-  const hasOrderSlipCheck = items.some(item => parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails));
-  const hasReferenceImageCheck = !!(
-    order?.customerReference ||
-    order?.customer_reference_url ||
-    items.find(i => i.customer_reference_url)?.customer_reference_url ||
-    items.find(i => i.customerReference)?.customerReference
+  
+  const hasOrderSlipCheck = items.some(item => 
+    parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails) || 
+    item.customer_reference_url || 
+    item.customerReference
   );
+  
+  const hasReferenceImageCheck = !!(order?.customerReference || order?.customer_reference_url);
 
-  // Guard against the modal being reused for a different order that has
-  // neither slip data nor a reference image while it was left sitting on
-  // the Order Slip tab.
   useEffect(() => {
     if (activeTab === 'slip' && !hasOrderSlipCheck && !hasReferenceImageCheck) {
       setActiveTab('order');
     }
   }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
 
-  // Lock background scroll while the modal is open, and let Escape close
-  // it — previously the page behind the modal kept scrolling.
   useEffect(() => {
     if (!isOpen || !order) return;
     const originalOverflow = document.body.style.overflow;
@@ -264,46 +242,37 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   const createdAt = order.createdAt || order.created_at;
   const updatedAt = order.updatedAt || order.updated_at;
 
-  const referenceImage       = order.customerReference || 
-                               order.customer_reference_url || 
-                               items.find(i => i.customer_reference_url)?.customer_reference_url || 
-                               items.find(i => i.customerReference)?.customerReference;
+  const globalReferenceImage = order.customerReference || order.customer_reference_url;
 
-  // Order Slip tab only shows up when at least one ordered product actually
-  // has slip details attached (order_items.order_slip_details) — kung wala,
-  // walang tab.
-  //
-  // One card per bundle (or per standalone product) — reuses the same
-  // bundle grouping as the Order Items table so bundled products still
-  // share one box, but each product's slip stays in its own clearly
-  // labeled section instead of being merged together. Bundle cards are
-  // titled with the bundle/promo name; standalone cards are titled with
-  // that specific product's name.
+  // Grouped by Bundle / Package / Standalone Item na kasama na ang specific reference images per component
   const orderSlipCards = (() => {
     const cards = [];
     groupOrderItems(items).forEach(g => {
       if (g.isBundle) {
         const sections = g.items
-          .map(item => ({ item, fields: getItemSlipFields(item) }))
-          .filter(({ fields }) => fields);
+          .map(item => ({ 
+            item, 
+            fields: getItemSlipFields(item), 
+            image: item.customer_reference_url || item.customerReference 
+          }))
+          .filter(({ fields, image }) => fields || image);
+          
         if (sections.length > 0) {
           cards.push({ title: g.bundleName, sections });
         }
       } else {
         const fields = getItemSlipFields(g.item);
-        if (fields) {
-          cards.push({ title: g.item.name || g.item.product_name || 'Item', sections: [{ item: g.item, fields }] });
+        const image = g.item.customer_reference_url || g.item.customerReference;
+        if (fields || image) {
+          cards.push({ title: g.item.name || g.item.product_name || 'Item', sections: [{ item: g.item, fields, image }] });
         }
       }
     });
     return cards;
   })();
+  
   const hasOrderSlip = orderSlipCards.length > 0;
-  // The tab itself should appear whenever there's EITHER slip data OR a
-  // reference image to show — previously it was gated on slip data alone,
-  // which meant an order with only a reference photo (no filled-in
-  // customization fields) never got a tab and the photo was unreachable.
-  const showSlipTab = hasOrderSlip || !!referenceImage;
+  const showSlipTab = hasOrderSlip || !!globalReferenceImage;
 
   const nextStatus = { Confirmed: 'Ready', Ready: 'Completed' };
 
@@ -415,8 +384,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           </div>
         </div>
 
-        {/* Tab switcher — underline style; scrolls horizontally on mobile
-            instead of wrapping or squeezing the labels */}
+        {/* Tab switcher */}
         <div className="px-4 sm:px-7 pt-4 shrink-0">
           <div className="flex items-center gap-4 sm:gap-8 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] pr-4">
             {TABS.map(tab => (
@@ -509,63 +477,84 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           )}
 
           {activeTab === 'slip' && showSlipTab && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+            <div className="flex flex-col gap-6 items-start">
               
-              {/* Left Column: Order Slip Details */}
-              <div className="flex flex-col gap-5">
-                {hasOrderSlip && orderSlipCards.map((card, idx) => (
-                  <div key={idx} className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
-                    <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
-                      <FileText size={14} className="text-[#8A7264]" />
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">
-                        {card.title}
-                      </p>
-                      {card.sections.length > 1 && <BundleTag />}
-                    </div>
-                    <div className="divide-y divide-[#EAE4E0]">
-                      {card.sections.map(({ item, fields }, i) => (
-                        <div key={i} className="p-5 space-y-2.5">
+              {/* Product Component Cards: Slips + Specific References */}
+              {hasOrderSlip && orderSlipCards.map((card, idx) => (
+                <div key={idx} className="w-full bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
+                    <FileText size={14} className="text-[#8A7264]" />
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">
+                      {card.title}
+                    </p>
+                    {card.sections.length > 1 && <BundleTag />}
+                  </div>
+                  <div className="divide-y divide-[#EAE4E0]">
+                    {card.sections.map(({ item, fields, image }, i) => (
+                      <div key={i} className="p-5 flex flex-col md:flex-row gap-6">
+                        
+                        {/* Text Fields */}
+                        <div className="flex-1 space-y-2.5 min-w-0">
                           {card.sections.length > 1 && (
-                            <p className="text-xs font-bold text-[#3B1F0A] mb-1">
+                            <p className="text-xs font-bold text-[#3B1F0A] mb-2 border-b border-[#EAE4E0] pb-1.5">
                               {item.name || item.product_name}
                             </p>
                           )}
-                          {Object.entries(fields).map(([key, value], j) => (
+                          {fields ? Object.entries(fields).map(([key, value], j) => (
                             <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
-                          ))}
+                          )) : (
+                            <p className="text-xs text-[#8A7264] italic">No slip details provided.</p>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
 
-              {/* Right Column: Customer Reference Image (Compact Box) */}
-              <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5 md:sticky md:top-0">
-                <SectionLabel icon={ImageIcon}>Customer Reference</SectionLabel>
-                <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center">
-                  {referenceImage ? (
+                        {/* Specific Component Image */}
+                        {image && (
+                           <div className="w-full md:w-56 shrink-0">
+                             <div className="flex items-center gap-1.5 mb-2">
+                               <ImageIcon size={13} className="text-[#8A7264]" />
+                               <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264]">Reference Image</p>
+                             </div>
+                             <button
+                               type="button"
+                               onClick={() => setLightboxImage(image)}
+                               className="w-full group relative cursor-zoom-in rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center aspect-video md:aspect-square"
+                               aria-label="View reference image"
+                             >
+                               <img src={image} alt="reference" className="w-full h-full object-cover" />
+                               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                                 <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
+                                   View Image
+                                 </span>
+                               </div>
+                             </button>
+                           </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Global Reference Fallback (Kung may reference image ang Order na hindi nakatali sa items) */}
+              {globalReferenceImage && !hasOrderSlip && (
+                <div className="w-full bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5">
+                  <SectionLabel icon={ImageIcon}>Order Reference</SectionLabel>
+                  <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center max-w-sm">
                     <button
                       type="button"
-                      onClick={() => setLightboxOpen(true)}
+                      onClick={() => setLightboxImage(globalReferenceImage)}
                       className="w-full group relative cursor-zoom-in"
-                      aria-label="View full-size reference image"
                     >
-                      <img src={referenceImage} alt="reference" className="w-full h-auto max-h-[220px] object-cover" />
+                      <img src={globalReferenceImage} alt="reference" className="w-full h-auto object-cover" />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
                         <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
                           View Image
                         </span>
                       </div>
                     </button>
-                  ) : (
-                    <div className="flex flex-col items-center gap-1.5 text-[#8A7264] opacity-70 p-6 text-center">
-                      <ImageIcon size={22} strokeWidth={1.75} />
-                      <span className="text-[10px] font-bold tracking-wider uppercase">No Reference Image</span>
-                    </div>
-                  )}
+                  </div>
                 </div>
-              </div>
+              )}
 
             </div>
           )}
@@ -596,34 +585,23 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         )}
       </div>
 
-      {/* Reference image lightbox.
-          FIX: dati, naka-nest ang lightbox na ito sa LOOB ng outer modal
-          overlay na may onClick={onClose} sa root nito, at walang
-          stopPropagation() ang lightbox — kaya anumang click dito (kasama
-          yung X button) ay bumu-bubble paitaas at nagsasara rin ng BUONG
-          Details modal, hindi lang ng preview. Idinagdag ang
-          stopPropagation() sa backdrop click (isara lang ang lightbox,
-          hindi ang buong modal) at binalot sa isang relative wrapper ang
-          image + X button (na may sarili ring stopPropagation) para hindi
-          na ito makarating pa sa outer modal.
-          Inilapit din ang X sa mismong image (relative sa image wrapper,
-          hindi sa buong screen) sa halip na nakatapon sa sulok ng viewport. */}
-      {lightboxOpen && referenceImage && (
+      {/* Lightbox para sa Specific Image URL */}
+      {lightboxImage && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
-          onClick={(e) => { e.stopPropagation(); setLightboxOpen(false); }}
+          onClick={(e) => { e.stopPropagation(); setLightboxImage(null); }}
         >
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
-              onClick={() => setLightboxOpen(false)}
+              onClick={() => setLightboxImage(null)}
               className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
               aria-label="Close"
             >
               <X size={18} />
             </button>
             <img
-              src={referenceImage}
+              src={lightboxImage}
               alt="reference full size"
               className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl block"
             />

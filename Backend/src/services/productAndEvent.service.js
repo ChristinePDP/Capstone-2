@@ -47,7 +47,12 @@ export const createDatabaseProduct = async (productData) => {
     pricing_mode: productData.pricing_mode || 'fixed',
     price_groups: productData.price_groups || [],
     price_matrix: productData.price_matrix || [],
-    event_tags: initialTags 
+    event_tags: initialTags,
+    // BAGO: para sa mga "Package" products — listahan ng mga component
+    // products (hal. cake, cupcake, tarp) na dapat ma-deduct sa kani-kanilang
+    // sariling stock kapag na-order ang package na ito. Tingnan ang
+    // pos.service.js / onlineOrdering.service.js para sa deduction logic.
+    package_items: Array.isArray(productData.package_items) ? productData.package_items : []
   };
 
   try {
@@ -82,7 +87,9 @@ export const updateDatabaseProduct = async (id, productData) => {
     pricing_mode: productData.pricing_mode,
     price_groups: productData.price_groups,
     price_matrix: productData.price_matrix,
-    event_tags: productData.event_tags ? productData.event_tags.filter(tag => validTags.includes(tag)) : []
+    event_tags: productData.event_tags ? productData.event_tags.filter(tag => validTags.includes(tag)) : [],
+    // BAGO: tingnan ang paliwanag sa createDatabaseProduct sa itaas.
+    package_items: productData.package_items
   };
 
   Object.keys(productToUpdate).forEach((key) => {
@@ -290,6 +297,57 @@ const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
   };
 };
 
+// BAGO: "Package" (dating hiwalay na product record na may category:
+// 'Package') ay nasa promo_bundles table na rin ngayon, kasabay ng
+// "Bundle". Magkaiba ang enrichment nila: Bundle ay tungkol sa discount %
+// laban sa product_ids/bundle_options, samantalang Package ay tungkol sa
+// component products (package_items: [{product_id, name, quantity}]) na
+// idededuct sa sarili nilang stock pag na-order — walang discount % o
+// event/date availability window.
+const enrichPackageBundle = async (bundle) => {
+  let safeIds = [];
+  if (Array.isArray(bundle.package_items)) {
+    safeIds = bundle.package_items
+      .map(item => item.product_id)
+      .filter(id => id !== null && id !== undefined && id !== '')
+      .map(id => String(id));
+  }
+
+  const componentProducts = await ProductModel.findByIds(safeIds);
+  const productsById = new Map(componentProducts.map(p => [String(p.id), p]));
+
+  const packageItems = (bundle.package_items || []).map(item => {
+    const product = productsById.get(String(item.product_id)) || null;
+    const unitPrice = Number(product?.price || 0);
+    return {
+      ...item,
+      product,
+      unit_price: unitPrice,
+      line_total: unitPrice * Number(item.quantity || 0)
+    };
+  });
+
+  const componentsTotal = packageItems.reduce((sum, item) => sum + item.line_total, 0);
+  const packagePrice = Number(bundle.discounted_price || 0);
+
+  return {
+    ...bundle,
+    category: 'Package',
+    package_items: packageItems,
+    // Para magamit pa rin ng parehong BundleCard/BundleImageGrid sa
+    // frontend (products[].image_url) nang walang extra branching doon.
+    products: componentProducts,
+    original_total: componentsTotal,
+    bundle_price: packagePrice,
+    discount_percent: componentsTotal > packagePrice && componentsTotal > 0
+      ? Math.round((1 - packagePrice / componentsTotal) * 100)
+      : 0,
+    // Walang event/date-range na availability ang Package (daily_limit na
+    // lang ang cap nito) — laging "within range" hangga't active.
+    is_within_date_range: true
+  };
+};
+
 // `filters.visibleOnly === 'true'` (galing sa `?visibleOnly=true` query param)
 // ay ginagamit ng PUBLIC-facing na Home.jsx para makuha lang ang mga bundle na
 // dapat talagang lumabas ngayon (active AT nasa loob ng availability window,
@@ -304,7 +362,11 @@ export const getAllBundles = async (filters = {}) => {
     const occasionsByTag = await getActiveOccasionsByTag();
 
     const bundlesWithPricing = await Promise.all(
-      (data || []).map(bundle => enrichBundleWithPricing(bundle, occasionsByTag))
+      (data || []).map(bundle =>
+        bundle.category === 'Package'
+          ? enrichPackageBundle(bundle)
+          : enrichBundleWithPricing(bundle, occasionsByTag)
+      )
     );
 
     const visibleOnly = filters.visibleOnly === 'true' || filters.visibleOnly === true;
@@ -322,6 +384,7 @@ export const getBundleById = async (id) => {
   try {
     const bundle = await BundleModel.findById(id);
     if (!bundle) return null;
+    if (bundle.category === 'Package') return enrichPackageBundle(bundle);
     const occasionsByTag = await getActiveOccasionsByTag();
     return enrichBundleWithPricing(bundle, occasionsByTag);
   } catch (error) {
@@ -329,26 +392,60 @@ export const getBundleById = async (id) => {
   }
 };
 
+// BAGO: "Package" ngayon ay isa na ring row sa promo_bundles (category:
+// 'Package') sa halip na product record — kaya dito na rin ito
+// isinasave/kinukuha. Iba ang laman ng row kumpara sa isang "Bundle":
+// package_items (component products + quantity) at ang presyo mismo
+// (hindi discount %), sa halip na product_ids/bundle_options/event/date
+// availability na ginagamit lang ng Bundle.
+const buildPackageInsertRow = (bundleData) => ({
+  category: 'Package',
+  bundle_name: bundleData.bundle_name,
+  product_ids: [],
+  bundle_options: {},
+  discounted_price: bundleData.price ?? bundleData.discounted_price ?? 0,
+  custom_image_url: bundleData.custom_image_url || null,
+  event_tag: null,
+  is_active: bundleData.is_active ?? true,
+  start_month: null,
+  start_day: null,
+  end_month: null,
+  end_day: null,
+  package_items: Array.isArray(bundleData.package_items) ? bundleData.package_items : [],
+  daily_limit: bundleData.daily_limit || 0,
+  date_exceptions: Array.isArray(bundleData.dateExceptions) ? bundleData.dateExceptions : []
+});
+
+const buildBundleInsertRow = (bundleData) => ({
+  category: 'Bundle',
+  bundle_name: bundleData.bundle_name,
+  product_ids: bundleData.product_ids || [],
+  bundle_options: bundleData.bundle_options || {},
+  discounted_price: bundleData.discounted_price || 0,
+  custom_image_url: bundleData.custom_image_url || null,
+  event_tag: bundleData.event_tag || null,
+  is_active: bundleData.is_active ?? true,
+  start_month: bundleData.start_month || null,
+  start_day: bundleData.start_day || null,
+  end_month: bundleData.end_month || null,
+  end_day: bundleData.end_day || null,
+  package_items: [],
+  daily_limit: 0,
+  date_exceptions: []
+});
+
 export const createBundle = async (bundleData) => {
-  const bundleToInsert = {
-    bundle_name: bundleData.bundle_name,
-    product_ids: bundleData.product_ids || [],
-    bundle_options: bundleData.bundle_options || {},
-    discounted_price: bundleData.discounted_price || 0,
-    custom_image_url: bundleData.custom_image_url || null,
-    event_tag: bundleData.event_tag || null,
-    is_active: bundleData.is_active ?? true,
-    start_month: bundleData.start_month || null,
-    start_day: bundleData.start_day || null,
-    end_month: bundleData.end_month || null,
-    end_day: bundleData.end_day || null
-  };
+  const isPackage = bundleData.category === 'Package';
+  const bundleToInsert = isPackage ? buildPackageInsertRow(bundleData) : buildBundleInsertRow(bundleData);
 
   try {
     const response = await BundleModel.create(bundleToInsert);
     if (response.error) throw new Error(response.error.message);
 
     const savedBundle = Array.isArray(response.data) ? response.data[0] : response.data;
+
+    if (isPackage) return enrichPackageBundle(savedBundle);
+
     const occasionsByTag = await getActiveOccasionsByTag();
     return enrichBundleWithPricing(savedBundle, occasionsByTag);
   } catch (error) {
@@ -357,19 +454,46 @@ export const createBundle = async (bundleData) => {
 };
 
 export const updateBundle = async (id, bundleData) => {
-  const bundleToUpdate = {
-    bundle_name: bundleData.bundle_name,
-    product_ids: bundleData.product_ids,
-    bundle_options: bundleData.bundle_options,
-    discounted_price: bundleData.discounted_price,
-    custom_image_url: bundleData.custom_image_url,
-    event_tag: bundleData.event_tag,
-    is_active: bundleData.is_active,
-    start_month: bundleData.start_month,
-    start_day: bundleData.start_day,
-    end_month: bundleData.end_month,
-    end_day: bundleData.end_day
-  };
+  // Category is locked in the frontend once a row is saved (a Bundle and a
+  // Package can't be converted into each other), so we trust whatever
+  // category the client sends on update. Default to 'Bundle' only for old
+  // payloads that predate the category field.
+  const isPackage = bundleData.category === 'Package';
+
+  const bundleToUpdate = isPackage
+    ? {
+        category: 'Package',
+        bundle_name: bundleData.bundle_name,
+        discounted_price: bundleData.price ?? bundleData.discounted_price,
+        custom_image_url: bundleData.custom_image_url,
+        is_active: bundleData.is_active,
+        package_items: bundleData.package_items,
+        daily_limit: bundleData.daily_limit,
+        date_exceptions: bundleData.dateExceptions,
+        // Package rows never carry these — explicitly clear them in case an
+        // older row is being re-saved.
+        product_ids: [],
+        bundle_options: {},
+        event_tag: null,
+        start_month: null,
+        start_day: null,
+        end_month: null,
+        end_day: null
+      }
+    : {
+        category: 'Bundle',
+        bundle_name: bundleData.bundle_name,
+        product_ids: bundleData.product_ids,
+        bundle_options: bundleData.bundle_options,
+        discounted_price: bundleData.discounted_price,
+        custom_image_url: bundleData.custom_image_url,
+        event_tag: bundleData.event_tag,
+        is_active: bundleData.is_active,
+        start_month: bundleData.start_month,
+        start_day: bundleData.start_day,
+        end_month: bundleData.end_month,
+        end_day: bundleData.end_day
+      };
 
   Object.keys(bundleToUpdate).forEach((key) => {
     if (bundleToUpdate[key] === undefined) delete bundleToUpdate[key];
@@ -383,6 +507,8 @@ export const updateBundle = async (id, bundleData) => {
     // dapat maging generic 500, kundi malinaw na "not found" signal papunta
     // sa controller.
     if (response.notFound) return null;
+
+    if (isPackage) return enrichPackageBundle(response.data);
 
     const occasionsByTag = await getActiveOccasionsByTag();
     return enrichBundleWithPricing(response.data, occasionsByTag);

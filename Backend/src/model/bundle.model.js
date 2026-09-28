@@ -15,6 +15,15 @@ const BundleModel = {
       query = query.eq('event_tag', filters.eventTag);
     }
 
+    // BAGO: "Package" at "Bundle" ay parehong nakatira na ngayon sa
+    // promo_bundles table, kaya kailangan ng paraan para i-filter per
+    // category — kapareho ng ?category= filter ng products endpoint.
+    // Kapag walang pinasang category, ibabalik lahat (Bundle + Package),
+    // gaya ng dating behavior.
+    if (filters.category) {
+      query = query.eq('category', filters.category);
+    }
+
     return query;
   },
 

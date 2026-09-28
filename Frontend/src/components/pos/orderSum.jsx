@@ -458,6 +458,23 @@ export default function OrderSummaryModal({
                   )}
                 </div>
               </div>
+
+              {/* FIX (Special Instructions, POS): dating naka-duplicate ito
+                  bilang default field sa BAWAT produkto (Product Modal),
+                  kaya paulit-ulit lumalabas sa order slip kapag maraming
+                  item. Isang beses na lang ito dito ngayon — para sa BUONG
+                  ORDER, hindi na per-product — katulad ng dati nitong
+                  puwesto: sa ilalim ng Date/Time. */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Special Instructions</label>
+                <textarea
+                  rows={2}
+                  placeholder="Anything else we should know? (optional)"
+                  value={form.instructions || ''}
+                  onChange={e => setForm({ ...form, instructions: e.target.value })}
+                  className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"
+                />
+              </div>
             </div>
           </div>
 
@@ -486,15 +503,32 @@ export default function OrderSummaryModal({
                     </p>
                   ))}
 
-                  {item.type === 'bundle' && item.order_slip_details ? (
-                    Object.entries(item.order_slip_details).map(([prodId, answers]) => {
-                      const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                      return Object.entries(answers).map(([label, value]) => (
-                        <p key={`sum-slip-${prodId}-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                          <span className="font-medium">{pName}</span> - {label}: {value}
-                        </p>
-                      ));
-                    })
+                  {/* FIX (per-product slip): dati, flat na "ProductName - Label:
+                      value" ang bawat line, kaya paulit-ulit ang product name at
+                      magulo tignan kapag maraming fields. Ngayon, may sariling
+                      maliit na "slip card" na ang bawat component product ng
+                      bundle — pangalan ng produkto sa taas bilang header, tapos
+                      ang mga fields/answers nito lang ang nakalista sa ilalim,
+                      tulad ng aktwal na order slip na pinunan para dito. */}
+                  {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
+                    <div className="flex flex-col gap-1.5 mt-1">
+                      {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
+                        const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
+                        if (!answers || Object.keys(answers).length === 0) return null;
+                        return (
+                          <div key={`sum-slip-${prodId}`} className="bg-[#F9F5F1] border border-[#F1EBE6] rounded-lg px-2.5 py-2">
+                            <p className="text-[10px] sm:text-[11px] font-bold text-[#5A453C] uppercase tracking-wide mb-1">{pName}</p>
+                            <div className="flex flex-col gap-0.5">
+                              {Object.entries(answers).map(([label, value]) => (
+                                <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
+                                  <span className="font-medium">{label}:</span> {value}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
                     item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
                       <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">

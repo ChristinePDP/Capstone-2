@@ -1,6 +1,7 @@
 export function ingStatus(stock, min) {
-  if (stock < min * 2) return { cls: 'danger', label: 'Low' };
-  return { cls: 'success', label: 'Enough' };
+  if (stock <= 0) return { cls: 'danger', label: 'Out of Stock' };
+  if (stock < min / 2) return { cls: 'warning', label: 'Low Stock' };
+  return { cls: 'success', label: 'In Stock' };
 }
 
 export function computeCapacity(recipe, ingredients) {

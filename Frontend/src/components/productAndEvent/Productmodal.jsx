@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, forwardRef } from 'react';
 import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
 
-const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Package', 'Celebration Material'];
+const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Celebration Material'];
 
 const BLANK_PRODUCT = {
   name: '',
@@ -243,7 +243,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   );
 });
 
-export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete, showToast = () => {} }) {
+export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete, showToast = () => {}, allProducts = [] }) {
   const initialFormState = product ? {
     name: product.name || '',
     category: product.category || PRODUCT_CATEGORIES[0],
@@ -253,7 +253,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     image: product.image_url || '',
     dailyLimit: product.daily_limit || 0,
     allowFileUpload: product.allow_file_upload || false,
-    eventTags: product.event_tags || []
+    eventTags: product.event_tags || [],
   } : BLANK_PRODUCT;
 
   const [form, setForm] = useState(initialFormState);
@@ -290,7 +290,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         image: product.image_url || '',
         dailyLimit,
         allowFileUpload: product.allow_file_upload || false,
-        eventTags: product.event_tags || []
+        eventTags: product.event_tags || [],
       } : BLANK_PRODUCT);
       setDailyLimitEnabled(dailyLimit > 0);
       
@@ -391,7 +391,11 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             }
         }
 
-        // Add the fixed special instructions explicitly so it gets saved to the backend
+        // FIX: hindi na dito auto-a-append ang "Special Instructions" — isang
+        // beses na lang ito lalabas sa buong order (sa Order Summary, sa
+        // ilalim ng Date/Time), hindi na paulit-ulit kada produkto. Ang
+        // filter sa ibaba ay para lang matanggal ang lumang fixed field na
+        // baka nasave pa sa mga existing product bago ang fix na ito.
         const cleanFields = fields
         .filter(f => f.label.trim() && f.label.toLowerCase() !== 'special instructions')
         .map(f => ({
@@ -402,13 +406,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                 ? (Array.isArray(f.options) ? f.options : (f.options || '').split(',')).map(o => o.trim()).filter(Boolean)
                 : [],
         }));
-        
-        cleanFields.push({
-            id: 'fixed-special-instructions',
-            label: 'Special Instructions',
-            type: 'Text',
-            options: []
-        });
 
         const payload = {
             name: form.name,
@@ -423,7 +420,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             pricing_mode: 'fixed',
             price_groups: [],
             price_matrix: [],
-            event_tags: form.eventTags || [] 
+            event_tags: form.eventTags || [],
         };
 
         const saveUrl = isEditing
@@ -517,16 +514,6 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                 <button type="button" onClick={() => removeField(field.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors self-end sm:self-auto"><Trash2 size={14} /></button>
               </div>
             ))}
-
-            {/* Fixed Special Instructions Field — always pinned last so it renders at the bottom of the order slip */}
-            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
-              <input value="Special Instructions" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
-              <select value="Text" disabled className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed">
-                <option value="Text">Text</option>
-              </select>
-              <input value="—" disabled className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none bg-gray-100 text-gray-500 cursor-not-allowed" />
-              <div className="p-2 shrink-0 self-end sm:self-auto w-[30px]"></div>
-            </div>
           </div>
 
           <button type="button" onClick={addField} className="mt-4 w-full border border-dashed border-[#DED4CC] rounded-2xl py-2.5 text-xs font-bold text-[#5A453C] bg-white flex items-center justify-center gap-1.5 hover:bg-[#F5EFEB] transition-colors">

@@ -1,5 +1,6 @@
-import { useState, useRef, useMemo } from 'react';
-import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart } from 'lucide-react';
+import { useState, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
@@ -10,18 +11,51 @@ import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
 
+const MATERIAL_VIEWS = [
+  { key: 'celebration', label: 'Celebration Material', category: 'Celebration Material' },
+  { key: 'product',     label: 'Product Material',     category: 'Product Material' },
+];
+
+// A material is a "Celebration Material" when it's linked to a Celebration
+// Material product that's actually being sold. Everything else (materials
+// linked to other product types, like boxes for cakes/pastries, or not
+// linked to any product at all) is a "Product Material".
+// This is only used as a fallback for OLDER records that don't have a
+// `category` saved yet — going forward, the type is set manually by the
+// user via the toggle in the Add/Edit form.
+function getMaterialViewKey(material, productsById = {}) {
+  if (material?.category === 'Product Material') return 'product';
+  if (material?.category === 'Celebration Material') return 'celebration';
+  const linkedProduct = productsById[material?.productId || material?.product_id];
+  return linkedProduct?.category === 'Celebration Material' ? 'celebration' : 'product';
+}
+
 export default function CelebrationTab() {
   const context = useApp() || {};
   const { addMaterial, updateMaterial, deleteMaterial, restockMaterial } = context;
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const pendingFulfillment = context.pendingMaterialFulfillment || [];
-  const products = (context.products || []).filter(product => product.category === 'Celebration Material');
+  const allProducts = context.products || [];
+  // Celebration Materials ay naka-link sa Celebration Material products
+  // (hal. tarpaulin/balloons na binebenta bilang add-on). Product
+  // Materials naman ay para sa packaging ng REGULAR products (hal. mga
+  // boxes ng cakes/pastries) — kaya iba dapat ang pinagkukunan ng
+  // name-suggestions sa datalist, hindi dapat sila dependent sa
+  // Celebration Material products.
+  const celebrationProducts = allProducts.filter(product => product.category === 'Celebration Material');
+  const regularProducts = allProducts.filter(product => product.category !== 'Celebration Material');
+  const productsById = useMemo(
+    () => Object.fromEntries(allProducts.map(p => [p.id, p])),
+    [allProducts]
+  );
   const isLoading = !!context.loading;
 
   const { show: showToast } = useToast();
   const [containerRef, isCompact] = useIsCompact();
+  const [materialView, setMaterialView] = useState(() => localStorage.getItem('inv_material_view') || 'celebration');
   const [page, setPage]             = useState(1);
   const [search, setSearch]         = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [modalOpen, setModalOpen]   = useState(false);
   const [editMat, setEditMat]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -30,10 +64,24 @@ export default function CelebrationTab() {
   const isDeletingRef = useRef(false);
 
   const currentEditMat = materials.find(m => m.id === editMat?.id) || editMat;
+  const activeView = MATERIAL_VIEWS.find(v => v.key === materialView) || MATERIAL_VIEWS[0];
 
-  const filtered = materials.filter(m =>
-    m.name.toLowerCase().includes(search.toLowerCase())
+  const handleViewChange = (key) => {
+    setMaterialView(key);
+    localStorage.setItem('inv_material_view', key);
+    setPage(1);
+  };
+
+  const materialsInView = useMemo(
+    () => materials.filter(m => getMaterialViewKey(m, productsById) === materialView),
+    [materials, materialView, productsById]
   );
+
+  const filtered = materialsInView.filter(m => {
+    const matchesSearch = m.name.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || ingStatus(m.stock, m.min).label === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   const handleSave = async (payload) => {
@@ -51,11 +99,11 @@ export default function CelebrationTab() {
     }
 
     if (payload.detailsPayload && payload.restockPayload) {
-      showToast(`Na-update ang detalye at +${payload.addedQty} ${currentEditMat.unit} na-add sa ${currentEditMat.name}.`);
+      showToast(`Details updated and +${payload.addedQty} ${currentEditMat.unit} added to ${currentEditMat.name}.`);
     } else if (payload.restockPayload) {
-      showToast(`+${payload.addedQty} ${currentEditMat.unit} na-add sa ${currentEditMat.name}.`);
+      showToast(`+${payload.addedQty} ${currentEditMat.unit} added to ${currentEditMat.name}.`);
     } else if (payload.detailsPayload) {
-      showToast('Naitama ang detalye ng material.');
+      showToast('Material details updated.');
     }
   };
 
@@ -98,24 +146,57 @@ export default function CelebrationTab() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800"> Celebration/Product Materials</h3>
-            <p className="text-xs text-brand-400 mt-0.5">Mag-manage ng Printed Balloons, Tarpaulin, at iba pang party add-ons.</p>
+            <h3 className="font-bold text-brand-800">Celebration/Product Materials</h3>
+            <p className="text-xs text-brand-400 mt-0.5">
+              {materialView === 'celebration'
+                ? 'Manage party add-ons like balloons and tarpaulins.'
+                : 'Manage packaging materials used for your products, like boxes.'}
+            </p>
           </div>
           <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
-            <Plus size={14} /> Add New Material
+            <Plus size={14} /> Add New {activeView.label}
           </Button>
         </div>
 
+        <div className="flex gap-6 border-b-2 border-brand-100 px-4 mt-3">
+          {MATERIAL_VIEWS.map(view => (
+            <button
+              key={view.key}
+              type="button"
+              onClick={() => handleViewChange(view.key)}
+              className={`pb-2.5 text-sm font-bold border-b-2 transition-all -mb-0.5 ${
+                materialView === view.key
+                  ? 'border-brand-800 text-brand-900'
+                  : 'border-transparent text-brand-400 hover:text-brand-600'
+              }`}
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
-          <div className="relative max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Search material..."
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white"
-            />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="relative max-w-xs w-full">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
+              <input
+                type="text"
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
+                placeholder="Search material..."
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+              className="px-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-full sm:w-auto"
+            >
+              <option value="all">All Status</option>
+              <option value="In Stock">In Stock</option>
+              <option value="Low Stock">Low Stock</option>
+              <option value="Out of Stock">Out of Stock</option>
+            </select>
           </div>
         </div>
 
@@ -185,7 +266,9 @@ export default function CelebrationTab() {
 
               {!paged.length && (
                 <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {search ? 'Walang nahanap na material.' : 'Walang naka-record na celebration / product materials.'}
+                  {(search || statusFilter !== 'all')
+                    ? 'No matching materials found.'
+                    : `No ${activeView.label.toLowerCase()} recorded yet.`}
                 </div>
               )}
             </>
@@ -194,30 +277,162 @@ export default function CelebrationTab() {
 
         {filtered.length > PER_PAGE && (
            <div className="p-3 border-t border-brand-100">
-             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total=" celebration / product materials" onChange={setPage} />
+             <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total={` ${activeView.label.toLowerCase()}`} onChange={setPage} />
            </div>
         )}
       </Card>
 
       <MaterialModal
-        key={currentEditMat?.id ?? 'new'}  
+        key={currentEditMat?.id ?? `new-${materialView}`}
         isOpen={modalOpen}
         material={currentEditMat}
-        products={products}
+        celebrationProducts={celebrationProducts}
+        regularProducts={regularProducts}
+        productsById={productsById}
+        defaultView={materialView}
         onClose={() => setModalOpen(false)}
         onSave={handleSave}
       />
 
       <ConfirmModal
         isOpen={!!deleteTarget} onClose={() => !isDeletingRef.current && setDeleteTarget(null)} onConfirm={handleDelete}
-        title="Delete Material" message={`I-delete ang "${deleteTarget?.name}"?`}
-        confirmLabel={isDeleting ? 'Dinedelete...' : 'Delete'} variant="danger"
+        title="Delete Material" message={`Delete "${deleteTarget?.name}"?`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'} variant="danger"
       />
     </div>
   );
 }
 
-function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
+// Custom-styled na autocomplete para sa Material Name (Celebration
+// Material lang) — pinalitan ang native <datalist>, dahil hindi
+// ma-cocontrol ng CSS ang itsura nito (browser default lang laging
+// lumalabas, hindi tugma sa theme). Ito ang nagbibigay ng product-link
+// (productId) kapag pumili ang user ng existing product sa listahan.
+//
+// IMPORTANT: naka-render ang dropdown panel sa pamamagitan ng React
+// Portal (diretso sa document.body), HINDI sa loob ng normal na DOM
+// tree ng modal. Dahil ang Modal body ay may sarili nitong
+// overflow-y-auto (scrollable container), kapag "absolute" lang ang
+// ginamit, na-cclip/nahihiwa ang dropdown sa gilid ng modal — lalo na
+// kapag naka-scroll o malapit sa dulo. Sa portal, "fixed" position ang
+// gamit base sa AKTWAL na coordinates ng input field
+// (getBoundingClientRect), kaya laging naka-anchor ito nang tama kahit
+// saan pa sa loob ng modal, at hindi na naaapektuhan ng overflow/z-index
+// ng anumang ancestor.
+function ProductLinkedNameField({ label = 'Material Name', value, onChange, products = [], placeholder, required = true }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  const [coords, setCoords] = useState(null);
+  const fieldRef = useRef(null);   // bumabalot sa Input — ginagamit para ma-measure ang position
+  const dropdownRef = useRef(null); // ang portal-rendered dropdown panel mismo
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    const list = q ? products.filter(p => p.name.toLowerCase().includes(q)) : products;
+    return list.slice(0, 8);
+  }, [products, value]);
+
+  const updateCoords = () => {
+    const rect = fieldRef.current?.getBoundingClientRect();
+    if (rect) {
+      setCoords({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+    }
+  };
+
+  // I-recompute ang position habang bukas (kasama ang pag-scroll ng
+  // modal body mismo — `true` sa 3rd arg ng addEventListener para
+  // ma-capture ang scroll ng ANUMANG naka-nest na scrollable ancestor,
+  // hindi lang ng window).
+  useEffect(() => {
+    if (!isOpen) return;
+    updateCoords();
+    window.addEventListener('scroll', updateCoords, true);
+    window.addEventListener('resize', updateCoords);
+    return () => {
+      window.removeEventListener('scroll', updateCoords, true);
+      window.removeEventListener('resize', updateCoords);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      const clickedField = fieldRef.current?.contains(e.target);
+      const clickedDropdown = dropdownRef.current?.contains(e.target);
+      if (!clickedField && !clickedDropdown) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
+
+  const selectProduct = (product) => {
+    onChange(product.name, product.id);
+    setIsOpen(false);
+    setHighlight(-1);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!isOpen || !filtered.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight(h => (h + 1) % filtered.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight(h => (h <= 0 ? filtered.length - 1 : h - 1));
+    } else if (e.key === 'Enter' && highlight >= 0) {
+      e.preventDefault();
+      selectProduct(filtered[highlight]);
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div className="relative" ref={fieldRef}>
+      <Input
+        label={label}
+        required={required}
+        value={value}
+        autoComplete="off"
+        onChange={e => { onChange(e.target.value, null); setIsOpen(true); setHighlight(-1); }}
+        onFocus={() => setIsOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+      />
+      {products.length > 0 && (
+        <ChevronDown
+          size={14}
+          className="pointer-events-none absolute right-3 top-[38px] text-brand-400"
+        />
+      )}
+
+      {isOpen && filtered.length > 0 && coords && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{ position: 'fixed', top: coords.top, left: coords.left, width: coords.width, zIndex: 9999 }}
+          className="max-h-52 overflow-y-auto rounded-md border border-gray-300 bg-white shadow-sm"
+        >
+          {filtered.map((product, idx) => (
+            <button
+              key={product.id}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onMouseEnter={() => setHighlight(idx)}
+              onClick={() => selectProduct(product)}
+              className={`w-full text-left px-3 py-1.5 text-sm ${
+                idx === highlight ? 'bg-blue-600 text-white' : 'bg-white text-gray-900'
+              }`}
+            >
+              {product.name}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
   const { show: showToast } = useToast();
 
   const [name, setName] = useState(material?.name ?? '');
@@ -225,8 +440,19 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
   const [stock, setStock] = useState('');
   const [min, setMin] = useState(material?.min ?? '');
   const [cost, setCost] = useState(''); 
-  const [expiry, setExpiry] = useState(''); // 👈 BAGONG DAGDAG
+  const [expiry, setExpiry] = useState(''); // New: expiration date input
   const [productId, setProductId] = useState(material?.productId || material?.product_id || '');
+
+  // The user manually picks whether this is a Celebration Material or a
+  // Product Material — this is not guessed automatically.
+  const initialMaterialType = material ? getMaterialViewKey(material, productsById) : defaultView;
+  const [materialType, setMaterialType] = useState(initialMaterialType);
+
+  // Name-suggestion source depende sa uri: Celebration Materials ay
+  // naka-link sa Celebration Material products, samantalang Product
+  // Materials ay para sa packaging ng regular products (hindi dapat
+  // dependent sa listahan ng Celebration Material products).
+  const products = materialType === 'product' ? regularProducts : celebrationProducts;
 
   const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
   const [editingDetails, setEditingDetails] = useState(false);
@@ -238,7 +464,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
 
   const finalizedStock = parseFractionInput(stock);
   const addedQty = parseFloat(finalizedStock) || 0;
-  const qtyError = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Dami na idadagdag' : 'Initial stock' }) : '';
+  const qtyError = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Quantity to add' : 'Initial stock' }) : '';
   const minError = getQtyError(min, { max: MAX_QTY, label: 'Minimum safety stock' });
   const costError = getCostError(cost);
   const detailsCostError = getCostError(detailsCost);
@@ -249,6 +475,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
     String(min) !== String(material?.min ?? '') ||
     String(detailsCost) !== String(material?.costPerUnit ?? '')
     || productId !== (material?.productId || material?.product_id || '')
+    || materialType !== initialMaterialType
   );
 
   const handleDetailsHeaderClick = () => {
@@ -273,6 +500,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
     setMin(material?.min ?? '');
     setDetailsCost(String(material?.costPerUnit ?? ''));
     setProductId(material?.productId || material?.product_id || '');
+    setMaterialType(initialMaterialType);
     setEditingDetails(false);
   };
 
@@ -298,8 +526,8 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
           stock_quantity: addedQty, 
           minimum_stock: parseFloat(min), 
           cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
-          category: 'Celebration / Product Material',
-          expiration_date: expiry || null // 👈 BAGONG DAGDAG
+          category: defaultView === 'product' ? 'Product Material' : 'Celebration Material',
+          expiration_date: expiry || null // New field
         },
         addedQty,
         itemName: name.trim(),
@@ -318,20 +546,27 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
     if (stock) {
       if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
       if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total cost is required kapag nagdadagdag ng stock.', 'error'); return; }
+      if (!cost) { showToast('Total cost is required when adding stock.', 'error'); return; }
       if (costError) { showToast(costError, 'error'); return; }
     }
 
     if (!isDetailsModified && !stock) {
-      showToast('Walang binago o idinagdag. I-edit ang detalye o maglagay ng dami na idadagdag.', 'error');
+      showToast('Nothing was changed or added. Edit the details or enter a quantity to add.', 'error');
       return;
     }
 
     const detailsPayload = isDetailsModified || editingDetails
-      ? { name: name.trim(), product_id: productId || null, unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
+      ? {
+          name: name.trim(),
+          product_id: productId || null,
+          unit,
+          minimum_stock: parseFloat(min) || 0,
+          cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0,
+          category: materialType === 'product' ? 'Product Material' : 'Celebration Material',
+        }
       : null;
       
-    // 👈 BAGONG DAGDAG SA RESTOCK PAYLOAD
+    // New field on the restock payload
     const restockPayload = stock ? { 
       added_qty: addedQty, 
       total_cost: cost ? parseFloat(cost) : 0,
@@ -367,23 +602,23 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
   };
 
   const confirmTitle = confirmPayload?.isNew
-    ? 'Kumpirmahin ang Bagong Material'
+    ? 'Confirm New Material'
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-      ? 'Kumpirmahin ang Pagbabago'
+      ? 'Confirm Changes'
       : confirmPayload?.restockPayload
-        ? 'Kumpirmahin ang Add Stock'
-        : 'Kumpirmahin ang Pag-edit';
+        ? 'Confirm Add Stock'
+        : 'Confirm Edit';
 
   const confirmMessage = confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-    ? `I-sasave ang bagong detalye ng "${confirmPayload.itemName}" AT idadagdag ang ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Sigurado ka na?`
+    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Are you sure?`
     : confirmPayload?.restockPayload
-      ? `Sigurado ka bang idadagdag ang ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} sa ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` na may kabuuang halaga na ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
-      : `I-save ang bagong detalye ng "${confirmPayload?.itemName}"?`;
+      ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
+      : `Save the new details for "${confirmPayload?.itemName}"?`;
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : 'Add New Celebration / Product Material'}
-        subtitle={isEdit ? `Unit: ${material?.unit}` : 'Mag-record ng bagong bulto ng party add-ons.'}
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : `Add New ${MATERIAL_VIEWS.find(v => v.key === defaultView)?.label ?? 'Material'}`}
+        subtitle={isEdit ? `Unit: ${material?.unit}` : `Record a new batch of ${MATERIAL_VIEWS.find(v => v.key === defaultView)?.label?.toLowerCase() ?? 'material'}.`}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -401,7 +636,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 <Wallet size={16} className="text-brand-500" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost ng Kasalukuyang Stock</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
                 <p className="text-lg font-black text-brand-800 leading-tight">
                   ₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}
                   <span className="text-xs font-semibold text-brand-400 ml-1.5">({material?.stock} {material?.unit})</span>
@@ -419,15 +654,22 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Input label="Material Name" required list="celebration-material-products" value={name} onChange={e => {
-                      const nextName = e.target.value;
-                      const linkedProduct = products.find(product => product.name === nextName);
-                      setName(nextName);
-                      setProductId(linkedProduct?.id || '');
-                    }} placeholder="e.g. Tarpaulin (2x3 ft)" />
-                    <datalist id="celebration-material-products">
-                      {products.map(product => <option key={product.id} value={product.name} />)}
-                    </datalist>
+                    {materialType === 'celebration' ? (
+                      <ProductLinkedNameField
+                        value={name}
+                        onChange={(nextName, linkedId) => {
+                          setName(nextName);
+                          setProductId(linkedId ?? '');
+                        }}
+                        products={products}
+                        placeholder="e.g. Tarpaulin (2x3 ft)"
+                      />
+                    ) : (
+                      <Input label="Material Name" required value={name} onChange={e => {
+                        setName(e.target.value);
+                        setProductId('');
+                      }} placeholder="e.g. Small Box (6x6 in)" />
+                    )}
                   </div>
                   <div>
                     <Select label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
@@ -450,11 +692,11 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="hal. 0.5 o 1/2" />
+                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="e.g. 0.5 or 1/2" />
                     {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
                   </div>
                   <div>
-                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="hal. 10" />
+                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="e.g. 10" />
                     {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
                   </div>
                 </div>
@@ -469,14 +711,14 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Input label="Total Halaga / Resibo" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
+                    <Input label="Total Amount / Receipt" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
                     {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
                     {!costError && cost && addedQty > 0 && (
                       <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {unit} ({addedQty} {unit})</p>
                     )}
                   </div>
                   <div>
-                    {/* 👈 BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA ADD NEW */}
+                    {/* Expiration date input for a new material */}
                     <Input 
                       label="Expiration Date (Optional)" 
                       type="date" 
@@ -539,6 +781,12 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 <div className="grid grid-cols-2 gap-2.5">
                   {!editingDetails ? (
                     <>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
+                        <span className="text-sm font-bold text-brand-800 block">
+                          {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
+                        </span>
+                      </div>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
                         <span className="block text-[10px] font-bold uppercase text-brand-400">Name</span>
                         <span className="text-sm font-bold text-brand-800 truncate block">{name}</span>
@@ -558,16 +806,42 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                     </>
                   ) : (
                     <>
+                      <div className="col-span-2">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400 mb-1.5">Material Type</span>
+                        <div className="flex gap-2">
+                          {MATERIAL_VIEWS.map(view => (
+                            <button
+                              key={view.key}
+                              type="button"
+                              onClick={() => setMaterialType(view.key)}
+                              className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
+                                materialType === view.key
+                                  ? 'bg-brand-800 text-white border-brand-800 shadow-sm'
+                                  : 'bg-white text-brand-500 border-brand-200 hover:text-brand-800'
+                              }`}
+                            >
+                              {view.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <div>
-                        <Input label="Name" required list="celebration-material-products" value={name} onChange={e => {
-                          const nextName = e.target.value;
-                          const linkedProduct = products.find(product => product.name === nextName);
-                          setName(nextName);
-                          setProductId(linkedProduct?.id || '');
-                        }} />
-                        <datalist id="celebration-material-products">
-                          {products.map(product => <option key={product.id} value={product.name} />)}
-                        </datalist>
+                        {materialType === 'celebration' ? (
+                          <ProductLinkedNameField
+                            label="Name"
+                            value={name}
+                            onChange={(nextName, linkedId) => {
+                              setName(nextName);
+                              setProductId(linkedId ?? '');
+                            }}
+                            products={products}
+                          />
+                        ) : (
+                          <Input label="Name" required value={name} onChange={e => {
+                            setName(e.target.value);
+                            setProductId('');
+                          }} />
+                        )}
                       </div>
                       <div>
                         <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
@@ -600,21 +874,21 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                 <div className="space-y-3">
                   <div>
                     <Input
-                      label="Dami na Idadagdag"
+                      label="Quantity to Add"
                       type="text" 
                       inputMode="decimal"
                       suffix={material?.unit}
                       value={stock} 
                       onChange={e => setStock(sanitizeQtyText(e.target.value))}
                       onBlur={() => setStock(current => parseFractionInput(current))}
-                      placeholder="hal. 0.5 o 1/2"
+                      placeholder="e.g. 0.5 or 1/2"
                     />
                     {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
                   </div>
 
                   <div>
                     <Input 
-                      label="Total Halaga / Resibo" 
+                      label="Total Amount / Receipt" 
                       type="text" 
                       inputMode="decimal" 
                       value={formatPesoLive(cost)} 
@@ -628,7 +902,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
                   </div>
 
                   <div>
-                    {/* 👈 BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA RESTOCK */}
+                    {/* Expiration date input for a restock */}
                     <Input 
                       label="Expiration Date (Optional)" 
                       type="date" 
@@ -652,7 +926,7 @@ function MaterialModal({ isOpen, onClose, material, products = [], onSave }) {
         onConfirm={executeSave}
         title={confirmTitle}
         message={confirmMessage}
-        confirmLabel={isSaving ? 'Sinasave...' : 'Oo, Sigurado Ako'}
+        confirmLabel={isSaving ? 'Saving...' : 'Yes, I\'m Sure'}
         variant="primary"
       />
     </>

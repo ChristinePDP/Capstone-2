@@ -276,6 +276,106 @@ const resolveBundleLineItem = async (item) => {
   }));
 };
 
+// "Package" products (Product Management > category "Package") explode into
+// order_items the same way a Promo Bundle does — hiniram dito ang parehong
+// `bundle_id`/`bundle_group_id`/`bundle_name` na mga column sa order_items
+// (walang bagong column na kailangan) — para bawat COMPONENT ng package ay
+// maging SARILI nitong order_item row, may sariling order_slip_details
+// (kinukuha mula sa `item.orderSlip[componentProductId]`, kagaya ng bundle),
+// at sa gayo'y nade-deduct din nang tama ang stock ng bawat isa (parehong
+// lohika sa Buy Now/POS at sa online pickup completion, walang extra code na
+// kailangan doon).
+//
+// FIX: hindi na dumadaan sa `allocateBundlePrice` dito (iba ito sa Bundle sa
+// itaas) — walang "discount" na kailangang i-divide sa Package dahil FIXED
+// na ang presyo ng bawat component mismo sa Product record nito. Ang
+// `pkg.price` (ang binayaran ng customer para sa buong package) ay
+// nananatiling nakatago lang sa `orders.grand_total`, hindi na kailangang
+// i-allocate/i-scale papunta sa mga component rows.
+const resolvePackageLineItem = async (item) => {
+  const pkg = await ProductModel.findById(item.packageId || item.productId);
+
+  if (!pkg) {
+    throw new Error(`Package not found: ${item.packageId || item.productId}`);
+  }
+  if (pkg.category !== 'Package') {
+    throw new Error(`"${pkg.name}" is not a Package product.`);
+  }
+  if (pkg.is_active === false) {
+    throw new Error(`"${pkg.name}" is no longer available.`);
+  }
+  if (!Array.isArray(pkg.package_items) || pkg.package_items.length === 0) {
+    throw new Error(`"${pkg.name}" has no products configured yet.`);
+  }
+
+  const componentIds = pkg.package_items.map(c => c.product_id).filter(Boolean);
+  const componentProducts = await ProductModel.findByIds(componentIds);
+  const componentById = new Map(componentProducts.map(p => [String(p.id), p]));
+
+  const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+  const packageGroupId = randomUUID();
+
+  // FIX: hindi na dumadaan sa `allocateBundlePrice` ang Package — ang
+  // function na iyon ay para sa Bundle (promo_bundles), kung saan may
+  // DISCOUNT na kailangang i-divide/i-proportion sa mga component dahil
+  // mas mababa ang bundle_price kumpara sa sum ng regular presyo ng mga
+  // kasamang produkto. Ang isang PACKAGE ay walang ganoong "discount to
+  // divide" — bawat component ay may sarili nang FIXED na presyo mula sa
+  // Product record nito, kaya iyon mismo ang ilalagay bilang unit_price/
+  // total_price ng bawat exploded row (hindi na artificially na-scale
+  // papunta sa `pkg.price`). Tama rin ang per-product revenue nito kapag
+  // kailangang i-refund/i-report ang isa lang sa mga component, dahil
+  // ang totoong presyo mismo ng produkto ang nakalagay, hindi isang
+  // hinati-hating bahagi ng package price.
+  //
+  // Tandaan: dahil dito, hindi na kinakailangang tumugma ang SUM ng mga
+  // total_price ng exploded rows sa `orders.grand_total` (na siyang
+  // aktwal na binayaran ng customer para sa buong package) — sadyang
+  // magkaiba ang dalawa, dahil ang layunin ng order_items dito ay
+  // i-record kung ANO at ILAN ang mga aktwal na produktong kasama (para
+  // sa stock deduction at per-product reporting), hindi para hatiin ang
+  // package price. Ang `orders.grand_total` pa rin (hindi ang sum ng
+  // order_items) ang single source of truth para sa aktwal na binayaran.
+  const rows = [];
+  for (const component of pkg.package_items) {
+    if (!component.product_id) continue;
+    const componentQty = Number(component.quantity || 0) * quantity;
+    if (componentQty <= 0) continue;
+
+    const componentProduct = componentById.get(String(component.product_id));
+    const ownUnitPrice = Number(componentProduct?.price) || 0;
+
+    rows.push({
+      product_id: component.product_id,
+      product_name: componentProduct?.name || component.name,
+      quantity: componentQty,
+      unit_price: ownUnitPrice,
+      total_price: Math.round(ownUnitPrice * componentQty * 100) / 100,
+
+      // FIX: Parehong format na ngayon sa resolveBundleLineItem para walang details na nawawala
+      // kung hindi man perpekto ang string/integer matching. Ang buong nested slip ay isasave.
+      order_slip_details: item.orderSlip || {},
+
+      selected_price_options: null,
+      customer_reference_url: item.inspirationUrls?.[component.product_id] || null,
+
+      // FIX: Gawing null ito para hindi mag-error ang Foreign Key na nakatali sa promo_bundles
+      bundle_id: null,
+
+      bundle_group_id: packageGroupId,
+      bundle_name: pkg.name,
+      original_unit_price: ownUnitPrice,
+      special_instructions: item.specialInstructions || '',
+    });
+  }
+
+  if (rows.length === 0) {
+    throw new Error(`"${pkg.name}" has no valid products configured.`);
+  }
+
+  return rows;
+};
+
 // Regular na (non-bundle) na item — parehong lohika gaya ng dati, walang
 // binago sa presyo (galing pa rin ito sa client payload).
 const resolveProductLineItem = (item) => ({
@@ -298,12 +398,36 @@ const resolveProductLineItem = (item) => ({
 // DB — kaya kung may invalid na bundle (na-delete, na-deactivate, o
 // nag-expire na ang date range), mahuhuli ito BAGO ma-orphan ang isang
 // customer/order record na walang laman.
+// Ang BACKEND na mismo ang nagpapasya kung Package ang isang item — hindi na
+// lang umaasa sa `type`/`packageId` na ipinadala ng frontend. Dati, kapag
+// nawala o hindi naipasa ang `type: 'package'` sa payload, nahuhulog ang
+// Package sa `resolveProductLineItem` at nagiging ISANG row lang sa
+// order_items ("Package A x1") sa halip na sumabog per component. Kabaligtaran
+// naman, ang `packageId` na naka-fallback sa `item.id` (para sa lahat ng
+// item) ay nagpapadala sa REGULAR na produkto sa package resolver at
+// nagre-error na "is not a Package product". Kaya ngayon: kung tahasang
+// `type: 'package'`, package; kung bundle, hindi; kung hindi tiyak, tinitignan
+// ang category ng product sa DB.
+const isPackageItem = async (item) => {
+  if (item.type === 'package') return true;
+  if (item.type === 'bundle' || item.bundleId) return false;
+
+  const candidateId = item.packageId || item.productId;
+  if (!candidateId) return false;
+
+  const product = await ProductModel.findById(candidateId);
+  return product?.category === 'Package';
+};
+
 export const resolveOrderItems = async (items = []) => {
   const resolved = [];
   for (const item of items) {
     if (item.type === 'bundle' || item.bundleId) {
       const bundleRows = await resolveBundleLineItem(item);
       resolved.push(...bundleRows);
+    } else if (await isPackageItem(item)) {
+      const packageRows = await resolvePackageLineItem(item);
+      resolved.push(...packageRows);
     } else {
       resolved.push(resolveProductLineItem(item));
     }
@@ -311,20 +435,45 @@ export const resolveOrderItems = async (items = []) => {
   return resolved;
 };
 
+// BAGO: kung "Package" ang isang order item (may naka-link na component
+// products, hal. cake + cupcake + tarp), ang dating validation ay tumitingin
+// lang sa product_id ng PACKAGE mismo — kaya kung may celebration material
+// sa LOOB ng package, hindi ito nasusuri kung sapat pa ba ang stock nito
+// bago tanggapin ang order. Ino-expand muna nito ang isang item papunta sa
+// { product_id, quantity } ng bawat aktwal na component (recursive, kung
+// sakaling may package sa loob package) bago ito iche-check sa ibaba.
+const expandToComponentQuantities = async (item) => {
+  const product = await ProductModel.findById(item.product_id);
+  if (product?.category === 'Package' && Array.isArray(product.package_items) && product.package_items.length > 0) {
+    const expanded = [];
+    for (const component of product.package_items) {
+      const qty = Number(component.quantity || 0) * Number(item.quantity || 0);
+      if (!component.product_id || qty <= 0) continue;
+      const nested = await expandToComponentQuantities({ product_id: component.product_id, quantity: qty });
+      expanded.push(...nested);
+    }
+    return expanded;
+  }
+  return [{ product_id: item.product_id, quantity: Number(item.quantity || 0) }];
+};
+
 export const validateCelebrationMaterialAvailability = async (items = [], orderType) => {
   if (orderType !== 'Buy Now') return;
 
   const requestedByMaterial = new Map();
   for (const item of items) {
-    const materialResult = await MaterialModel.findByProductId(item.product_id);
-    if (materialResult.error) throw materialResult.error;
-    const material = materialResult.data;
-    if (!material) continue;
+    const expandedItems = await expandToComponentQuantities(item);
+    for (const expandedItem of expandedItems) {
+      const materialResult = await MaterialModel.findByProductId(expandedItem.product_id);
+      if (materialResult.error) throw materialResult.error;
+      const material = materialResult.data;
+      if (!material) continue;
 
-    requestedByMaterial.set(
-      material.id,
-      (requestedByMaterial.get(material.id) || 0) + Number(item.quantity || 0)
-    );
+      requestedByMaterial.set(
+        material.id,
+        (requestedByMaterial.get(material.id) || 0) + expandedItem.quantity
+      );
+    }
   }
 
   for (const [materialId, requested] of requestedByMaterial) {
@@ -343,6 +492,10 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   let resolvedItems;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
+    console.log(
+      `[ORDER] ${payload.items.length} cart item(s) -> ${resolvedItems.length} order_items row(s):`,
+      payload.items.map(i => `${i.name || i.packageId || i.bundleId} [type=${i.type || '-'}]`).join(', ')
+    );
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
     throw new Error(`Items Error: ${itemsError.message}`);
@@ -398,6 +551,135 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   notifyNewOrder(newOrder, payload);
 
   return newOrder;
+};
+
+// --- PAYMENT VERIFICATION + PENDING ORDER FINALIZATION ---
+//
+// Dalawang paraan na ngayon para maging TOTOONG order ang isang pending
+// order pagkatapos mabayaran: (1) ang PayMongo webhook, at (2) ang
+// fallback sa `getPendingOrderStatus` (tinatawag ng Confirm.jsx habang
+// nagpo-poll) na direktang nagtatanong sa PayMongo kung bayad na. Kaya
+// kahit hindi maabot ng webhook ang backend (hal. localhost na walang
+// public URL) o pumalya ito, magagawa pa rin ang order. Parehong
+// `finalizePendingOrder` ang dinadaanan ng dalawa, at may atomic claim
+// para hindi madoble.
+
+// Tinatanong ang PayMongo kung bayad na ba ang isang checkout session.
+// Bumabalik ng { paid, paymentId }. Hindi nagta-throw sa network/API error
+// — { paid: false } lang ang ibinabalik at nagla-log (para hindi masira ang
+// polling; susubukan ulit sa susunod na poll).
+export const verifyCheckoutSessionPaid = async (checkoutSessionId) => {
+  if (!checkoutSessionId || !process.env.PAYMONGO_SECRET_KEY) {
+    return { paid: false, paymentId: null };
+  }
+
+  try {
+    const response = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${checkoutSessionId}`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        authorization: `Basic ${Buffer.from(process.env.PAYMONGO_SECRET_KEY + ':').toString('base64')}`,
+      },
+    });
+    const json = await response.json();
+
+    if (!response.ok || !json?.data) {
+      console.error('[SERVICE] PayMongo checkout session lookup failed:', json?.errors || response.status);
+      return { paid: false, paymentId: null };
+    }
+
+    const attrs = json.data.attributes || {};
+    const payments = Array.isArray(attrs.payments) ? attrs.payments : [];
+    const paidPayment = payments.find(p => p?.attributes?.status === 'paid');
+    if (paidPayment) return { paid: true, paymentId: paidPayment.id };
+
+    if (attrs.payment_intent?.attributes?.status === 'succeeded') {
+      return { paid: true, paymentId: payments[0]?.id || checkoutSessionId };
+    }
+
+    return { paid: false, paymentId: null };
+  } catch (err) {
+    console.error('[SERVICE] Error verifying PayMongo checkout session:', err);
+    return { paid: false, paymentId: null };
+  }
+};
+
+// I-promote ang pending order papunta sa TOTOONG order (orders + exploded
+// order_items). Ligtas tawagin nang paulit-ulit / sabay-sabay — iisang
+// caller lang ang makakapag-claim, ang iba ay { created: false }.
+export const finalizePendingOrder = async (pendingOrderId, paymentId) => {
+  const claimed = await PendingOrdersModel.claim(pendingOrderId);
+  if (!claimed) {
+    return { created: false, order: null };
+  }
+
+  let newOrder;
+  try {
+    newOrder = await createDatabaseOrder(claimed.payload, paymentId);
+  } catch (err) {
+    // Walang order na nagawa — ibalik ang claim para makapag-retry ang
+    // susunod na webhook/poll.
+    try {
+      await PendingOrdersModel.releaseClaim(pendingOrderId);
+    } catch (releaseErr) {
+      console.error('[SERVICE] Failed to release pending order claim:', releaseErr);
+    }
+    throw err;
+  }
+
+  // Nagawa na ang order — HUWAG nang ibalik ang claim kahit pumalya ito
+  // (mag-du-duplicate). I-retry lang ang pag-mark bilang paid.
+  let marked = false;
+  for (let attempt = 1; attempt <= 3 && !marked; attempt++) {
+    try {
+      await PendingOrdersModel.markAsPaid(pendingOrderId, paymentId, newOrder);
+      marked = true;
+    } catch (markErr) {
+      console.error(`[SERVICE] markAsPaid attempt ${attempt} failed for pending order ${pendingOrderId}:`, markErr);
+    }
+  }
+  if (!marked) {
+    console.error(`[SERVICE] ORDER ${newOrder.order_number} was created but pending order ${pendingOrderId} could not be marked paid. Fix manually.`);
+  }
+
+  return { created: true, order: newOrder };
+};
+
+// I-deduct ang stock ng IISANG product/material — hiwalay na function
+// (recursive) para magamit din ito paulit-ulit sa bawat COMPONENT ng isang
+// "Package" product, hindi lang sa top-level na order item mismo. Kapareho
+// ito ng `deductSingleProductStock` sa pos.service.js — dalawang beses itong
+// na-duplicate (isa dito, isa doon) dahil hiwalay ang dalawang completion
+// flow (online pickup vs. POS walk-in); tingnan ang paliwanag doon.
+const deductSingleProductStock = async (productId, quantity) => {
+  if (!productId || Number(quantity) <= 0) return;
+
+  const materialResult = await MaterialModel.findByProductId(productId);
+  if (materialResult.error) throw materialResult.error;
+  if (materialResult.data) {
+    await MaterialModel.deductById(materialResult.data.id, quantity);
+    console.log(`[SERVICE] Deducted ${quantity} from ${materialResult.data.name}'s celebration material stock.`);
+    return;
+  }
+
+  const product = await ProductModel.findById(productId);
+  if (!product) return;
+
+  if (product.category === 'Package' && Array.isArray(product.package_items) && product.package_items.length > 0) {
+    for (const component of product.package_items) {
+      const componentQty = Number(component.quantity || 0) * Number(quantity);
+      await deductSingleProductStock(component.product_id, componentQty);
+    }
+    return;
+  }
+
+  // Same priority rule gaya ng availability computation: kung may laman
+  // ang daily_limit, dun babawas (Pre-order "slots"); kung wala, sa
+  // stock_quantity babawas (Pick-up Today na produced stock).
+  const limitField = getStockLimitField(product);
+  const currentValue = Number(product[limitField]) || 0;
+  const newValue = Math.max(0, currentValue - Number(quantity));
+  await ProductModel.update(productId, { [limitField]: newValue });
 };
 
 export const completeOrderAndDeductStock = async (orderId) => {
@@ -486,29 +768,8 @@ export const completeOrderAndDeductStock = async (orderId) => {
       console.log(`[SERVICE] 6. Processing Product ID: ${item.product_id} | Qty to deduct: ${item.quantity}`);
 
       try {
-        const product = await ProductModel.findById(item.product_id);
-        const materialResult = await MaterialModel.findByProductId(item.product_id);
-        if (materialResult.error) throw materialResult.error;
-        if (materialResult.data) {
-          await MaterialModel.deductById(materialResult.data.id, item.quantity);
-          console.log(`[SERVICE] Deducted ${item.quantity} from ${materialResult.data.name}'s celebration material stock.`);
-          continue;
-        }
-        
-        if (product) {
-          // Same priority rule gaya ng availability computation: kung may
-          // laman ang daily_limit, dun babawas (Pre-order "slots"); kung
-          // wala, sa stock_quantity babawas (Pick-up Today na produced stock).
-          const limitField = getStockLimitField(product);
-          const currentValue = Number(product[limitField]) || 0;
-          console.log(`[SERVICE] 7. Current ${limitField} for ${item.product_id} is: ${currentValue}`);
-
-          const newValue = Math.max(0, currentValue - item.quantity);
-          console.log(`[SERVICE] 8. New ${limitField} will be: ${newValue}`);
-
-          await ProductModel.update(item.product_id, { [limitField]: newValue });
-          console.log(`[SERVICE] 9. SUCCESS! Updated ${limitField} for Product ID: ${item.product_id}`);
-        }
+        await deductSingleProductStock(item.product_id, item.quantity);
+        console.log(`[SERVICE] 9. SUCCESS! Deducted stock for Product ID: ${item.product_id}`);
       } catch (err) {
          console.error(`[SERVICE] 9. Error fetching/updating stock for ${item.product_id}:`, err);
       }

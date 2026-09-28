@@ -11,6 +11,24 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
 
+// A recipe is for a product that actually needs raw ingredients to be made
+// — a Celebration Material "product" (e.g. a tarpaulin or balloon that's
+// sold as-is) doesn't need a recipe, so it's excluded from the Product Name
+// list below.
+// A recipe is INGREDIENTS ONLY — no materials of any kind (Product Material
+// or Celebration Material) are selectable in the recipe picker. Materials
+// (packaging, boxes, ribbons, etc.) are add-ons attached to a product/bundle
+// separately from the recipe, not something a recipe "consumes" per batch.
+// `getMaterialViewKey` is kept only for the legacy shortfall/lookup helpers
+// further down that still need to resolve materials already saved on older
+// recipes.
+function getMaterialViewKey(material, productsById = {}) {
+  if (material?.category === 'Product Material') return 'product';
+  if (material?.category === 'Celebration Material') return 'celebration';
+  const linkedProduct = productsById[material?.productId || material?.product_id];
+  return linkedProduct?.category === 'Celebration Material' ? 'celebration' : 'product';
+}
+
 const inventoryKey = (name, unit, type = '') => `${normalizeText(name)}|${normalizeUnit(unit)}|${normalizeText(type)}`;
 
 const getOrderItems = (order = {}) => Array.isArray(order.order_items)
@@ -85,12 +103,13 @@ export default function RecipeTab() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [confirmTarget, setConfirmTarget] = useState(null); // Modal state para sa production confirmation
+  const [confirmTarget, setConfirmTarget] = useState(null); // Modal state for production confirmation
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isDeletingRef = useRef(false);
 
   const [rows, setRows] = useState([{ itemId: '', qty: '', unit: '' }]);
+  const [addonRows, setAddonRows] = useState([]);
   const [productId, setProductId] = useState('');
   const [yld, setYld] = useState('');
   const [yldUnit, setYldUnit] = useState('pcs');
@@ -102,6 +121,11 @@ export default function RecipeTab() {
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
+  const productsById = useMemo(
+    () => Object.fromEntries(products.map(p => [p.id, p])),
+    [products]
+  );
+
   const inventoryOptions = useMemo(() => {
     const ingredientOptions = ingredients.map(item => ({
       id: item.id,
@@ -111,16 +135,20 @@ export default function RecipeTab() {
       label: `${item.name} (Raw${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
     }));
 
-    const materialOptions = materials.map(item => ({
-      id: item.id,
-      name: item.name,
-      unit: normalizeUnit(item.unit),
-      sourceType: 'material',
-      label: `${item.name} (Material${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
-    }));
+    // Celebration Materials are add-ons, not recipe ingredients — only
+    // Product Materials (e.g. boxes) are offered here.
+    const materialOptions = materials
+      .filter(item => getMaterialViewKey(item, productsById) !== 'celebration')
+      .map(item => ({
+        id: item.id,
+        name: item.name,
+        unit: normalizeUnit(item.unit),
+        sourceType: 'material',
+        label: `${item.name} (Material${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
+      }));
 
     return [...ingredientOptions, ...materialOptions];
-  }, [ingredients, materials]);
+  }, [ingredients, materials, productsById]);
 
   const inventoryById = useMemo(() => {
     const map = {};
@@ -128,10 +156,35 @@ export default function RecipeTab() {
     return map;
   }, [inventoryOptions]);
 
-  const productOptions = useMemo(() => products.map(product => ({
-    id: product.id,
-    label: product.name,
-  })), [products]);
+  // What the "Add/Edit Recipe" modal actually offers to pick from — raw
+  // ingredients ONLY. Materials never belong in a recipe, so they're not in
+  // this list at all (unlike `inventoryOptions` above, which still includes
+  // materials for the legacy shortfall/lookup helpers).
+  const ingredientPickerOptions = useMemo(
+    () => inventoryOptions.filter(option => option.sourceType === 'raw'),
+    [inventoryOptions]
+  );
+
+  // Add-ons section of the modal — materials only (Product Materials; the
+  // same Celebration-Material exclusion as before still applies). These are
+  // attached to the recipe as their own section, never merged into the
+  // ingredients rows above, but they're saved through the same
+  // `recipe_ingredients` rows on the backend (tagged `item_type: 'material'`)
+  // so batch production still auto-deducts their stock like an ingredient.
+  const addonPickerOptions = useMemo(
+    () => inventoryOptions.filter(option => option.sourceType === 'material'),
+    [inventoryOptions]
+  );
+
+  // A recipe only makes sense for a product that needs to be produced from
+  // raw ingredients — Celebration Material products (sold as-is) don't need
+  // one, so they're left out of this list.
+  const productOptions = useMemo(() => products
+    .filter(product => product.category !== 'Celebration Material')
+    .map(product => ({
+      id: product.id,
+      label: product.name,
+    })), [products]);
 
   const calculateMaxUnits = useCallback((recipe, inventory) => {
     if (!recipe.ingredients || recipe.ingredients.length === 0) return 0;
@@ -275,6 +328,7 @@ export default function RecipeTab() {
     setYld('');
     setYldUnit('pcs');
     setRows([{ itemId: '', qty: '', unit: '' }]);
+    setAddonRows([]);
     setModalOpen(true);
   };
 
@@ -283,14 +337,28 @@ export default function RecipeTab() {
     setProductId(r.productId || products.find(p => normalizeText(p.name) === normalizeText(r.product))?.id || '');
     setYld(r.yield);
     setYldUnit(r.yieldUnit || 'pcs');
-    setRows((r.ingredients || []).map(i => {
+
+    const mappedRows = (r.ingredients || []).map(i => {
       const item = inventoryOptions.find(option => normalizeText(option.name) === normalizeText(i.name || i.item_name || '') && normalizeText(option.sourceType) === normalizeText(i.itemType || i.item_type || option.sourceType));
       return {
         itemId: item?.id || '',
         qty: i.qty ?? i.quantity ?? '',
         unit: normalizeUnit(i.unit || item?.unit || ''),
+        sourceType: item?.sourceType || normalizeText(i.itemType || i.item_type || 'raw'),
       };
-    }));
+    });
+
+    // Split the saved recipe_ingredients rows back into the two sections —
+    // raw ingredients go to `rows`, materials go to `addonRows`.
+    const savedIngredientRows = mappedRows
+      .filter(row => row.sourceType !== 'material')
+      .map(({ sourceType, ...row }) => row);
+    const savedAddonRows = mappedRows
+      .filter(row => row.sourceType === 'material')
+      .map(({ sourceType, ...row }) => row);
+
+    setRows(savedIngredientRows.length ? savedIngredientRows : [{ itemId: '', qty: '', unit: '' }]);
+    setAddonRows(savedAddonRows);
     setModalOpen(true);
   };
 
@@ -326,54 +394,90 @@ export default function RecipeTab() {
         showToast('Add at least one ingredient row.', 'warning');
         return;
       }
+      const validAddonRows = addonRows.filter(row => row.itemId || row.qty || row.unit);
 
-      const normalizedIngredients = [];
+      // Shared validator for both the Ingredients rows and the Add-ons rows.
+      // `requiredSourceType` enforces the section boundary: an ingredient
+      // row can only resolve to a raw ingredient, an add-on row can only
+      // resolve to a material. Returns null (after showing a toast) on the
+      // first invalid row, or the normalized recipe_ingredients entries.
+      const normalizeRowsOrToast = (rowsToCheck, { requiredSourceType, sectionLabel }) => {
+        const normalized = [];
 
-      for (const row of validRows) {
-        if (!row.itemId) {
-          showToast('Select an ingredient or material for each row.', 'warning');
-          return;
+        for (const row of rowsToCheck) {
+          if (!row.itemId) {
+            showToast(`Select a${sectionLabel === 'ingredient' ? 'n' : ''} ${sectionLabel} for each row.`, 'warning');
+            return null;
+          }
+
+          const inventoryItem = inventoryById[row.itemId];
+          if (!inventoryItem) {
+            showToast(`One of the rows has an invalid ${sectionLabel} selection.`, 'warning');
+            return null;
+          }
+
+          // Defensive guard: keeps the two sections from bleeding into each
+          // other. Mainly catches a row carried over from editing an older
+          // recipe saved before this split existed — the pickers themselves
+          // no longer offer the wrong kind as an option.
+          if (inventoryItem.sourceType !== requiredSourceType) {
+            showToast(
+              requiredSourceType === 'raw'
+                ? `"${inventoryItem.name}" is a material, not an ingredient — move it to the Add-ons section instead.`
+                : `"${inventoryItem.name}" is an ingredient, not a material — it belongs in the Ingredients section instead.`,
+              'warning'
+            );
+            return null;
+          }
+
+          const qtyValue = Number(row.qty);
+          if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
+            showToast(`Invalid quantity for ${inventoryItem.name}.`, 'warning');
+            return null;
+          }
+
+          const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${inventoryItem.name}` });
+          if (rowQtyErr) {
+            showToast(rowQtyErr, 'warning');
+            return null;
+          }
+
+          const selectedUnit = normalizeUnit(row.unit || inventoryItem.unit);
+          const baseUnit = normalizeUnit(inventoryItem.unit);
+          const normalizedQty = convertToBase(qtyValue, selectedUnit, baseUnit);
+          if (!Number.isFinite(normalizedQty)) {
+            showToast(`Unit conversion not supported for ${inventoryItem.name} — check if the units match.`, 'warning');
+            return null;
+          }
+
+          normalized.push({
+            item_type: inventoryItem.sourceType,
+            item_name: inventoryItem.name,
+            quantity: roundQty(normalizedQty),
+            unit: baseUnit,
+          });
         }
 
-        const inventoryItem = inventoryById[row.itemId];
-        if (!inventoryItem) {
-          showToast('One of the rows has an invalid ingredient/material selection.', 'warning');
-          return;
-        }
+        return normalized;
+      };
 
-        const qtyValue = Number(row.qty);
-        if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
-          showToast(`Invalid quantity for ${inventoryItem.name}.`, 'warning');
-          return;
-        }
+      const normalizedIngredients = normalizeRowsOrToast(validRows, { requiredSourceType: 'raw', sectionLabel: 'ingredient' });
+      if (!normalizedIngredients) return;
 
-        const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${inventoryItem.name}` });
-        if (rowQtyErr) {
-          showToast(rowQtyErr, 'warning');
-          return;
-        }
-
-        const selectedUnit = normalizeUnit(row.unit || inventoryItem.unit);
-        const baseUnit = normalizeUnit(inventoryItem.unit);
-        const normalizedQty = convertToBase(qtyValue, selectedUnit, baseUnit);
-        if (!Number.isFinite(normalizedQty)) {
-          showToast(`Unit conversion not supported for ${inventoryItem.name} — check kung tugma ang units.`, 'warning');
-          return;
-        }
-
-        normalizedIngredients.push({
-          item_type: inventoryItem.sourceType,
-          item_name: inventoryItem.name,
-          quantity: roundQty(normalizedQty),
-          unit: baseUnit,
-        });
-      }
+      const normalizedAddons = normalizeRowsOrToast(validAddonRows, { requiredSourceType: 'material', sectionLabel: 'add-on' });
+      if (!normalizedAddons) return;
 
       const data = {
         product_id: matchedProduct.id,
         yield_quantity: numericYield,
         yield_unit: yldUnit.trim(),
-        ingredients: normalizedIngredients,
+        // The backend's recipe_ingredients table doesn't know about the
+        // "Ingredients" vs "Add-ons" split — that's purely a UI grouping.
+        // Both are sent in one array here, distinguished by `item_type`
+        // ('raw' vs 'material'), which is exactly what ProductionService
+        // already uses to deduct raw-ingredient stock and material stock
+        // separately when a batch is confirmed.
+        ingredients: [...normalizedIngredients, ...normalizedAddons],
       };
 
       setIsSaving(true);
@@ -394,7 +498,7 @@ export default function RecipeTab() {
     }
   };
 
-  // Kumpirmasyon at actual execution ng batch production
+  // Confirmation and actual execution of batch production
   const handleExecuteConfirm = async () => {
     if (!confirmTarget) return;
     const { recipe, goalNum } = confirmTarget;
@@ -494,7 +598,7 @@ export default function RecipeTab() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
             <h3 className="font-bold text-brand-800">Recipe Log</h3>
-            <p className="text-xs text-brand-400 mt-0.5">Maglagay ng Goal upang makita kung sapat ang ingredients mo.</p>
+            <p className="text-xs text-brand-400 mt-0.5">Enter a Target Goal to see if you have enough ingredients.</p>
           </div>
           <Button variant="dark" onClick={openAdd} className="w-full sm:w-auto justify-center"><Plus size={14} /> Add Recipe</Button>
         </div>
@@ -630,7 +734,7 @@ export default function RecipeTab() {
           </Table>
           )}
 
-          {!paged.length && <div className="text-center py-8 text-brand-300">Walang recipe na nahanap.</div>}
+          {!paged.length && <div className="text-center py-8 text-brand-300">No recipes found.</div>}
           </>
           )}
         </div>
@@ -651,7 +755,7 @@ export default function RecipeTab() {
         isOpen={modalOpen}
         onClose={() => !isSaving && setModalOpen(false)}
         title={editRecipe ? `Edit Recipe — ${editRecipe.product}` : 'Add New Recipe'}
-        subtitle="I-configure ang timpla at tamang dami ng sangkap per batch."
+        subtitle="Set the mix and exact ingredient amounts per batch."
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -687,12 +791,12 @@ export default function RecipeTab() {
             </div>
           </div>
 
-          {/* SECTION 2: INGREDIENTS & MATERIALS BREAKDOWN */}
+          {/* SECTION 2: INGREDIENTS (raw only) */}
           <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-brand-100">
               <div className="flex items-center gap-1.5">
                 <Package size={13} className="text-brand-500" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Ingredients & Materials</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Ingredients</span>
               </div>
               <span className="text-[11px] text-brand-400 font-semibold">{rows.length} {rows.length === 1 ? 'item' : 'items'} added</span>
             </div>
@@ -700,7 +804,7 @@ export default function RecipeTab() {
             <div className="space-y-2.5">
               {rows.map((row, i) => {
                 const rowItem = inventoryById[row.itemId];
-                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity ng ${rowItem?.name || 'ingredient'}` }) : null;
+                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'ingredient'}` }) : null;
 
                 return (
                   <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
@@ -715,8 +819,8 @@ export default function RecipeTab() {
                           className="w-full"
                           required
                         >
-                          <option value="">Select ingredient or material</option>
-                          {inventoryOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          <option value="">Select ingredient</option>
+                          {ingredientPickerOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
                         </Select>
                       </div>
 
@@ -767,8 +871,98 @@ export default function RecipeTab() {
                 onClick={() => setRows(prev => [...prev, { itemId: '', qty: '', unit: '' }])}
                 className="w-full border border-dashed border-brand-300 hover:border-brand-500 bg-brand-50/40 hover:bg-brand-50 text-brand-600 font-bold py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1 mt-2"
               >
-                <Plus size={13} /> Add Ingredient / Material
+                <Plus size={13} /> Add Ingredient
               </button>
+            </div>
+          </div>
+
+          {/* SECTION 3: ADD-ONS (materials only, e.g. packaging for bundle products) */}
+          <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-brand-100">
+              <div className="flex items-center gap-1.5">
+                <Package size={13} className="text-brand-500" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">3. Add-ons</span>
+                <span className="text-[10px] font-semibold text-brand-300">(optional — materials for bundles)</span>
+              </div>
+              <span className="text-[11px] text-brand-400 font-semibold">{addonRows.length} {addonRows.length === 1 ? 'item' : 'items'} added</span>
+            </div>
+
+            <div className="space-y-2.5">
+              {addonRows.map((row, i) => {
+                const rowItem = inventoryById[row.itemId];
+                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'add-on'}` }) : null;
+
+                return (
+                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
+                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                      <div className="w-full sm:flex-1 sm:min-w-0">
+                        <Select
+                          value={row.itemId}
+                          onChange={e => {
+                            const selected = inventoryById[e.target.value];
+                            setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
+                          }}
+                          className="w-full"
+                        >
+                          <option value="">Select material</option>
+                          {addonPickerOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                        </Select>
+                      </div>
+
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
+                          <input
+                            value={row.qty}
+                            type="text"
+                            inputMode="decimal"
+                            onChange={e => setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
+                            placeholder="Qty"
+                            className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
+                          <Select
+                            value={row.unit}
+                            onChange={e => setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
+                            className="w-full"
+                          >
+                            <option value="">Unit</option>
+                            {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
+                          </Select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setAddonRows(prev => prev.filter((_, j) => j !== i))}
+                          className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
+                          title="Remove row"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {rowQtyErr && (
+                      <p className="text-[11px] text-red-600 font-medium pl-1">{rowQtyErr}</p>
+                    )}
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={() => setAddonRows(prev => [...prev, { itemId: '', qty: '', unit: '' }])}
+                className="w-full border border-dashed border-brand-300 hover:border-brand-500 bg-brand-50/40 hover:bg-brand-50 text-brand-600 font-bold py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1 mt-2"
+              >
+                <Plus size={13} /> Add Add-on
+              </button>
+
+              {!addonRows.length && (
+                <p className="text-[11px] text-brand-300 text-center py-1">
+                  No add-ons yet — packaging or other materials for bundle products go here, deducted from stock the same way when a batch is produced.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -779,32 +973,32 @@ export default function RecipeTab() {
         isOpen={!!confirmTarget}
         onClose={() => !confirmingIds[confirmTarget?.recipe?.id] && setConfirmTarget(null)}
         onConfirm={handleExecuteConfirm}
-        title="I-confirm ang Batch Production"
+        title="Confirm Batch Production"
         message={
           confirmTarget ? (
             <div className="space-y-3 text-left text-sm text-gray-600">
-              <p>Sigurado ka bang gusto mong simulan ang production para sa <strong>{confirmTarget.recipe.product}</strong>?</p>
+              <p>Are you sure you want to start production for <strong>{confirmTarget.recipe.product}</strong>?</p>
               <div className="bg-brand-50 p-3 rounded-xl border border-brand-100 text-xs space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Target Goal:</span>
                   <strong className="text-brand-900">{confirmTarget.goalNum} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Mabubuong Batches:</span>
+                  <span className="text-gray-500">Complete Batches:</span>
                   <strong className="text-brand-900">{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1))} batch(es)</strong>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-brand-200/60">
-                  <span className="text-gray-700 font-medium">Total na Malilikha:</span>
+                  <span className="text-gray-700 font-medium">Total to Produce:</span>
                   <strong className="text-emerald-700">+{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1)) * (Number(confirmTarget.recipe.yield) || 1)} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
                 </div>
               </div>
               <p className="text-[11px] text-amber-600 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
-                ⚠️ Awtomatikong mababawasan ang kaukulang raw ingredients sa inventory kapag kinumpirma ito.
+                ⚠️ The matching raw ingredients will be automatically deducted from inventory once this is confirmed.
               </p>
             </div>
           ) : ''
         }
-        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Kina-confirm...' : 'Kumpirmahin Production'}
+        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Confirming...' : 'Confirm Production'}
         variant="primary"
       />
 
@@ -814,8 +1008,8 @@ export default function RecipeTab() {
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)}
         onConfirm={handleDeleteRecipe}
         title="Delete Recipe"
-        message={`Burahin ang recipe para sa "${deleteTarget?.product}"?`}
-        confirmLabel={isDeleting ? 'Dinedelete...' : 'Delete'}
+        message={`Delete the recipe for "${deleteTarget?.product}"?`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
         variant="danger"
       />
     </div>

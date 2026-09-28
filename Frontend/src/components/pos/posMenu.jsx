@@ -307,7 +307,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
 
           {isVariable && (
             <div className="flex flex-col gap-4 mb-6">
@@ -529,7 +529,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
 
   return (
     <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
-      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] rounded-2xl flex flex-col shadow-xl overflow-hidden">
+      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] max-h-[90vh] rounded-2xl flex flex-col shadow-xl overflow-hidden">
 
         <div className="flex flex-col gap-2 p-5 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
           <div className="flex items-start justify-between">
@@ -552,7 +552,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
           </p>
         </div>
 
-        <div className="p-5 flex-1 overflow-y-auto overscroll-contain scrollbar-thin max-h-[60vh]">
+        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           {!hasFields && !allowsImageUpload ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <Package size={32} className="text-[#DED4CC] mb-3" />
@@ -659,6 +659,217 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
   );
 }
 
+// --- PACKAGE STEPPER MODAL ---
+// Parehong stepper-per-component UX gaya ng PosBundleModal sa itaas —
+// dinadaan dito ang cashier sa bawat product na LAMAN ng "Package" (hal.
+// cake, cupcake, tarp) para masagutan ang order slip fields ng bawat isa.
+// Ang package mismo ay walang sariling order_slip_fields (tingnan ang admin
+// Productmodal.jsx — tinatago ang section na iyon kapag category === 'Package'),
+// kaya ang mga fields ng bawat COMPONENT (`pkg.package_components`, na
+// hinydrate na sa PosMenu component list sa ibaba) ang ipinapakita dito,
+// tulad ng ginagawa sa PosBundleModal gamit ang `bundle.products`.
+function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
+  const [currentStep, setCurrentStep] = useState(0);
+  const [packageAnswers, setPackageAnswers] = useState({});
+  const [packageImages, setPackageImages] = useState({}); // { [productId]: File }
+  const [packageImageErrors, setPackageImageErrors] = useState({}); // { [productId]: string }
+  const components = pkg.package_components || [];
+
+  if (!pkg || components.length === 0) return null;
+
+  const currentProduct = components[currentStep];
+  const hasFields = currentProduct.order_slip_fields && currentProduct.order_slip_fields.length > 0;
+  const allowsImageUpload = Boolean(currentProduct.allow_file_upload);
+  const isLastStep = currentStep === components.length - 1;
+
+  const handleAnswerChange = (label, value) => {
+    setPackageAnswers(prev => ({
+      ...prev,
+      [currentProduct.id]: { ...(prev[currentProduct.id] || {}), [label]: value }
+    }));
+  };
+
+  const handleImageChange = (file) => {
+    if (file && file.size > MAX_FILE_SIZE_BYTES) {
+      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setPackageImages(prev => ({ ...prev, [currentProduct.id]: null }));
+      return;
+    }
+    setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: '' }));
+    setPackageImages(prev => ({ ...prev, [currentProduct.id]: file }));
+  };
+
+  const handleNext = () => {
+    if (hasFields) {
+      const missingFields = currentProduct.order_slip_fields.filter(field => {
+        const isOptional = field.optional === true || field.isOptional === true || field.required === false;
+        if (isOptional) return false;
+        const answer = packageAnswers[currentProduct.id]?.[field.label];
+        return !answer || answer.trim() === '';
+      });
+      if (missingFields.length > 0) {
+        showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
+        return;
+      }
+    }
+
+    if (!isLastStep) {
+      setCurrentStep(prev => prev + 1);
+    } else {
+      if (checkAndWarnLimit && !checkAndWarnLimit(pkg, 1)) return;
+
+      const hasAnyImage = Object.values(packageImages).some(Boolean);
+      onAddToCart({
+        ...pkg,
+        qty: 1,
+        price: pkg.price,
+        type: 'package',
+        packageId: pkg.id,
+        products: components, // para sa cart display, gaya ng bundle.products
+        selected_price_options: null,
+        order_slip_details: packageAnswers,
+        inspiration_image: hasAnyImage ? packageImages : null
+      });
+      onClose();
+    }
+  };
+
+  const handleBack = () => {
+    if (currentStep > 0) setCurrentStep(prev => prev - 1);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
+      <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] max-h-[90vh] rounded-2xl flex flex-col shadow-xl overflow-hidden">
+
+        <div className="flex flex-col gap-2 p-5 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 min-w-0">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Package</span>
+              <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{pkg.name}</h2>
+              <p className="text-sm font-bold text-[#5A453C]">₱{Number(pkg.price).toLocaleString()}</p>
+              <p className="text-xs text-[#8A7264] leading-snug mt-1">{components.map(c => c.name).join(' + ')}</p>
+            </div>
+            <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
+          </div>
+
+          <div className="flex items-center gap-2 mt-2">
+            {components.map((_, idx) => (
+              <div key={idx} className={`h-1.5 flex-1 rounded-full ${idx <= currentStep ? 'bg-[#3B1F0A]' : 'bg-[#EAE4E0]'}`} />
+            ))}
+          </div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mt-1">
+            Item {currentStep + 1} of {components.length}: <span className="text-[#3B1F0A]">{currentProduct.name}</span>
+          </p>
+        </div>
+
+        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
+          {!hasFields && !allowsImageUpload ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <Package size={32} className="text-[#DED4CC] mb-3" />
+              <p className="text-sm font-semibold text-[#5A453C]">No customization needed for this item.</p>
+              <p className="text-xs text-[#8A7264] mt-1">You can proceed to the next item.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {hasFields && currentProduct.order_slip_fields.map((field, index) => {
+                const isOptional = field.optional === true || field.isOptional === true || field.required === false;
+                const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
+
+                if (field.type === 'Select') {
+                  return (
+                    <div key={index} className="flex flex-col w-full">
+                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                      <select
+                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
+                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        onChange={e => handleAnswerChange(field.label, e.target.value)}
+                      >
+                        <option value="" disabled>Select {field.label}...</option>
+                        {field.options?.map((opt, i) => (
+                          <option key={i} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                }
+                if (field.type === 'Textarea') {
+                  return (
+                    <div key={index} className="flex flex-col w-full">
+                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                      <textarea
+                        placeholder={`Enter ${field.label}...`}
+                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors"
+                        rows={3}
+                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        onChange={e => handleAnswerChange(field.label, e.target.value)}
+                      />
+                    </div>
+                  );
+                }
+                return (
+                  <div key={index} className="flex flex-col w-full">
+                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                    <input
+                      type={field.type === 'Number' ? 'number' : 'text'}
+                      placeholder={`Enter ${field.label}...`}
+                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
+                      value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                      onChange={e => handleAnswerChange(field.label, e.target.value)}
+                    />
+                  </div>
+                );
+              })}
+
+              {allowsImageUpload && (
+                <div className={hasFields ? 'border-t border-[#EAE4E0] pt-4' : ''}>
+                  <label className="text-xs font-semibold text-[#8A7264] mb-1 block">Upload Reference Image (Optional)</label>
+                  <p className="text-[10px] text-[#B7A99F] mb-1.5">Max file size: 5MB</p>
+
+                  {!packageImages[currentProduct.id] ? (
+                    <label className="flex items-center w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 text-xs rounded-xl cursor-pointer focus-within:border-[#5A453C] transition-colors">
+                      <span className="mr-3 py-1 px-3 rounded-lg border-0 text-[10px] font-bold uppercase bg-white text-[#4A3B36] shrink-0">Choose File</span>
+                      <span className="text-[#8A7264] truncate">No file chosen</span>
+                      <input type="file" accept="image/*" onChange={(e) => handleImageChange(e.target.files?.[0] || null)} className="hidden" />
+                    </label>
+                  ) : (
+                    <div className="flex items-center justify-between w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-3 rounded-xl">
+                      <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{packageImages[currentProduct.id].name}</span>
+                      <button type="button" onClick={() => handleImageChange(null)} aria-label="Remove file" className="ml-3 w-6 h-6 rounded-full bg-white text-[#8A7264] flex items-center justify-center shrink-0 hover:bg-[#EAE4E0] hover:text-[#3B1F0A] transition-colors">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
+                  {packageImageErrors[currentProduct.id] && (
+                    <span className="text-[10px] text-red-500 mt-1 block">{packageImageErrors[currentProduct.id]}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 p-5 border-t border-[#EAE4E0] bg-white shrink-0">
+          <button
+            onClick={currentStep === 0 ? onClose : handleBack}
+            className="px-5 py-3 border border-[#DED4CC] rounded-xl text-xs font-bold text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
+          >
+            {currentStep === 0 ? 'Cancel' : 'Back'}
+          </button>
+
+          <button
+            onClick={handleNext}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors shadow-sm bg-[#3B1F0A] text-white hover:bg-[#2A1608]"
+          >
+            {isLastStep ? 'Add Package to Order' : 'Next Item'}
+            {!isLastStep && <ChevronRight size={14} />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [] }) {
   const [orderTypeFilter, setOrderTypeFilter] = useState('All');
   const [modal, setModal] = useState(null);
@@ -751,6 +962,32 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     return () => { isMounted = false; };
   }, []);
 
+  // FIX: dating basta ipinapasa ang "Package" products as-is papunta sa
+  // grid, kaya walang paraan ang PosPackageModal (sa itaas) na malaman ang
+  // order_slip_fields/allow_file_upload ng bawat COMPONENT ng package — ang
+  // `package_items` mula sa backend ay minimal lang ({ product_id, quantity,
+  // name }). Dito na natin ini-hydrate ang bawat package sa
+  // `package_components`: ang FULL product record ng bawat component,
+  // kinuha mula sa `products` prop — parehong pattern gaya ng
+  // `bundleProducts` sa ibaba para sa Promo Bundle.
+  const hydratedProducts = useMemo(() => {
+    return products.map(p => {
+      if (p.category !== 'Package' || !Array.isArray(p.package_items) || p.package_items.length === 0) {
+        return p;
+      }
+      const packageComponents = p.package_items
+        .map(pi => products.find(cp => cp.id === pi.product_id))
+        .filter(Boolean);
+
+      return {
+        ...p,
+        type: 'package',
+        packageId: p.id,
+        package_components: packageComponents,
+      };
+    });
+  }, [products]);
+
   // I-map ang raw bundle rows papunta sa parehong shape na ginagamit sa
   // product grid (type: 'bundle', products: [...]) — same transform gaya ng
   // Menu.jsx, gamit ang `products` prop (regular products, kasama ang
@@ -805,10 +1042,10 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   }, [bundleItems, searchQuery]);
 
   const displayItems = useMemo(() => {
-    const items = [...visibleBundleItems, ...products];
+    const items = [...visibleBundleItems, ...hydratedProducts];
     return items.filter(item => orderTypeFilter === 'All'
       || (orderTypeFilter === 'Buy Now' ? item.order_type === 'Pick-up Today' : item.order_type === orderTypeFilter));
-  }, [visibleBundleItems, products, orderTypeFilter]);
+  }, [visibleBundleItems, hydratedProducts, orderTypeFilter]);
 
   const categories = useMemo(() => {
     return bundleItems.length > 0
@@ -875,9 +1112,11 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
               const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
               const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
               
-              // Bundles laging dumadaan sa stepper modal para makita ang bawat
-              // component product — parehong rule gaya ng Menu.jsx.
-              const isCustomizable = isBundle || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload || isVariable;
+              // Bundles at Packages laging dumadaan sa stepper modal para
+              // makita ang bawat component product — parehong rule gaya ng
+              // Menu.jsx.
+              const isBundleOrPackage = isBundle || p.type === 'package';
+              const isCustomizable = isBundleOrPackage || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload || isVariable;
 
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
@@ -1045,6 +1284,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
       {modal && modal.type === 'bundle' ? (
         <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} showToast={showToast} />
+      ) : modal && modal.type === 'package' ? (
+        <PosPackageModal pkg={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} showToast={showToast} />
       ) : modal ? (
         <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : null}

@@ -334,7 +334,7 @@ export function AppProvider({ children }) {
 
       // Palitan lang sa list yung na-edit na order (walang re-fetch ng
       // buong listahan) — mas mabilis ang UI update.
-      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+     setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
 
       return updated;
     } catch (err) {
