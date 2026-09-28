@@ -114,6 +114,22 @@ function getSlotLabel(value) {
   return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
+// Same idea as the cart's `aileen_cake_max_cart` key sa parent — pinapayagan
+// nitong makapunta-balik ang customer sa Menu (mag-add pa ng item) nang hindi
+// nabubura ang nasulat na niyang detalye dito. Cleared lang ito pagka-successful
+// na ng order (tingnan sa Confirm.jsx).
+const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
+
+function loadCheckoutDraft() {
+  try {
+    const saved = localStorage.getItem(CHECKOUT_DRAFT_KEY);
+    return saved ? JSON.parse(saved) : null;
+  } catch (err) {
+    console.error('Failed to read checkout draft from storage:', err);
+    return null;
+  }
+}
+
 export default function Checkout({ cart, setCart }) {
   const navigate = useNavigate();
 
@@ -129,7 +145,9 @@ export default function Checkout({ cart, setCart }) {
   const today = new Date();
   const todayString = new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
 
-  const [form, setForm] = useState({
+  const draft = loadCheckoutDraft();
+
+  const [form, setForm] = useState(() => draft?.form ?? {
     name: '',
     phone: '',
     altPhone: '',
@@ -138,8 +156,8 @@ export default function Checkout({ cart, setCart }) {
     instructions: '',
   });
 
-  const [pickupType, setPickupType] = useState(forcedPickupType);
-  const [paymentType, setPaymentType] = useState('half');
+  const [pickupType, setPickupType] = useState(() => draft?.pickupType ?? forcedPickupType);
+  const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
@@ -255,6 +273,25 @@ export default function Checkout({ cart, setCart }) {
     return new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify({ form, pickupType, paymentType }));
+    } catch (err) {
+      console.error('Failed to save checkout draft to storage:', err);
+    }
+  }, [form, pickupType, paymentType]);
+
+  // Kung bumalik sa Menu para magdagdag pa ng item (hal. nagdagdag ng
+  // Pre-order item), baka hindi na valid 'yung naka-save na pickupType sa
+  // draft laban sa BAGONG laman ng cart — i-correct agad.
+  useEffect(() => {
+    if (hasPreOrder && pickupType !== 'later') {
+      setPickupType('later');
+    } else if (!hasPreOrder && hasPickUpToday && pickupType !== 'now') {
+      setPickupType('now');
+    }
+  }, [hasPreOrder, hasPickUpToday]);
+
   const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, PRE_ORDER_MIN_LEAD_DAYS);
@@ -319,6 +356,17 @@ export default function Checkout({ cart, setCart }) {
   };
 
   const handlePlaceOrder = async () => {
+    // Re-check ito dito (hindi lang sa handleProceedToOrder) kasi puwedeng
+    // makatawid na ng SHOP_CLOSE_TIME habang bukas pa 'yung Order Summary
+    // modal (nag-review, kumuha ng oras bago pumindot ng "Place Order").
+    // Kung isang beses lang tinignan noong "Proceed", may window kung saan
+    // makakalusot pa rin ang "Buy Now" order kahit sarado na ang shop.
+    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
+      setShowSummaryModal(false);
+      setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+      return;
+    }
+
     setIsProcessing(true);
     let updatedCart = [...cart];
 

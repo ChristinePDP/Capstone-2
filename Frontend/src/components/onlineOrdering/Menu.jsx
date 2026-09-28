@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Menu.jsx
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
+import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
@@ -101,13 +101,207 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Cart Item Row — collapsible (name+price lang pag closed, buong
+// detalye pag open), may thumbnail preview, at swipe-to-delete
+// (variant="mobile") o plain na "Remove" button (variant="desktop").
+// ─────────────────────────────────────────────────────────────
+function CartItemRow({
+  item, index, changeQty, onRemove, expanded, onToggleExpand,
+  imageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage,
+}) {
+  const isMobile = variant === 'mobile';
+  const swipeStartX = useRef(null);
+  const replaceInputRef = useRef(null);
+
+  // Pointer Events (hindi lang Touch Events) — gumagana ito parehong sa
+  // totoong touchscreen AT sa ordinaryong mouse-drag (hal. habang nagte-test
+  // sa desktop browser/DevTools na naka-off ang touch emulation).
+  const handlePointerDown = (e) => { swipeStartX.current = e.clientX; };
+  const handlePointerMove = (e) => {
+    if (swipeStartX.current === null) return;
+    const delta = e.clientX - swipeStartX.current;
+    if (delta < -40) setOpenSwipeIndex(index);
+    else if (delta > 40) setOpenSwipeIndex(null);
+  };
+  const handlePointerUp = () => { swipeStartX.current = null; };
+
+  // Buuin ang detail lines (price options + order slip answers) —
+  // isang listahan lang, kahit bundle o regular na item.
+  const detailLines = [];
+  if (item.selected_price_options) {
+    Object.entries(item.selected_price_options).forEach(([key, val]) => {
+      detailLines.push({ key: `opt-${key}`, label: key, value: val });
+    });
+  }
+  if (item.type === 'bundle' && item.order_slip_details) {
+    Object.entries(item.order_slip_details).forEach(([prodId, answers]) => {
+      const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
+      Object.entries(answers).forEach(([key, val]) => {
+        detailLines.push({ key: `slip-${prodId}-${key}`, label: pName, sublabel: key, value: val });
+      });
+    });
+  } else if (item.order_slip_details) {
+    Object.entries(item.order_slip_details).forEach(([key, val]) => {
+      detailLines.push({ key: `slip-${key}`, label: key, value: val });
+    });
+  }
+
+  const imageCount = item.type === 'bundle' && item.inspiration_image
+    ? Object.values(item.inspiration_image).filter(Boolean).length
+    : (item.inspiration_image ? 1 : 0);
+
+  const qtyBtnSize = isMobile ? 'w-8 h-8' : 'w-6 h-6';
+  const qtyIconSize = isMobile ? 14 : 11;
+
+  const content = (
+    <div className="bg-white">
+      <button type="button" onClick={() => onToggleExpand(index)} className="w-full flex items-center gap-3 text-left">
+        {imageSrc ? (
+          <img
+            src={imageSrc}
+            alt=""
+            onClick={(e) => { e.stopPropagation(); onPreviewImage(imageSrc); }}
+            className={`${isMobile ? 'w-12 h-12' : 'w-10 h-10'} rounded-lg object-cover shrink-0 border border-[#EAE4E0] cursor-zoom-in`}
+          />
+        ) : (
+          <div className={`${isMobile ? 'w-12 h-12' : 'w-10 h-10'} rounded-lg bg-[#F5EFEB] border border-[#EAE4E0] shrink-0 flex items-center justify-center`}>
+            <Package size={16} className="text-[#DED4CC]" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-sm text-[#3B1F0A] truncate">{item.name}</p>
+          {!expanded && <p className="text-[11px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
+        </div>
+        <span className="font-bold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+        <ChevronDown size={16} className={`text-[#B7A99F] shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+
+      {expanded && (
+        <div className="mt-2.5 pl-0">
+          {detailLines.map(d => (
+            <p key={d.key} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">
+              {d.sublabel ? (
+                <><span className="font-semibold text-[#8A7264]">{d.label}</span> - {d.sublabel}: {d.value}</>
+              ) : (
+                <>{d.label}: {d.value}</>
+              )}
+            </p>
+          ))}
+
+          {imageCount > 0 && (
+            <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5 flex items-center gap-2">
+              <span>{item.type === 'bundle' ? `Image Attached (${imageCount})` : 'Image Attached'}</span>
+              {imageSrc && (
+                <button type="button" onClick={() => onPreviewImage(imageSrc)} className="underline underline-offset-2 font-normal normal-case text-[#5A453C]">
+                  View
+                </button>
+              )}
+              {/* Palitan lang ang picture nang direkta rito — hindi na kailangang
+                  ulitin ang buong modal (details, atbp.) para lang baguhin ang image.
+                  Sa ngayon, non-bundle items lang muna (isang File slot). */}
+              {item.type !== 'bundle' && onReplaceImage && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => replaceInputRef.current?.click()}
+                    aria-label="Change picture"
+                    title="Change picture"
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-[#DED4CC] text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
+                  >
+                    <Pencil size={11} />
+                  </button>
+                  <input
+                    ref={replaceInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) onReplaceImage(index, file);
+                      e.target.value = '';
+                    }}
+                  />
+                </>
+              )}
+            </p>
+          )}
+
+          <div className="flex items-center justify-between mt-2.5">
+            <div className="flex items-center gap-2">
+              <button onClick={() => changeQty(index, -1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Minus size={qtyIconSize} /></button>
+              <span className={`font-mono ${isMobile ? 'text-sm w-6' : 'text-xs w-4'} text-center`}>{item.qty}</span>
+              <button onClick={() => changeQty(index, 1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Plus size={qtyIconSize} /></button>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              aria-label="Remove item"
+              title="Remove item"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (!isMobile) {
+    return <div className="pb-4 border-b border-[#F1EBE6] last:border-0 last:pb-0">{content}</div>;
+  }
+
+  // Mobile: swipeable wrapper — i-drag pakaliwa para lumabas ang delete button
+  // sa likod (parang Shopee/Lazada), sa halip na palaging kailangang mag-expand
+  // muna bago makapag-delete.
+  return (
+    <div className="border-b border-[#F1EBE6] last:border-0 pb-4 last:pb-0">
+      <div className="grid overflow-hidden rounded-2xl">
+        <div className="[grid-area:1/1] bg-red-500 rounded-2xl flex items-center justify-end">
+          <button type="button" onClick={() => onRemove(index)} className="w-20 self-stretch flex flex-col items-center justify-center gap-1 text-white">
+            <Trash2 size={18} />
+            <span className="text-[9px] font-bold uppercase tracking-wide">Delete</span>
+          </button>
+        </div>
+        <div
+          className="[grid-area:1/1] bg-white transition-transform duration-200 ease-out touch-pan-y"
+          style={{ transform: openSwipeIndex === index ? 'translateX(-80px)' : 'translateX(0)' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+        >
+          {content}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Bundle Stepper Modal (NEW)
 // ─────────────────────────────────────────────────────────────
 function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
+  const [bundleImagePreviews, setBundleImagePreviews] = useState({}); // { [productId]: objectURL }
   const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
+
+  // Live thumbnail per bundle component — parehong dahilan sa ProductModal:
+  // gustong makumpirma agad ng customer kung tama ang na-upload niya bago pa
+  // makarating sa Checkout Order Summary.
+  useEffect(() => {
+    const urls = {};
+    Object.entries(bundleImages).forEach(([productId, file]) => {
+      if (file) urls[productId] = URL.createObjectURL(file);
+    });
+    setBundleImagePreviews(urls);
+    return () => {
+      Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [bundleImages]);
   const [errors, setErrors] = useState({});
   const products = bundle.products || [];
 
@@ -284,7 +478,14 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
                       />
                     </label>
                   ) : (
-                    <div className="flex items-center justify-between w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-3 rounded-xl">
+                    <div className="flex items-center gap-2.5 w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-2 rounded-xl">
+                      {bundleImagePreviews[currentProduct.id] && (
+                        <img
+                          src={bundleImagePreviews[currentProduct.id]}
+                          alt="Preview ng napiling reference image"
+                          className="w-9 h-9 rounded-lg object-cover shrink-0 border border-[#DED4CC]"
+                        />
+                      )}
                       <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{bundleImages[currentProduct.id].name}</span>
                       <button
                         type="button"
@@ -333,10 +534,24 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
 function ProductModal({ product, onClose, onAddToCart, showToast }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [imageError, setImageError] = useState('');
   
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
   const [errors, setErrors] = useState({});
+
+  // Live thumbnail ng napiling file — para makumpirma agad ng customer na
+  // TAMA ang na-upload niya, sa halip na malaman lang niya sa Checkout
+  // Order Summary (huli na 'yon para makapag-reselect).
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
 
   if (!product) return null;
 
@@ -544,7 +759,14 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
                   />
                 </label>
               ) : (
-                <div className="flex items-center justify-between w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-3 rounded-xl">
+                <div className="flex items-center gap-2.5 w-full border border-[#EAE4E0] bg-[#F5EFEB] p-2 pl-2 rounded-xl">
+                  {imagePreviewUrl && (
+                    <img
+                      src={imagePreviewUrl}
+                      alt="Preview ng napiling reference image"
+                      className="w-9 h-9 rounded-lg object-cover shrink-0 border border-[#DED4CC]"
+                    />
+                  )}
                   <span className="text-xs text-[#4A3B36] truncate min-w-0 flex-1">{imageFile.name}</span>
                   <button
                     type="button"
@@ -887,6 +1109,69 @@ export default function Menu({ cart, setCart }) {
     });
   };
 
+  const removeItem = (index) => setCart(prev => prev.filter((_, i) => i !== index));
+
+  // Palitan lang ang na-upload na picture ng isang item na nasa cart na —
+  // para hindi na kailangang i-redo ang buong form (details, atbp.) kung
+  // ang gusto lang palitan ay ang larawan.
+  const replaceCartItemImage = (index, file) => setCart(prev => prev.map(
+    (item, i) => (i === index ? { ...item, inspiration_image: file } : item)
+  ));
+
+  // ── Cart item UI state: collapsible rows, swipe-to-delete (mobile), at
+  // image preview lightbox — walang kinalaman sa checkout/backend logic. ──
+  const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
+  const toggleCartItemExpanded = (i) => {
+    setExpandedCartIndexes(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+  const [openSwipeIndex, setOpenSwipeIndex] = useState(null);
+  const [cartImagePreviewSrc, setCartImagePreviewSrc] = useState(null);
+
+  // Blob URLs para sa File-based na inspiration images sa loob ng cart —
+  // ginagawa/dini-nirevoke lang tuwing magbabago ang cart, para hindi
+  // tumagas ang memory (parehong pattern gaya ng ginawa sa upload preview).
+  const [cartImageBlobUrls, setCartImageBlobUrls] = useState({});
+  useEffect(() => {
+    const urls = {};
+    cart.forEach((item, i) => {
+      let file = null;
+      if (item.inspiration_image instanceof File) {
+        file = item.inspiration_image;
+      } else if (item.inspiration_image && typeof item.inspiration_image === 'object') {
+        file = Object.values(item.inspiration_image).find(v => v instanceof File);
+      }
+      if (file) urls[i] = URL.createObjectURL(file);
+    });
+    setCartImageBlobUrls(urls);
+    return () => {
+      Object.values(urls).forEach(u => URL.revokeObjectURL(u));
+    };
+  }, [cart]);
+
+  // Same fallback chain gaya ng ginagamit sa Checkout.jsx Order Summary —
+  // File -> blob URL, string -> URL/backend path, wala -> default product image.
+  const resolveCartImageSrc = (item, i) => {
+    let src = cartImageBlobUrls[i];
+    if (!src) {
+      if (item.inspiration_image && typeof item.inspiration_image === 'string') {
+        src = item.inspiration_image;
+      } else if (item.inspiration_image && typeof item.inspiration_image === 'object') {
+        const strVal = Object.values(item.inspiration_image).find(v => typeof v === 'string');
+        if (strVal) src = strVal;
+      } else {
+        src = item.image || item.image_url;
+      }
+    }
+    if (src && !src.startsWith('http') && !src.startsWith('blob:') && !src.startsWith('data:')) {
+      src = `${import.meta.env.VITE_API_URL}/uploads/${src.replace(/^\//, '')}`;
+    }
+    return src || null;
+  };
+
   const changeQty = (index, delta) => setCart(prev => {
     const newCart = [...prev];
     const item = newCart[index];
@@ -1177,46 +1462,19 @@ export default function Menu({ cart, setCart }) {
             <>
               <div className="px-6 py-4 flex-1 overflow-y-auto flex flex-col gap-4">
                 {cart.map((item, i) => (
-                  <div key={i} className="flex justify-between items-start gap-3 pb-4 border-b border-[#F1EBE6] last:border-0 last:pb-0">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.name}</p>
-                      
-                      {item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
-                        <p key={`opt-${key}`} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">{key}: {val}</p>
-                      ))}
-
-                      {item.type === 'bundle' && item.order_slip_details ? (
-                         // Kapag bundle, nakagrupo per product ID ang slip details
-                         Object.entries(item.order_slip_details).map(([prodId, answers]) => {
-                           const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                           return Object.entries(answers).map(([key, val]) => (
-                             <p key={`slip-${prodId}-${key}`} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">
-                               <span className="font-semibold text-[#8A7264]">{pName}</span> - {key}: {val}
-                             </p>
-                           ));
-                         })
-                      ) : (
-                        item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
-                          <p key={`slip-${key}`} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">{key}: {val}</p>
-                        ))
-                      )}
-
-                      {item.inspiration_image && (
-                         <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">
-                           {item.type === 'bundle'
-                             ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
-                             : 'Image Attached'}
-                         </p>
-                      )}
-                      
-                      <div className="flex items-center gap-2 mt-2.5">
-                        <button onClick={() => changeQty(i, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={11} /></button>
-                        <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
-                        <button onClick={() => changeQty(i, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={11} /></button>
-                      </div>
-                    </div>
-                    <span className="font-bold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
-                  </div>
+                  <CartItemRow
+                    key={i}
+                    item={item}
+                    index={i}
+                    changeQty={changeQty}
+                    onRemove={removeItem}
+                    expanded={expandedCartIndexes.has(i)}
+                    onToggleExpand={toggleCartItemExpanded}
+                    imageSrc={resolveCartImageSrc(item, i)}
+                    onPreviewImage={setCartImagePreviewSrc}
+                    variant="desktop"
+                    onReplaceImage={replaceCartItemImage}
+                  />
                 ))}
               </div>
 
@@ -1262,45 +1520,21 @@ export default function Menu({ cart, setCart }) {
 
             <div className="overflow-y-auto p-5 flex flex-col gap-4">
               {cart.map((item, i) => (
-                <div key={i} className="flex justify-between items-start gap-3 pb-4 border-b border-[#F1EBE6] last:border-0">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-sm text-[#3B1F0A] truncate">{item.name}</p>
-                    
-                    {item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
-                      <p key={`mob-opt-${key}`} className="text-[11px] text-[#B7A99F] mt-1 leading-snug">{key}: {val}</p>
-                    ))}
-
-                    {item.type === 'bundle' && item.order_slip_details ? (
-                       Object.entries(item.order_slip_details).map(([prodId, answers]) => {
-                         const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
-                         return Object.entries(answers).map(([key, val]) => (
-                           <p key={`mob-slip-${prodId}-${key}`} className="text-[11px] text-[#B7A99F] mt-1 leading-snug">
-                             <span className="font-semibold text-[#8A7264]">{pName}</span> - {key}: {val}
-                           </p>
-                         ));
-                       })
-                    ) : (
-                      item.order_slip_details && Object.entries(item.order_slip_details).map(([key, val]) => (
-                        <p key={`mob-slip-${key}`} className="text-[11px] text-[#B7A99F] mt-1 leading-snug">{key}: {val}</p>
-                      ))
-                    )}
-
-                    {item.inspiration_image && (
-                       <p className="text-[11px] font-semibold text-[#8A7264] mt-1">
-                         {item.type === 'bundle'
-                           ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
-                           : 'Image Attached'}
-                       </p>
-                    )}
-
-                    <div className="flex items-center gap-2 mt-3">
-                      <button onClick={() => changeQty(i, -1)} className="w-8 h-8 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] active:bg-[#EAE4E0]"><Minus size={14} /></button>
-                      <span className="font-mono text-sm w-6 text-center">{item.qty}</span>
-                      <button onClick={() => changeQty(i, 1)} className="w-8 h-8 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] active:bg-[#EAE4E0]"><Plus size={14} /></button>
-                    </div>
-                  </div>
-                  <span className="font-bold text-sm text-[#5A453C] shrink-0 mt-0.5">₱{(item.price * item.qty).toLocaleString()}</span>
-                </div>
+                <CartItemRow
+                  key={i}
+                  item={item}
+                  index={i}
+                  changeQty={changeQty}
+                  onRemove={removeItem}
+                  expanded={expandedCartIndexes.has(i)}
+                  onToggleExpand={toggleCartItemExpanded}
+                  imageSrc={resolveCartImageSrc(item, i)}
+                  onPreviewImage={setCartImagePreviewSrc}
+                  variant="mobile"
+                  onReplaceImage={replaceCartItemImage}
+                  openSwipeIndex={openSwipeIndex}
+                  setOpenSwipeIndex={setOpenSwipeIndex}
+                />
               ))}
             </div>
 
@@ -1335,6 +1569,28 @@ export default function Menu({ cart, setCart }) {
       ) : null}
 
       {previewImage && <ImagePreviewModal product={previewImage} onClose={() => setPreviewImage(null)} />}
+
+      {cartImagePreviewSrc && (
+        <div
+          className="fixed inset-0 z-[5000] bg-black/80 flex items-center justify-center p-6"
+          onClick={() => setCartImagePreviewSrc(null)}
+        >
+          <img
+            src={cartImagePreviewSrc}
+            alt="Reference image"
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-full max-h-full rounded-2xl object-contain"
+          />
+          <button
+            onClick={() => setCartImagePreviewSrc(null)}
+            aria-label="Close image preview"
+            className="absolute top-5 right-5 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+      )}
+
       {cartCount > 0 && <div className="lg:hidden h-24"></div>}
       <Footer />
     </div>

@@ -7,30 +7,79 @@ import Checkout from '../components/onlineOrdering/Checkout';
 import Confirm from '../components/onlineOrdering/Confirm';
 import Header from '../components/onlineOrdering/Header';
 
-const CART_STORAGE_KEY = 'aileen_cake_max_cart';
+const CART_DB_NAME = 'aileen_cake_max_db';
+const CART_DB_VERSION = 1;
+const CART_STORE_NAME = 'cart_store';
+const CART_KEY = 'cart';
+
+// Bakit IndexedDB sa halip na localStorage: kayang-kaya nitong i-store nang
+// DIREKTA ang File/Blob objects (walang kailangang i-convert sa base64 text),
+// at ang quota nito ay daan-daang MB (kumpara sa ~5-10MB lang ng localStorage)
+// — importante dahil hanggang ilang malalaking photo (hal. 3-4 na reference
+// picture sa isang Tarpaulin order) ang puwedeng ma-attach sa isang item.
+function openCartDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(CART_DB_NAME, CART_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(CART_STORE_NAME)) {
+        db.createObjectStore(CART_STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadCartFromDb() {
+  try {
+    const db = await openCartDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(CART_STORE_NAME, 'readonly');
+      const req = tx.objectStore(CART_STORE_NAME).get(CART_KEY);
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.error('Failed to read cart from IndexedDB:', err);
+    return [];
+  }
+}
+
+async function saveCartToDb(cart) {
+  try {
+    const db = await openCartDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CART_STORE_NAME, 'readwrite');
+      tx.objectStore(CART_STORE_NAME).put(cart, CART_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error('Failed to save cart to IndexedDB:', err);
+  }
+}
 
 export default function OnlineOrderingPage() {
-  const [cart, setCart] = useState(() => {
-    try {
-      const saved = localStorage.getItem(CART_STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (err) {
-      console.error('Failed to read cart from storage:', err);
-      return [];
-    }
-  });
+  const [cart, setCart] = useState([]);
+  // Naghihintay muna tayo ng buong (async) restore mula sa IndexedDB bago
+  // paganahin ang pag-save pabalik — kung hindi, may split-second na
+  // ma-o-overwrite natin ang naka-save na cart ng EMPTY array bago pa
+  // matapos mag-restore.
+  const [cartHydrated, setCartHydrated] = useState(false);
 
   useEffect(() => {
-    try {
-      const serializable = cart.map(({ inspiration_image, ...rest }) => ({
-        ...rest,
-        had_inspiration_image: !!inspiration_image,
-      }));
-      localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(serializable));
-    } catch (err) {
-      console.error('Failed to save cart to storage:', err);
-    }
-  }, [cart]);
+    (async () => {
+      const restored = await loadCartFromDb();
+      setCart(restored);
+      setCartHydrated(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!cartHydrated) return;
+    saveCartToDb(cart);
+  }, [cart, cartHydrated]);
 
   const [confirmedOrderId, setConfirmedOrderId] = useState('');
 
@@ -60,7 +109,7 @@ export default function OnlineOrderingPage() {
       
       
       
-      <Route path="confirm" element={<Confirm orderId={confirmedOrderId} />} />
+      <Route path="confirm" element={<Confirm orderId={confirmedOrderId} setCart={setCart} />} />
       
       {/* 404 Fallback sa loob ng ordering page */}
       <Route path="*" element={<Navigate to="/onlineOrdering/home" replace />} />

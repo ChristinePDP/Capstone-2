@@ -9,11 +9,15 @@ const DUMMY_CART = [
   { name: 'Special Ensaymada', qty: 2, price: 70 },
 ];
 
+// Kailangang MAGKATUGMA ito sa CHECKOUT_DRAFT_KEY sa Checkout.jsx — dito lang
+// ito ini-clear, pagkatapos ma-confirm na successful na ang order.
+const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
+
 // Gaano katagal mag-poll bago sabihin sa customer na tumagal ang confirmation.
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 20; // ~40s total
 
-export default function Confirm({ orderId }) {
+export default function Confirm({ orderId, setCart }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -49,6 +53,15 @@ export default function Confirm({ orderId }) {
           setResolvedOrder(data.order);
           setPaymentStatus('paid');
           sessionStorage.removeItem('pendingOrderId');
+          // NOTE: sinasadyang HINDI ginagalaw ang `tempOrderData` dito — binabasa
+          // 'yan sa BAWAT render para sa item list ng receipt (linya 22, 81);
+          // kung aalisin dito, babalik sa DUMMY_CART fallback pag na-re-render.
+          setCart?.([]); // successful na ang order — i-clear na 'yung TOTOONG cart (auto ring mabubura sa localStorage via parent's useEffect)
+          try {
+            localStorage.removeItem(CHECKOUT_DRAFT_KEY);
+          } catch (err) {
+            console.error('Failed to clear checkout draft from storage:', err);
+          }
           return;
         }
 
