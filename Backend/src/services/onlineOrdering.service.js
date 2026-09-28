@@ -539,7 +539,9 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   const itemsToInsert = resolvedItems.map(item => ({
     ...item,
     order_id: newOrder.id,
-    special_instructions: payload.specialInstructions || ''
+    // Ang special instructions na tinype ng customer sa Checkout ay napupunta
+    // sa `order_items.special_instructions` (parehong text sa bawat row ng order).
+    special_instructions: (payload.specialInstructions || '').trim() || item.special_instructions || ''
   }));
 
   try {

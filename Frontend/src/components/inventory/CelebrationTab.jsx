@@ -84,6 +84,22 @@ export default function CelebrationTab() {
   });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
+  // Total per material type — shown as a small count beside each view tab.
+  const viewCounts = useMemo(() => {
+    const counts = { celebration: 0, product: 0 };
+    materials.forEach(m => { counts[getMaterialViewKey(m, productsById)] += 1; });
+    return counts;
+  }, [materials, productsById]);
+
+  // Counts shown in the status dropdown (for the material type currently
+  // in view). Uses the same ingStatus() as the table's Status column and the
+  // filter, so the numbers always match what you get after picking an option.
+  const statusCounts = materialsInView.reduce((acc, m) => {
+    const label = ingStatus(m.stock, m.min).label;
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+
   const handleSave = async (payload) => {
     if (payload.isNew) {
       await addMaterial(payload.newData);
@@ -164,13 +180,14 @@ export default function CelebrationTab() {
               key={view.key}
               type="button"
               onClick={() => handleViewChange(view.key)}
-              className={`pb-2.5 text-sm font-bold border-b-2 transition-all -mb-0.5 ${
+              className={`pb-2.5 text-sm font-bold border-b-2 transition-all -mb-0.5 flex items-center gap-2 ${
                 materialView === view.key
                   ? 'border-brand-800 text-brand-900'
                   : 'border-transparent text-brand-400 hover:text-brand-600'
               }`}
             >
               {view.label}
+              <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{viewCounts[view.key]}</span>
             </button>
           ))}
         </div>
@@ -192,10 +209,10 @@ export default function CelebrationTab() {
               onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
               className="px-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-full sm:w-auto"
             >
-              <option value="all">All Status</option>
-              <option value="In Stock">In Stock</option>
-              <option value="Low Stock">Low Stock</option>
-              <option value="Out of Stock">Out of Stock</option>
+              <option value="all">All Status ({materialsInView.length})</option>
+              <option value="In Stock">In Stock ({statusCounts['In Stock'] || 0})</option>
+              <option value="Low Stock">Low Stock ({statusCounts['Low Stock'] || 0})</option>
+              <option value="Out of Stock">Out of Stock ({statusCounts['Out of Stock'] || 0})</option>
             </select>
           </div>
         </div>

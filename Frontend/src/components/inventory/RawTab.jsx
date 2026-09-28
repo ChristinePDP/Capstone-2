@@ -38,6 +38,15 @@ export default function IngredientsTab() {
   });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
+  // Counts shown in the status dropdown. Uses the same ingStatus() as the
+  // table's Status column and the filter, so the numbers always match what
+  // you get after picking that option.
+  const statusCounts = ingredients.reduce((acc, ing) => {
+    const label = ingStatus(ing.stock, ing.min).label;
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+
   const handleSave = async (payload) => {
     if (payload.isNew) {
       await addIngredient(payload.newData);
@@ -82,8 +91,11 @@ export default function IngredientsTab() {
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800">Ingredients</h3>
-            <p className="text-xs text-brand-400 mt-0.5">Keep track of Flour, Sugar, Baking Powder, and other key ingredients.</p>
+            <h3 className="font-bold text-brand-800 flex items-center gap-2">
+              Ingredients
+              <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{ingredients.length} total</span>
+            </h3>
+            <p className="text-xs text-brand-400 mt-0.5">Keep track of the key raw ingredients used to produce your products.</p>
           </div>
           <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
             <Plus size={14} /> Add New Ingredient
@@ -107,10 +119,10 @@ export default function IngredientsTab() {
               onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
               className="px-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-full sm:w-auto"
             >
-              <option value="all">All Status</option>
-              <option value="In Stock">In Stock</option>
-              <option value="Low Stock">Low Stock</option>
-              <option value="Out of Stock">Out of Stock</option>
+              <option value="all">All Status ({ingredients.length})</option>
+              <option value="In Stock">In Stock ({statusCounts['In Stock'] || 0})</option>
+              <option value="Low Stock">Low Stock ({statusCounts['Low Stock'] || 0})</option>
+              <option value="Out of Stock">Out of Stock ({statusCounts['Out of Stock'] || 0})</option>
             </select>
           </div>
         </div>

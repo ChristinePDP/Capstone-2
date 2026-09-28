@@ -535,7 +535,7 @@ if (data.success && data.checkoutUrl) {
 
         {/* LEFT COLUMN: Step 1 */}
         <div className="flex-1 flex flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2 lg:overflow-y-auto scrollbar-thin">
-          <div className="flex flex-col lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
+          <div className="flex flex-col lg:flex-1 lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
 
               <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:rounded-none lg:border-0 lg:shadow-none">
                   <div className="flex items-center gap-2.5 mb-3.5 shrink-0">
@@ -747,14 +747,15 @@ if (data.success && data.checkoutUrl) {
                           </div>
                       </div>
 
-                      <div className="hidden lg:block mb-4 pb-6 invisible pointer-events-none select-none" aria-hidden="true">
+                      <div className="min-w-0">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
-                          <input
-                            type="text"
+                          <textarea
+                            rows={4}
                             placeholder="Anything else we should know?"
-                            readOnly
-                            tabIndex={-1}
-                            className="w-full h-[42px] border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl text-ellipsis overflow-hidden whitespace-nowrap"
+                            maxLength={300}
+                            value={form.instructions}
+                            onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
+                            className="block w-full max-w-full min-w-0 resize-none border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                           />
                       </div>
 
@@ -918,9 +919,9 @@ if (data.success && data.checkoutUrl) {
                   </div>
 
                   {form.instructions && (
-                    <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl">
+                    <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl min-w-0">
                       <span className="text-[10px] text-[#B7A99F] uppercase font-semibold">Special Instructions</span>
-                      <span className="text-[#3B1F0A] mt-0.5">{form.instructions}</span>
+                      <span className="text-[#3B1F0A] mt-0.5 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{form.instructions}</span>
                     </div>
                   )}
                 </div>

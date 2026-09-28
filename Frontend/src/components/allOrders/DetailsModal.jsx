@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText } from 'lucide-react';
+import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText } from 'lucide-react';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -244,6 +244,14 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
 
   const globalReferenceImage = order.customerReference || order.customer_reference_url;
 
+  // Special instructions ay nasa order_items.special_instructions (iisang text
+  // na inuulit sa bawat row), kaya dine-dedupe para isang beses lang ipakita.
+  const specialInstructions = [...new Set(
+    items
+      .map(it => (it.special_instructions ?? it.specialInstructions ?? '').toString().trim())
+      .filter(Boolean)
+  )];
+
   // Grouped by Bundle / Package / Standalone Item na kasama na ang specific reference images per component
   const orderSlipCards = (() => {
     const cards = [];
@@ -472,6 +480,18 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                   <p className="text-[11px] text-[#8A7264] font-mono mt-2.5 break-all">Ref: {paymentRef}</p>
                 )}
               </div>
+
+              {/* Special Instructions — pinakababa ng order details */}
+              {specialInstructions.length > 0 && (
+                <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5 min-w-0">
+                  <SectionLabel icon={MessageSquareText}>Special Instructions</SectionLabel>
+                  <div className="space-y-1.5">
+                    {specialInstructions.map((text, i) => (
+                      <p key={i} className="text-sm text-[#3B1F0A] font-medium whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             </div>
           )}

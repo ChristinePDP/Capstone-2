@@ -6,6 +6,13 @@ import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
 
+const DATE_FILTERS = [
+  { key: 'All',        label: 'All Time' },
+  { key: 'Today',      label: 'Today' },
+  { key: 'This Week',  label: 'This Week' },
+  { key: 'This Month', label: 'This Month' },
+];
+
 const formatLocalTime = (dateString) => {
   if (!dateString) return 'N/A';
   const date = new Date(dateString);
@@ -20,6 +27,12 @@ const formatLocalTime = (dateString) => {
   });
 };
 
+// YYYY-MM-DD sa Asia/Manila para tama ang paghahambing ng "today"
+const manilaDateKey = (dateInput) => {
+  if (!dateInput) return null;
+  return new Date(dateInput).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+};
+
 export default function ProductLogTab() {
   const context = useApp() || {};
   const productionLogs = context.productionLogs || [];
@@ -30,28 +43,40 @@ export default function ProductLogTab() {
   const [search, setSearch]     = useState('');
   const [filterDate, setFilterDate] = useState('All');
 
+  // Isang lugar lang ang date-matching para pareho ang gamit ng filter at ng bilang sa dropdown
+  const matchesDate = (pl, range) => {
+    if (range === 'All') return true;
+    if (!pl.dt) return false;
+    const logDate = new Date(pl.dt);
+    const now = new Date();
+
+    if (range === 'Today') {
+      return manilaDateKey(logDate) === manilaDateKey(now);
+    }
+    if (range === 'This Week') {
+      const diffTime = Math.abs(now - logDate);
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= 7;
+    }
+    if (range === 'This Month') {
+      // Siguraduhing tugma sa buwan at taon
+      return logDate.getMonth() === now.getMonth() && logDate.getFullYear() === now.getFullYear();
+    }
+    return true;
+  };
+
+  // Bilang ng entries sa bawat date range (para sa dropdown)
+  const dateCounts = useMemo(() => {
+    const counts = {};
+    DATE_FILTERS.forEach(f => {
+      counts[f.key] = productionLogs.filter(pl => matchesDate(pl, f.key)).length;
+    });
+    return counts;
+  }, [productionLogs]);
+
   const filtered = useMemo(() => {
     return productionLogs.filter(pl => {
       if (search && !pl.product.toLowerCase().includes(search.toLowerCase())) return false;
-
-      if (!pl.dt && filterDate !== 'All') return false;
-      const logDate = new Date(pl.dt);
-      const now = new Date();
-
-      if (filterDate === 'Today') {
-
-        return logDate.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' }) === 
-               now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' });
-      }
-      if (filterDate === 'This Week') {
-        const diffTime = Math.abs(now - logDate);
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= 7;
-      }
-      if (filterDate === 'This Month') {
-        // Siguraduhing tugma sa buwan at taon
-        return logDate.getMonth() === now.getMonth() && logDate.getFullYear() === now.getFullYear();
-      }
-      return true;
+      return matchesDate(pl, filterDate);
     });
   }, [productionLogs, search, filterDate]);
 
@@ -62,9 +87,9 @@ export default function ProductLogTab() {
       <Card>
         <div className="flex items-center justify-between p-4 border-b border-brand-100">
           <div>
-            <h3 className=" font-bold text-brand-800">Product Log</h3>
+            <h3 className=" font-bold text-brand-800">Production Log</h3>
             <p className="text-xs text-brand-400 mt-0.5">
-              Lahat ng na-confirm na batch production. Reference ito bago mag-log ng unsold sa Waste Log.
+              All confirmed batch productions. Use this as a reference before logging unsold items in the Waste Log.
             </p>
           </div>
         </div>
@@ -89,10 +114,9 @@ export default function ProductLogTab() {
               value={filterDate}
               onChange={e => { setFilterDate(e.target.value); setPage(1); }}
             >
-              <option value="All">All Time</option>
-              <option value="Today">Today</option>
-              <option value="This Week">This Week</option>
-              <option value="This Month">This Month</option>
+              {DATE_FILTERS.map(f => (
+                <option key={f.key} value={f.key}>{f.label} ({dateCounts[f.key]})</option>
+              ))}
             </select>
           </div>
         </div>
@@ -152,8 +176,8 @@ export default function ProductLogTab() {
               {!filtered.length && (
                 <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
                   {search || filterDate !== 'All'
-                    ? 'Walang nahanap na production record.'
-                    : 'Wala pang production record. Mag-set ng target sa Recipe Log at i-confirm ang batch.'}
+                    ? 'No production records found.'
+                    : 'No production records yet. Set a target in Production Formula and confirm a batch.'}
                 </div>
               )}
             </>

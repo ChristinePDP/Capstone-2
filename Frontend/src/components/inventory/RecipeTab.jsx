@@ -11,14 +11,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
 
-// A recipe is for a product that actually needs raw ingredients to be made
-// — a Celebration Material "product" (e.g. a tarpaulin or balloon that's
-// sold as-is) doesn't need a recipe, so it's excluded from the Product Name
-// list below.
-// A recipe is INGREDIENTS ONLY — no materials of any kind (Product Material
-// or Celebration Material) are selectable in the recipe picker. Materials
-// (packaging, boxes, ribbons, etc.) are add-ons attached to a product/bundle
-// separately from the recipe, not something a recipe "consumes" per batch.
+// A Production Formula is for a product that actually needs raw ingredients
+// to be made — a Celebration Material "product" (e.g. a tarpaulin or balloon
+// that's sold as-is) doesn't need a formula, so it's excluded from the
+// Product Name list below.
+// A formula has two parts: the Recipe (raw ingredients ONLY) and the Product
+// Materials (boxes, packaging, etc. needed to produce the product). No
+// materials are selectable in the Recipe picker, and no raw ingredients are
+// selectable in the Product Materials picker.
 // `getMaterialViewKey` is kept only for the legacy shortfall/lookup helpers
 // further down that still need to resolve materials already saved on older
 // recipes.
@@ -101,6 +101,7 @@ export default function RecipeTab() {
   const { show: showToast } = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [shoppingOpen, setShoppingOpen] = useState(false); // Shopping List modal
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null); // Modal state for production confirmation
@@ -135,7 +136,7 @@ export default function RecipeTab() {
       label: `${item.name} (Raw${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
     }));
 
-    // Celebration Materials are add-ons, not recipe ingredients — only
+    // Celebration Materials are not recipe ingredients — only
     // Product Materials (e.g. boxes) are offered here.
     const materialOptions = materials
       .filter(item => getMaterialViewKey(item, productsById) !== 'celebration')
@@ -165,7 +166,7 @@ export default function RecipeTab() {
     [inventoryOptions]
   );
 
-  // Add-ons section of the modal — materials only (Product Materials; the
+  // Product Materials section of the modal — materials only (Product Materials; the
   // same Celebration-Material exclusion as before still applies). These are
   // attached to the recipe as their own section, never merged into the
   // ingredients rows above, but they're saved through the same
@@ -349,7 +350,7 @@ export default function RecipeTab() {
     });
 
     // Split the saved recipe_ingredients rows back into the two sections —
-    // raw ingredients go to `rows`, materials go to `addonRows`.
+    // raw ingredients (Recipe) go to `rows`, materials (Product Materials) go to `addonRows`.
     const savedIngredientRows = mappedRows
       .filter(row => row.sourceType !== 'material')
       .map(({ sourceType, ...row }) => row);
@@ -396,9 +397,9 @@ export default function RecipeTab() {
       }
       const validAddonRows = addonRows.filter(row => row.itemId || row.qty || row.unit);
 
-      // Shared validator for both the Ingredients rows and the Add-ons rows.
+      // Shared validator for both the Recipe rows and the Product Materials rows.
       // `requiredSourceType` enforces the section boundary: an ingredient
-      // row can only resolve to a raw ingredient, an add-on row can only
+      // row can only resolve to a raw ingredient, a product-material row can only
       // resolve to a material. Returns null (after showing a toast) on the
       // first invalid row, or the normalized recipe_ingredients entries.
       const normalizeRowsOrToast = (rowsToCheck, { requiredSourceType, sectionLabel }) => {
@@ -423,8 +424,8 @@ export default function RecipeTab() {
           if (inventoryItem.sourceType !== requiredSourceType) {
             showToast(
               requiredSourceType === 'raw'
-                ? `"${inventoryItem.name}" is a material, not an ingredient — move it to the Add-ons section instead.`
-                : `"${inventoryItem.name}" is an ingredient, not a material — it belongs in the Ingredients section instead.`,
+                ? `"${inventoryItem.name}" is a material, not an ingredient — move it to the Product Materials section instead.`
+                : `"${inventoryItem.name}" is an ingredient, not a material — it belongs in the Recipe section instead.`,
               'warning'
             );
             return null;
@@ -464,7 +465,7 @@ export default function RecipeTab() {
       const normalizedIngredients = normalizeRowsOrToast(validRows, { requiredSourceType: 'raw', sectionLabel: 'ingredient' });
       if (!normalizedIngredients) return;
 
-      const normalizedAddons = normalizeRowsOrToast(validAddonRows, { requiredSourceType: 'material', sectionLabel: 'add-on' });
+      const normalizedAddons = normalizeRowsOrToast(validAddonRows, { requiredSourceType: 'material', sectionLabel: 'material' });
       if (!normalizedAddons) return;
 
       const data = {
@@ -472,7 +473,7 @@ export default function RecipeTab() {
         yield_quantity: numericYield,
         yield_unit: yldUnit.trim(),
         // The backend's recipe_ingredients table doesn't know about the
-        // "Ingredients" vs "Add-ons" split — that's purely a UI grouping.
+        // "Recipe" vs "Product Materials" split — that's purely a UI grouping.
         // Both are sent in one array here, distinguished by `item_type`
         // ('raw' vs 'material'), which is exactly what ProductionService
         // already uses to deduct raw-ingredient stock and material stock
@@ -483,16 +484,16 @@ export default function RecipeTab() {
       setIsSaving(true);
       if (editRecipe?.id) {
         if (updateRecipe) await updateRecipe(editRecipe.id, data);
-        showToast('Recipe updated.', 'success');
+        showToast('Formula updated.', 'success');
       } else {
         if (addRecipe) await addRecipe(data);
-        showToast('Recipe added.', 'success');
+        showToast('Formula added.', 'success');
       }
 
       setModalOpen(false);
     } catch (err) {
       console.error('Recipe save failed:', err);
-      showToast(err?.message || 'Something went wrong while saving the recipe.', 'error');
+      showToast(err?.message || 'Something went wrong while saving the formula.', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -516,7 +517,7 @@ export default function RecipeTab() {
     const recipeId = recipe.id;
 
     if (!UUID_RE.test(recipeId) || !UUID_RE.test(resolvedProductId || '')) {
-      showToast('Recipe/product data not fully loaded yet — refresh the page and try again.', 'warning');
+      showToast('Formula/product data not fully loaded yet — refresh the page and try again.', 'warning');
       setConfirmTarget(null);
       setConfirmingIds(prev => ({ ...prev, [recipe.id]: false }));
       return;
@@ -558,11 +559,11 @@ export default function RecipeTab() {
     setIsDeleting(true);
     try {
       if (deleteRecipe) await deleteRecipe(deleteTarget.id);
-      showToast('Recipe deleted.', 'success');
+      showToast('Formula deleted.', 'success');
       setDeleteTarget(null);
     } catch (err) {
       console.error('deleteRecipe failed:', err);
-      showToast(err?.message || "Couldn't delete the recipe.", 'error');
+      showToast(err?.message || "Couldn't delete the formula.", 'error');
     } finally {
       isDeletingRef.current = false;
       setIsDeleting(false);
@@ -576,37 +577,36 @@ export default function RecipeTab() {
 
   return (
     <div className="space-y-4">
-      {allShortfalls.length > 0 && (
-        <div className="border border-red-200 bg-white rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-red-50 border-b border-red-200">
-            <ShoppingCart size={14} className="text-red-600 shrink-0" />
-            <p className="text-xs font-bold uppercase tracking-wider text-red-700 flex-1">Shopping List</p>
-            <span className="text-[10px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full">{allShortfalls.length} items</span>
-          </div>
-          <ul className="divide-y divide-gray-100 max-h-48 overflow-y-auto">
-            {allShortfalls.map((item, idx) => (
-              <li key={`${item.name}-${item.unit}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-                <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
-                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{roundQty(item.shortage)} {item.unit}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       <Card>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
-            <h3 className="font-bold text-brand-800">Recipe Log</h3>
-            <p className="text-xs text-brand-400 mt-0.5">Enter a Target Goal to see if you have enough ingredients.</p>
+            <h3 className="font-bold text-brand-800">Production Formulas</h3>
+            <p className="text-xs text-brand-400 mt-0.5">Enter a Target Goal to see if you have enough ingredients and materials.</p>
           </div>
-          <Button variant="dark" onClick={openAdd} className="w-full sm:w-auto justify-center"><Plus size={14} /> Add Recipe</Button>
+          <div className="flex items-center gap-4 w-full sm:w-auto">
+            {allShortfalls.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShoppingOpen(true)}
+                title={`Shopping list — ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
+                aria-label={`Open shopping list, ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
+                className="relative inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors shrink-0"
+              >
+                <ShoppingCart size={16} />
+                <span className="text-xs font-bold hidden sm:inline">Shopping List</span>
+                <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold leading-none ring-2 ring-white">
+                  {allShortfalls.length}
+                </span>
+              </button>
+            )}
+            <Button variant="dark" onClick={openAdd} className="flex-1 sm:flex-none justify-center"><Plus size={14} /> Add Formula</Button>
+          </div>
         </div>
 
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
           <div className="relative max-w-xs">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
-            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }} placeholder="Search recipe..." className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none bg-white" />
+            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }} placeholder="Search formula..." className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none bg-white" />
           </div>
         </div>
 
@@ -734,7 +734,7 @@ export default function RecipeTab() {
           </Table>
           )}
 
-          {!paged.length && <div className="text-center py-8 text-brand-300">No recipes found.</div>}
+          {!paged.length && <div className="text-center py-8 text-brand-300">No formulas found.</div>}
           </>
           )}
         </div>
@@ -750,28 +750,55 @@ export default function RecipeTab() {
         )}
       </Card>
 
-      {/* REFACTORED RECIPE MODAL */}
+      {/* SHOPPING LIST MODAL — opened from the cart/alert button in the header */}
+      <Modal
+        isOpen={shoppingOpen}
+        onClose={() => setShoppingOpen(false)}
+        title="Shopping List"
+        subtitle="Items to restock to cover your pending orders and production targets."
+        size="lg"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setShoppingOpen(false)}>Close</Button>
+          </div>
+        }
+      >
+        {allShortfalls.length > 0 ? (
+          <ul className="divide-y divide-gray-100 border border-red-100 rounded-xl overflow-hidden max-h-[60vh] overflow-y-auto">
+            {allShortfalls.map((item, idx) => (
+              <li key={`${item.name}-${item.unit}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
+                <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{roundQty(item.shortage)} {item.unit}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-center text-sm text-brand-400 py-6">Nothing to restock right now.</p>
+        )}
+      </Modal>
+
+      {/* PRODUCTION FORMULA MODAL */}
       <Modal
         isOpen={modalOpen}
         onClose={() => !isSaving && setModalOpen(false)}
-        title={editRecipe ? `Edit Recipe — ${editRecipe.product}` : 'Add New Recipe'}
-        subtitle="Set the mix and exact ingredient amounts per batch."
+        title={editRecipe ? `Edit Formula — ${editRecipe.product}` : 'Add New Formula'}
+        subtitle="Set the recipe and product materials needed per batch."
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button variant="primary" disabled={isSaving} onClick={handleSave}>
-              {isSaving ? 'Saving...' : editRecipe ? 'Save Changes' : 'Save Recipe'}
+              {isSaving ? 'Saving...' : editRecipe ? 'Save Changes' : 'Save Formula'}
             </Button>
           </div>
         }
       >
         <div className="space-y-5">
-          {/* SECTION 1: BASIC RECIPE DETAILS */}
+          {/* SECTION 1: BASIC FORMULA DETAILS */}
           <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
               <Tag size={13} className="text-brand-500" />
-              <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">1. Recipe Details</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">1. Formula Details</span>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -791,12 +818,12 @@ export default function RecipeTab() {
             </div>
           </div>
 
-          {/* SECTION 2: INGREDIENTS (raw only) */}
+          {/* SECTION 2: RECIPE (raw ingredients only) */}
           <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-brand-100">
               <div className="flex items-center gap-1.5">
                 <Package size={13} className="text-brand-500" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Ingredients</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Recipe</span>
               </div>
               <span className="text-[11px] text-brand-400 font-semibold">{rows.length} {rows.length === 1 ? 'item' : 'items'} added</span>
             </div>
@@ -876,13 +903,13 @@ export default function RecipeTab() {
             </div>
           </div>
 
-          {/* SECTION 3: ADD-ONS (materials only, e.g. packaging for bundle products) */}
+          {/* SECTION 3: PRODUCT MATERIALS (materials only, e.g. boxes / packaging needed to produce the product) */}
           <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-brand-100">
               <div className="flex items-center gap-1.5">
                 <Package size={13} className="text-brand-500" />
-                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">3. Add-ons</span>
-                <span className="text-[10px] font-semibold text-brand-300">(optional — materials for bundles)</span>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">3. Product Materials</span>
+                <span className="text-[10px] font-semibold text-brand-300">(optional — boxes, packaging, etc.)</span>
               </div>
               <span className="text-[11px] text-brand-400 font-semibold">{addonRows.length} {addonRows.length === 1 ? 'item' : 'items'} added</span>
             </div>
@@ -890,7 +917,7 @@ export default function RecipeTab() {
             <div className="space-y-2.5">
               {addonRows.map((row, i) => {
                 const rowItem = inventoryById[row.itemId];
-                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'add-on'}` }) : null;
+                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'material'}` }) : null;
 
                 return (
                   <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
@@ -955,12 +982,12 @@ export default function RecipeTab() {
                 onClick={() => setAddonRows(prev => [...prev, { itemId: '', qty: '', unit: '' }])}
                 className="w-full border border-dashed border-brand-300 hover:border-brand-500 bg-brand-50/40 hover:bg-brand-50 text-brand-600 font-bold py-2 text-xs rounded-lg transition-all flex items-center justify-center gap-1 mt-2"
               >
-                <Plus size={13} /> Add Add-on
+                <Plus size={13} /> Add Material
               </button>
 
               {!addonRows.length && (
                 <p className="text-[11px] text-brand-300 text-center py-1">
-                  No add-ons yet — packaging or other materials for bundle products go here, deducted from stock the same way when a batch is produced.
+                  No product materials yet — boxes, packaging, or other materials needed to produce this product go here, deducted from stock the same way when a batch is produced.
                 </p>
               )}
             </div>
@@ -1002,13 +1029,13 @@ export default function RecipeTab() {
         variant="primary"
       />
 
-      {/* DELETE RECIPE CONFIRMATION MODAL */}
+      {/* DELETE FORMULA CONFIRMATION MODAL */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)}
         onConfirm={handleDeleteRecipe}
-        title="Delete Recipe"
-        message={`Delete the recipe for "${deleteTarget?.product}"?`}
+        title="Delete Formula"
+        message={`Delete the formula for "${deleteTarget?.product}"?`}
         confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
         variant="danger"
       />
