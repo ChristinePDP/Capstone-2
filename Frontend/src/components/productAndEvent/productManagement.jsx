@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Edit2, Trash2, X, Search, Package, Loader2 } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
@@ -276,6 +276,7 @@ function ProductCard({ product, onEdit, onDelete }) {
 // ─────────────────────────────────────────────────────────────
 export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenHandled } = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -379,6 +380,17 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenAdd]);
 
+  // Galing sa Promo Bundles page (pagkatapos mag-add/edit ng Package, o nag-click
+  // ng category tab): buksan agad ang tamang category tab dito.
+  useEffect(() => {
+    const target = location.state?.category;
+    if (!target) return;
+    if (CATEGORIES.includes(target)) setCategory(target);
+    if (location.state?.toast) showToast(location.state.toast);
+    navigate(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
   const handleSaveSuccess = async () => {
     await fetchProducts(true);
     showToast(editProduct?.id ? 'Product updated.' : 'Product added.');
@@ -427,7 +439,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const confirmDeleteBundle = async () => {
     try {
-      const res = await fetch(`${BUNDLES_API}/${deleteBundleTarget.id}`, { method: 'DELETE' });
+      const res = await fetch(`${BUNDLES_API}/${deleteBundleTarget.id}`, { method: 'DELETE', credentials: 'include' });
       const result = await res.json().catch(() => ({}));
       if (!res.ok || result.success === false) {
         throw new Error(result.message || result.error || 'Failed to delete bundle.');

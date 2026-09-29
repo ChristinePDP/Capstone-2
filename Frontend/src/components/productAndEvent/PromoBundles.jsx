@@ -321,7 +321,7 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
         {!bundle.event_tag && (
           <div className="absolute top-2 left-2">
             <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest bg-white text-[#3B1F0A] px-2 sm:px-2.5 py-1 rounded-full shadow-sm">
-              <Tag size={10} /> Bundle
+              <Tag size={10} /> {bundle.category === 'Package' ? 'Package' : 'Bundle'}
             </span>
           </div>
         )}
@@ -417,8 +417,12 @@ const emptyForm = {
   // Package mode lang (tingnan ang Productmodal.jsx dati):
   price: '',
   packageItems: [], // Holds { productId, name, quantity }
-  dailyLimit: 0, // Package mode lang — same "Pre-Order Limits" feature as Productmodal.jsx
+  // Order Type — same choices as Productmodal.jsx; applies to both Bundle and Package.
+  orderType: 'Both',
+  dailyLimit: 0, // Pre-Order Limits — Bundle and Package, same feature as Productmodal.jsx
 };
+
+const ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
 
 function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
   const [form, setForm] = useState(emptyForm);
@@ -437,6 +441,8 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   const [pendingPackageProductId, setPendingPackageProductId] = useState('');
   const [pendingPackageQty, setPendingPackageQty] = useState(1);
   const isEditingPackage = Boolean(editPackageProduct?.id) || (bundle?.category === 'Package' && Boolean(bundle?.id));
+  // Anumang existing row (Bundle man o Package) — para sa title/button labels.
+  const isEditing = Boolean(bundle?.id || editPackageProduct?.id);
 
   // ── Pre-Order Limits (category === 'Package') ──────────────────────
   // Same toggle + "Default Daily Capacity" + "Date Exceptions" UI as the
@@ -484,6 +490,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           bundle_name: bundle.bundle_name || '',
           custom_image_url: bundle.custom_image_url || '',
           is_active: bundle.is_active ?? true,
+          orderType: bundle.order_type || 'Both',
           price: bundle.discounted_price ?? bundle.bundle_price ?? '',
           packageItems: initialPackageItems,
           dailyLimit: initialDailyLimit,
@@ -497,6 +504,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           bundle_name: editPackageProduct.name || '',
           custom_image_url: editPackageProduct.image_url || '',
           is_active: editPackageProduct.is_active ?? true,
+          orderType: editPackageProduct.order_type || 'Both',
           price: editPackageProduct.price ?? '',
           packageItems: initialPackageItems,
           dailyLimit: initialDailyLimit,
@@ -518,7 +526,11 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           start_day: bundle.start_day || 1,
           end_month: bundle.end_month || 12,
           end_day: bundle.end_day || 31,
+          orderType: bundle.order_type || 'Both',
+          dailyLimit: Number(bundle.daily_limit || 0),
         });
+        setDailyLimitEnabled(Number(bundle.daily_limit || 0) > 0);
+        setExceptions(bundle.date_exceptions || bundle.dateExceptions || []);
       } else {
         setForm(emptyForm);
         setDailyLimitEnabled(false);
@@ -725,12 +737,16 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       }, {});
 
       const payload = {
+        category: 'Bundle',
         bundle_name: form.bundle_name.trim(),
         product_ids: cleanProductIds, 
         bundle_options: bundleOptions, 
         discounted_price: computedPrice,
         custom_image_url: form.custom_image_url || null,
         is_active: form.is_active,
+        order_type: form.orderType,
+        daily_limit: dailyLimitEnabled ? Number(form.dailyLimit) : 0,
+        dateExceptions: dailyLimitEnabled ? exceptions : [],
         event_tag: form.availabilityMode === 'event' ? (form.event_tag || null) : null,
         start_month: form.availabilityMode === 'dates' ? Number(form.start_month) : null,
         start_day: form.availabilityMode === 'dates' ? Number(form.start_day) : null,
@@ -787,6 +803,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         price: Number(form.price),
         custom_image_url: form.custom_image_url || null,
         is_active: form.is_active,
+        order_type: form.orderType,
         package_items: cleanPackageItems,
         daily_limit: dailyLimitEnabled ? Number(form.dailyLimit) : 0,
         dateExceptions: dailyLimitEnabled ? exceptions : [],
@@ -795,7 +812,9 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       // `bundle` carries the row being edited (category 'Package' or
       // 'Bundle' — both come through the same prop now). `editPackageProduct`
       // is a legacy fallback that should no longer trigger in practice.
-      const editId = (bundle?.category === 'Package' ? bundle.id : null) || editPackageProduct?.id || null;
+      // Kahit Bundle ang orihinal na category, i-UPDATE pa rin ang parehong row
+      // (hindi gagawa ng bago) — para gumana ang Bundle → Package na pagpapalit.
+      const editId = bundle?.id || editPackageProduct?.id || null;
       const isUpdate = Boolean(editId);
       const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${editId}` : ''}`, {
         method: isUpdate ? 'PUT' : 'POST',
@@ -820,17 +839,91 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   };
 
   // Category — chooses whether this is a discount Bundle or a stock-deducting
-  // Package. Locked once the record already exists, since a saved Bundle and a
-  // saved Package live in different tables and can't be converted.
+  // Package. Puwede na itong palitan kahit Edit, dahil pareho na silang nasa
+  // promo_bundles table (category column lang ang pagitan). Ang name, image
+  // at active status ay dinadala; ang mga field na para sa kabilang category
+  // lang ang nire-reset.
   const categorySelect = (
     <Select
       label="Category"
       value={form.category}
-      onChange={e => setForm(prev => ({ ...emptyForm, category: e.target.value }))}
-      disabled={Boolean(bundle?.id) || isEditingPackage}
+      onChange={e => {
+        const nextCategory = e.target.value;
+        setFormError(null);
+        setForm(prev => ({
+          ...emptyForm,
+          category: nextCategory,
+          bundle_name: prev.bundle_name,
+          custom_image_url: prev.custom_image_url,
+          is_active: prev.is_active,
+          orderType: prev.orderType,
+          dailyLimit: prev.dailyLimit,
+        }));
+      }}
     >
       {BUNDLE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
     </Select>
+  );
+
+  // Pre-Order Limits card — shared by Bundle and Package (same UI/fields as
+  // the "Pre-Order Limits" card in Productmodal.jsx).
+  const preOrderLimitsCard = (
+    <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+      <div className="flex items-center gap-3 mb-2">
+        <input
+          type="checkbox"
+          id="preOrderLimitToggle"
+          checked={dailyLimitEnabled}
+          onChange={e => {
+            const enabled = e.target.checked;
+            setDailyLimitEnabled(enabled);
+            if (!enabled) setForm(prev => ({ ...prev, dailyLimit: 0 }));
+            else if (Number(form.dailyLimit) <= 0) setForm(prev => ({ ...prev, dailyLimit: 1 }));
+          }}
+          className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
+        />
+        <label htmlFor="preOrderLimitToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer">Pre-Order Limits</label>
+      </div>
+      <p className="text-xs text-[#8A7264] mb-4">
+        Set maximum order capacities per day or assign custom date exceptions.
+      </p>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
+        <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+          <Input
+            label="Default Daily Capacity (Slots)"
+            type="number"
+            min="0"
+            disabled={!dailyLimitEnabled}
+            value={form.dailyLimit}
+            onChange={e => setForm(prev => ({ ...prev, dailyLimit: e.target.value }))}
+            placeholder="0"
+          />
+        </div>
+
+        <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
+          <div className="flex flex-row items-center gap-2 mb-3 w-full">
+            <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} disabled={!dailyLimitEnabled} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB]" />
+            <input type="number" min="0" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} disabled={!dailyLimitEnabled} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
+          </div>
+          <button type="button" onClick={addException} disabled={!dailyLimitEnabled} className="w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white hover:bg-[#F5EFEB] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+            + Add Date Exception
+          </button>
+          {exceptions.length > 0 && (
+            <div className="mt-3 max-h-32 overflow-y-auto pr-1 scrollbar-thin flex flex-col gap-1.5">
+              {exceptions.map(ex => (
+                <div key={ex.date} className="flex items-center justify-between text-xs font-semibold text-[#3B1F0A] py-2 px-3 bg-white border border-[#DED4CC] rounded-xl">
+                  <span>{ex.date}</span>
+                  <span>{ex.slots} slots</span>
+                  <button type="button" onClick={() => removeException(ex.date)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 
   return (
@@ -839,8 +932,8 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       onClose={onClose}
       title={
         form.category === 'Package'
-          ? (isEditingPackage ? 'Edit Package' : 'Add Package')
-          : (bundle?.id ? 'Edit Promo Bundle' : 'Add Promo Bundle')
+          ? (isEditing ? 'Edit Package' : 'Add Package')
+          : (isEditing ? 'Edit Promo Bundle' : 'Add Promo Bundle')
       }
       footer={
         <div className="flex justify-end gap-3">
@@ -848,8 +941,8 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           <Button variant="dark" onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
             {form.category === 'Package'
-              ? (isEditingPackage ? 'Save Changes' : 'Create Package')
-              : (bundle?.id ? 'Save Changes' : 'Create Bundle')}
+              ? (isEditing ? 'Save Changes' : 'Create Package')
+              : (isEditing ? 'Save Changes' : 'Create Bundle')}
           </Button>
         </div>
       }
@@ -900,14 +993,17 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
               </div>
 
               <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
+                    {form.category === 'Package' ? 'Package Name' : 'Bundle Name'}
+                  </label>
+                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
-                      {form.category === 'Package' ? 'Package Name' : 'Bundle Name'}
-                    </label>
-                    <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
-                  </div>
                   {categorySelect}
+                  <Select label="Order Type" value={form.orderType} onChange={e => setForm(prev => ({ ...prev, orderType: e.target.value }))}>
+                    {ORDER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </Select>
                 </div>
 
                 {form.category === 'Package' ? (
@@ -1019,65 +1115,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
             </div>
           </div>
 
-          {/* Pre-Order Limits — Package category lang, same UI/fields as the
-              "Pre-Order Limits" card sa Productmodal.jsx (Default Daily
-              Capacity + Date Exceptions). */}
-          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-            <div className="flex items-center gap-3 mb-2">
-              <input
-                type="checkbox"
-                id="packageLimitToggle"
-                checked={dailyLimitEnabled}
-                onChange={e => {
-                  const enabled = e.target.checked;
-                  setDailyLimitEnabled(enabled);
-                  if (!enabled) setForm(prev => ({ ...prev, dailyLimit: 0 }));
-                  else if (Number(form.dailyLimit) <= 0) setForm(prev => ({ ...prev, dailyLimit: 1 }));
-                }}
-                className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
-              />
-              <label htmlFor="packageLimitToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer">Pre-Order Limits</label>
-            </div>
-            <p className="text-xs text-[#8A7264] mb-4">
-              Set maximum order capacities per day or assign custom date exceptions.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
-              <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-                <Input
-                  label="Default Daily Capacity (Slots)"
-                  type="number"
-                  min="0"
-                  disabled={!dailyLimitEnabled}
-                  value={form.dailyLimit}
-                  onChange={e => setForm(prev => ({ ...prev, dailyLimit: e.target.value }))}
-                  placeholder="0"
-                />
-              </div>
-
-              <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
-                <div className="flex flex-row items-center gap-2 mb-3 w-full">
-                  <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} disabled={!dailyLimitEnabled} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB]" />
-                  <input type="number" min="0" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} disabled={!dailyLimitEnabled} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
-                </div>
-                <button type="button" onClick={addException} disabled={!dailyLimitEnabled} className="w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white hover:bg-[#F5EFEB] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                  + Add Date Exception
-                </button>
-                {exceptions.length > 0 && (
-                  <div className="mt-3 max-h-32 overflow-y-auto pr-1 scrollbar-thin flex flex-col gap-1.5">
-                    {exceptions.map(ex => (
-                      <div key={ex.date} className="flex items-center justify-between text-xs font-semibold text-[#3B1F0A] py-2 px-3 bg-white border border-[#DED4CC] rounded-xl">
-                        <span>{ex.date}</span>
-                        <span>{ex.slots} slots</span>
-                        <button type="button" onClick={() => removeException(ex.date)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          {preOrderLimitsCard}
           </>
         ) : (
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
@@ -1143,6 +1181,9 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           </div>
         </div>
         )}
+
+        {/* Pre-Order Limits — Bundle (Package renders its own above) */}
+        {form.category !== 'Package' && preOrderLimitsCard}
 
         {/* 3. Availability UI Section — Bundle only; Packages don't have this. */}
         {form.category !== 'Package' && (
@@ -1358,6 +1399,14 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
     await fetchAll(true); // force: kailangan bagong datos, hindi stale cache
     const { category, isUpdate } = saveInfo;
     const noun = category === 'Package' ? 'Package' : 'Bundle';
+    // Ang Package ay hindi nakalista sa Promo Bundle tab — dalhin sa Package
+    // tab ng Product Catalog kung saan talaga ito nakatira.
+    if (category === 'Package') {
+      navigate('/productAndEvent', {
+        state: { category: 'Package', toast: isUpdate ? 'Package updated.' : 'Package added.' },
+      });
+      return;
+    }
     showToast(isUpdate ? `${noun} updated.` : `${noun} added.`);
   };
 
@@ -1400,7 +1449,7 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
         <CategoryTabs
           options={TAB_ITEMS}
           activeItem="Promo Bundle"
-          onCategoryClick={() => navigate('/productAndEvent')}
+          onCategoryClick={(opt) => navigate('/productAndEvent', { state: { category: opt } })}
         />
       </div>
 

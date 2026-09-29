@@ -420,15 +420,6 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Module-level cache — "nabubuhay" ito habang naka-open ang tab (hindi
-// ito React state, kaya HINDI ito nawawala kada mag-unmount/mag-mount
-// ulit ang Home, hal. paglipat papunta sa Menu tapos balik). Sa unang
-// pagtawag lang dito talaga tatakbo ang fetch; sa susunod na mga pagtawag
-// (bagong mount ng Home), ibabalik na lang nito yung parehong promise na
-// nasa cache na — kaya isang request lang sa buong buhay ng tab, hindi na
-// paulit-ulit kada balik-balik sa Home.
-// ─────────────────────────────────────────────────────────────
 let configFetchPromise = null;
 function getConfig() {
   if (!configFetchPromise) {
@@ -448,14 +439,18 @@ function getConfig() {
 let bundlesFetchPromise = null;
 function getBundles() {
   if (!bundlesFetchPromise) {
-    // `visibleOnly=true`: ipinapasa lang ng backend ang mga bundle na
-    // is_active AT nasa loob ng aktwal na availability window nito ngayon —
-    // event-linked man (base sa live na occasion) o may specific dates.
-    // Kaya hindi na lumalabas dito agad ang isang "Christmas Bundle" bago pa
-    // man magsimula ang Pasko.
-    bundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`)
+    // FIX: Idinagdag ang `&category=Bundle` parameter dito upang i-filter
+    // na agad ng backend ang mga item at ibalik lamang ang mga Promo Bundle
+    // at hindi isama ang mga Package.
+    bundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true&category=Bundle`)
       .then(res => res.json())
-      .then(data => (data.success && Array.isArray(data.data)) ? data.data : [])
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+           // Karagdagang filter checking sa frontend para masigurado
+           return data.data.filter(b => (b.category || 'Bundle') === 'Bundle');
+        }
+        return [];
+      })
       .catch(err => {
         console.error('Failed to load promo bundles:', err);
         return [];
@@ -559,7 +554,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* 2. Promo Bundles Section — hidden entirely once loading finishes if there are 0 available bundles */}
+        {/* 2. Promo Bundles Section */}
         {(isLoadingBundles || bundles.length > 0) && (
           <section className="w-full bg-[#F5EFEB] py-10 sm:py-14 relative overflow-hidden border-b border-[#EAE4E0] min-h-[calc(100svh-70px)] lg:min-h-0 lg:h-[calc(100vh-76px)] flex items-center">
             <div className="max-w-[1300px] mx-auto px-5 sm:px-8 w-full relative z-10 flex flex-col lg:flex-row items-center gap-8 lg:gap-12">

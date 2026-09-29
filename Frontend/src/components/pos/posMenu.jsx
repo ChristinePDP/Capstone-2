@@ -6,11 +6,6 @@ import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake,
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_FILE_SIZE_LABEL = '5MB';
 
-// FIX: dating naka-loob ito sa useEffect ng component, kaya tuwing
-// mag-uunmount/mag-remount ang PosMenu (kasabay ng PosPage tuwing lilipat
-// ka papunta sa POS page) ay bagong fetch ulit sa backend. Module-scope
-// variable ito ngayon (sa labas ng component) kaya minsan lang talaga ito
-// magre-request habang bukas ang session.
 let posBundlesCache = null;
 let posBundlesPromise = null;
 
@@ -44,8 +39,7 @@ async function fetchPosBundles() {
 const BASE_CATEGORIES = ['All', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
 
 // ─────────────────────────────────────────────────────────────
-// Icon for each category tab (used on mobile where labels are hidden) —
-// parehong mapping gaya ng customer-facing Menu.jsx.
+// Icon for each category tab (used on mobile where labels are hidden)
 // ─────────────────────────────────────────────────────────────
 const CATEGORY_ICONS = {
   'All': LayoutGrid,
@@ -57,16 +51,6 @@ const CATEGORY_ICONS = {
 };
 const getCategoryIcon = (cat) => CATEGORY_ICONS[cat] || Tag;
 
-// ─────────────────────────────────────────────────────────────
-// Same dynamic bundle logic ginagamit ng customer-facing Menu.jsx —
-// kinokopya dito para may Promo Bundle rin ang POS: fetch mula sa
-// product_bundle table (parehong endpoint, `/online-ordering/products/bundles`),
-// i-explode bawat bundle sa mga component product niya, at gawan ng sariling
-// "Promo Bundle" category kapag may active bundles.
-// ─────────────────────────────────────────────────────────────
-
-// Builds "Product A (Option, Option) + Product B" text for a bundle — same
-// logic as the admin Promo Bundles card at ang customer Menu.jsx.
 function getBundleDescription(bundle) {
   const products = bundle.products || [];
   const bundleOptions = bundle.bundle_options || {};
@@ -82,16 +66,12 @@ function getBundleDescription(bundle) {
   }).join(' + ');
 }
 
-// I-de-derive ang order_type ng isang BUNDLE base sa mga products na talagang
-// laman nito — kapag may kahit isang 'Pre-order' na product sa loob, dapat
-// 'Pre-order' na rin ang buong bundle kahit may ibang 'Pick-up Today'/'Both'.
 function resolveBundleOrderType(products = []) {
   if (products.some(p => p.order_type === 'Pre-order')) return 'Pre-order';
   if (products.some(p => p.order_type === 'Pick-up Today')) return 'Pick-up Today';
   return 'Both';
 }
 
-// Bundle Image Grid — parehong component gaya ng sa Menu.jsx
 function BundleMenuImage({ products = [], customImageUrl }) {
   if (customImageUrl) {
     return <img src={customImageUrl} alt="Bundle" className="w-full h-full object-cover transition-transform group-hover:scale-105" />;
@@ -148,29 +128,22 @@ function BundleMenuImage({ products = [], customImageUrl }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Quantity tracking helpers — parehong logic gaya ng sa customer-facing
-// Menu.jsx. Dating order_type ('Pick-up Today'/'Both') lang ang tinitignan
-// dito, kaya Pre-order products (na may daily_limit) ay walang badge, walang
-// sold-out state, at hindi nasasama sa sorting. Ngayon parehong daily_limit
-// (Pre-order slots) at stock_quantity (Pick-up Today produced stock) ang
-// sinusuri: kung may laman (di null, > 0) ang daily_limit, ITO ang
-// babasahin kahit may laman din ang stock_quantity; kung wala, babalik sa
-// stock_quantity.
-// ─────────────────────────────────────────────────────────────
 function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
 function isQuantityTracked(item, orderType = 'Buy Now') {
   if (!item) return false;
-  if (item.type === 'bundle') return item.is_tracked; 
+  if (item.type === 'bundle' || item.type === 'package') return true; 
   if (item.order_type === 'Pre-order' || orderType === 'Pre-Order') return true;
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
-  if (item.type === 'bundle') return item.available_stock;
+  if (item.type === 'bundle' || item.type === 'package') {
+    if (orderType === 'Buy Now') return 0; // Kung Buy Now mode sa POS, walang stock ang Pre-order bundle/package
+    return Number(item.daily_limit ?? item.available_stock ?? 0);
+  }
   if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
@@ -181,8 +154,6 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
   const [imageFile, setImageFile] = useState(null);
   const [imageError, setImageError] = useState('');
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
-  
-  // BAGO: State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
 
   const handleImagePick = (file) => {
@@ -230,14 +201,12 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 
   const handleAnswerChange = (label, value) => {
     setSlipAnswers(prev => ({ ...prev, [label]: value }));
-    // Aalisin ang error kapag nag-input na si user
     setErrors(prev => ({ ...prev, [label]: false }));
   };
 
   const handleAdd = () => {
     const newErrors = {};
 
-    // 1. Validation para sa Product Options
     if (isVariable && !allGroupsSelected) {
       priceGroups.forEach(g => {
         if (!selectedPriceOptions[g.name]) {
@@ -250,11 +219,9 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
       return;
     }
 
-    // 2. Validation para sa Customization Details
     if (hasFields) {
       product.order_slip_fields.forEach(field => {
         const isOptional = field.optional === true || field.isOptional === true || field.required === false;
-        
         if (!isOptional) {
           const answer = slipAnswers[field.label];
           if (!answer || answer.trim() === '') {
@@ -264,15 +231,11 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
       });
     }
 
-    // 3. I-set ang errors kung meron, at pigilan ang pag-add
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    // RESTORED: exceed-limit check bago i-finalize ang pag-add — kailangan
-    // dito, hindi lang sa grid, dahil dumadaan dito ang mga variable-price
-    // at customizable na product bago pumasok sa cart.
     if (checkAndWarnLimit && !checkAndWarnLimit(product, 1)) return;
 
     onAddToCart({
@@ -456,14 +419,11 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 }
 
 // --- BUNDLE STEPPER MODAL ---
-// Parehong stepper-per-component UX gaya ng Menu.jsx's BundleModal — dinadaan
-// dito ang cashier sa bawat product na laman ng bundle para masagutan ang
-// order slip fields nito bago ma-add sa cart bilang isang bundle line.
 function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
-  const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
-  const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
+  const [bundleImages, setBundleImages] = useState({});
+  const [bundleImageErrors, setBundleImageErrors] = useState({});
   const products = bundle.products || [];
 
   if (!bundle || products.length === 0) return null;
@@ -507,7 +467,6 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
     if (!isLastStep) {
       setCurrentStep(prev => prev + 1);
     } else {
-      // RESTORED: exceed-limit check bago i-finalize ang buong bundle.
       if (checkAndWarnLimit && !checkAndWarnLimit(bundle, 1)) return;
 
       const hasAnyImage = Object.values(bundleImages).some(Boolean);
@@ -660,19 +619,11 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
 }
 
 // --- PACKAGE STEPPER MODAL ---
-// Parehong stepper-per-component UX gaya ng PosBundleModal sa itaas —
-// dinadaan dito ang cashier sa bawat product na LAMAN ng "Package" (hal.
-// cake, cupcake, tarp) para masagutan ang order slip fields ng bawat isa.
-// Ang package mismo ay walang sariling order_slip_fields (tingnan ang admin
-// Productmodal.jsx — tinatago ang section na iyon kapag category === 'Package'),
-// kaya ang mga fields ng bawat COMPONENT (`pkg.package_components`, na
-// hinydrate na sa PosMenu component list sa ibaba) ang ipinapakita dito,
-// tulad ng ginagawa sa PosBundleModal gamit ang `bundle.products`.
 function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [packageAnswers, setPackageAnswers] = useState({});
-  const [packageImages, setPackageImages] = useState({}); // { [productId]: File }
-  const [packageImageErrors, setPackageImageErrors] = useState({}); // { [productId]: string }
+  const [packageImages, setPackageImages] = useState({});
+  const [packageImageErrors, setPackageImageErrors] = useState({});
   const components = pkg.package_components || [];
 
   if (!pkg || components.length === 0) return null;
@@ -725,7 +676,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
         price: pkg.price,
         type: 'package',
         packageId: pkg.id,
-        products: components, // para sa cart display, gaya ng bundle.products
+        products: components,
         selected_price_options: null,
         order_slip_details: packageAnswers,
         inspiration_image: hasAnyImage ? packageImages : null
@@ -876,22 +827,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   const [bundles, setBundles] = useState([]);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const productListRef = useRef(null);
-
-  // ─────────────────────────────────────────────────────────────
-  // RESTORED: exceed-limit warning. Ito yung nawalang function — dating
-  // walang paraan ang PosMenu para malaman kung ilan na ang isang tracked
-  // product (daily_limit / stock_quantity / available_stock) na laman na
-  // ng cart, kaya patuloy pa ring naa-add ("Add to Cart" sa grid, sa
-  // PosProductModal, at sa PosBundleModal) kahit lampas na sa available
-  // stock. Kailangan i-pasa ang `cart` prop papunta dito galing sa parent
-  // (PosPage) para gumana ito.
-  //
-  // FIX (toast): iisang LOCAL na toast bar (walang bagong/hiwalay na
-  // file) — ginagamit na ito para sa stock-limit warning DITO at para
-  // sa "required fields" na dating alert() sa loob ng PosBundleModal
-  // (ipinapasa lang bilang prop pababa dito, gaya ng checkAndWarnLimit).
-  // ─────────────────────────────────────────────────────────────
-  const [toast, setToast] = useState(null); // { message, type }
+  const [toast, setToast] = useState(null); 
   const toastTimerRef = useRef(null);
 
   const showToast = (message, type = 'error') => {
@@ -907,14 +843,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   }, []);
 
   const showLimitToast = (message) => showToast(message, 'error');
-
   const getCartQtyForId = (id) => cart.filter(i => i.id === id).reduce((sum, i) => sum + i.qty, 0);
 
-  // Bumabalik ng `true` kung pwede pang idagdag ang `addQty`. Kung
-  // malalampasan na nito ang available limit (kasama na ang dati nang
-  // laman ng cart para sa parehong product/bundle id), nagpapakita ng
-  // warning toast at bumabalik ng `false` — dapat itigil ng caller ang
-  // pag-add. Ginagamit ito sa lahat ng entry point papunta sa cart.
   const checkAndWarnLimit = (item, addQty = 1) => {
     if (!isQuantityTracked(item, orderType)) return true;
     const limit = getQuantityLimit(item, orderType);
@@ -944,16 +874,6 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     productListRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Fetch mula sa parehong public bundles endpoint na ginagamit ng
-  // customer-facing Menu.jsx — para makita rin ng cashier ang mga
-  // active Promo Bundle sa POS, kasama ang lahat ng laman nito.
-  //
-  // FIX: dati, direktang `fetch()` ito tuwing mag-mo-mount ang PosMenu —
-  // kasabay ng PosPage, ibig sabihin TUWING lilipat papasok ang cashier sa
-  // POS page ay bago na namang request papunta sa backend. Dumadaan na
-  // ngayon sa `getPosBundlesCached` (posDataCache.js), na nag-iimbak sa
-  // module scope — kaya minsan lang talaga ito tatawag sa backend habang
-  // bukas ang session, hindi tuwing nag-navigate papunta rito.
   useEffect(() => {
     let isMounted = true;
     fetchPosBundles().then(data => {
@@ -962,48 +882,44 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     return () => { isMounted = false; };
   }, []);
 
-  // FIX: dating basta ipinapasa ang "Package" products as-is papunta sa
-  // grid, kaya walang paraan ang PosPackageModal (sa itaas) na malaman ang
-  // order_slip_fields/allow_file_upload ng bawat COMPONENT ng package — ang
-  // `package_items` mula sa backend ay minimal lang ({ product_id, quantity,
-  // name }). Dito na natin ini-hydrate ang bawat package sa
-  // `package_components`: ang FULL product record ng bawat component,
-  // kinuha mula sa `products` prop — parehong pattern gaya ng
-  // `bundleProducts` sa ibaba para sa Promo Bundle.
-  const hydratedProducts = useMemo(() => {
-    return products.map(p => {
-      if (p.category !== 'Package' || !Array.isArray(p.package_items) || p.package_items.length === 0) {
-        return p;
-      }
-      const packageComponents = p.package_items
-        .map(pi => products.find(cp => cp.id === pi.product_id))
-        .filter(Boolean);
-
-      return {
-        ...p,
-        type: 'package',
-        packageId: p.id,
-        package_components: packageComponents,
-      };
-    });
-  }, [products]);
-
-  // I-map ang raw bundle rows papunta sa parehong shape na ginagamit sa
-  // product grid (type: 'bundle', products: [...]) — same transform gaya ng
-  // Menu.jsx, gamit ang `products` prop (regular products, kasama ang
-  // available_stock) para ma-resolve ang bundle components.
   const bundleItems = useMemo(() => {
     return bundles
       .filter(b => b.is_active && b.is_within_date_range !== false)
       .map(b => {
         const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
-        const bundleProducts = (b.product_ids || []).map(id => products.find(p => p.id === id)).filter(Boolean);
 
-        const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-        const isTracked = trackedComponents.length > 0;
-        const bundleStock = isTracked
-          ? Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0))
-          : 999;
+        if (b.category === 'Package') {
+           const packageComponents = (b.package_items || [])
+              .map(pi => {
+                  const cp = products.find(p => String(p.id) === String(pi.product_id));
+                  return cp ? { ...cp, package_qty: pi.quantity } : null;
+              })
+              .filter(Boolean);
+
+           return {
+              ...b,
+              id: `package-${b.id}`,
+              name: b.bundle_name,
+              category: 'Package',
+              type: 'package',
+              packageId: b.id,
+              package_components: packageComponents,
+              image_url: b.custom_image_url || fallbackImage,
+              custom_image_url: b.custom_image_url,
+              price: Number(b.bundle_price || b.discounted_price || 0),
+              original_price: Number(b.original_total || 0),
+              order_type: b.order_type || 'Pre-order',
+              pricing_mode: 'fixed',
+              available_stock: Number(b.daily_limit || 0),
+              is_tracked: true,
+              order_slip_fields: [],
+              price_groups: [],
+              price_matrix: []
+           };
+        }
+
+        const bundleProducts = (b.product_ids || []).map(id => products.find(p => String(p.id) === String(id))).filter(Boolean);
+        const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
 
         return {
           id: `bundle-${b.id}`,
@@ -1017,12 +933,10 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           image_url: b.custom_image_url || fallbackImage,
           custom_image_url: b.custom_image_url,
           products: bundleProducts,
-          order_type: resolveBundleOrderType(bundleProducts),
+          order_type: bundleOrderType,
           pricing_mode: 'fixed',
-          
-          available_stock: Math.max(0, bundleStock),
-          is_tracked: isTracked,
-          
+          available_stock: Number(b.daily_limit || 0),
+          is_tracked: true,
           type: 'bundle',
           bundleId: b.id,
           order_slip_fields: [],
@@ -1030,11 +944,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           price_matrix: []
         };
       });
-  }, [bundles, products, orderType]);
+  }, [bundles, products]);
 
-  // Bundles ay hindi galing sa `/pos/products?search=` (hiwalay itong
-  // endpoint), kaya i-filter na lang ito sa client side base sa searchQuery,
-  // para tumugma sa filtering na ginagawa na ng backend sa regular products.
   const visibleBundleItems = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
     if (!q) return bundleItems;
@@ -1042,10 +953,15 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   }, [bundleItems, searchQuery]);
 
   const displayItems = useMemo(() => {
-    const items = [...visibleBundleItems, ...hydratedProducts];
-    return items.filter(item => orderTypeFilter === 'All'
-      || (orderTypeFilter === 'Buy Now' ? item.order_type === 'Pick-up Today' : item.order_type === orderTypeFilter));
-  }, [visibleBundleItems, hydratedProducts, orderTypeFilter]);
+    const regularProducts = products.filter(p => p.category !== 'Package');
+    const items = [...visibleBundleItems, ...regularProducts];
+    
+    return items.filter(item => {
+      if (orderTypeFilter === 'All') return true;
+      if (orderTypeFilter === 'Buy Now') return item.order_type === 'Pick-up Today';
+      return item.order_type === orderTypeFilter;
+    });
+  }, [visibleBundleItems, products, orderTypeFilter]);
 
   const categories = useMemo(() => {
     return bundleItems.length > 0
@@ -1058,8 +974,6 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       ? categories.filter(c => c !== 'All') 
       : [activeCategory];
 
-    // Kapag naghahanap at walang tumugmang product sa kahit anong category,
-    // ipakita ang isang centered empty-state message sa halip na blangkong grid.
     const hasAnyMatch = categoriesToRender.some(cat => displayItems.some(p => p.category === cat));
     if (isSearching && !hasAnyMatch) {
       return (
@@ -1079,17 +993,14 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       const catProducts = displayItems.filter(p => p.category === cat);
       if (catProducts.length === 0) return null;
 
-      // --- BAGONG CODE PARA SA SORTING ---
-      // Ihihiwalay natin at ilalagay sa dulo ang mga sold out
       const sortedCatProducts = [...catProducts].sort((a, b) => {
         const isSoldOutA = isQuantityTracked(a, orderType) && getQuantityLimit(a, orderType) <= 0;
         const isSoldOutB = isQuantityTracked(b, orderType) && getQuantityLimit(b, orderType) <= 0;
         
-        if (isSoldOutA && !isSoldOutB) return 1;  // Ilagay si A sa huli
-        if (!isSoldOutA && isSoldOutB) return -1; // Ilagay si B sa huli
-        return 0; // Walang babaguhin sa pwesto kung parehas available o parehas sold out
+        if (isSoldOutA && !isSoldOutB) return 1;  
+        if (!isSoldOutA && isSoldOutB) return -1; 
+        return 0; 
       });
-      // -----------------------------------
 
       return (
         <div key={cat} className="mb-8">
@@ -1102,21 +1013,18 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
               const isStockTracked = isQuantityTracked(p, orderType);
-              // RESTORED: ibinabawas na ngayon ang laman ng cart (getCartQtyForId)
-              // sa available limit, kaya kung, halimbawa, 4 available at 4 na rin
-              // ang laman ng cart, "Sold Out" na agad ang makikita imbes na
-              // patuloy pa rin makaka-add ang cashier.
               const currentStock = Math.max(0, getQuantityLimit(p, orderType) - getCartQtyForId(p.id));
               const isSoldOut = isStockTracked && currentStock <= 0;
               
               const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
               const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
               
-              // Bundles at Packages laging dumadaan sa stepper modal para
-              // makita ang bawat component product — parehong rule gaya ng
-              // Menu.jsx.
               const isBundleOrPackage = isBundle || p.type === 'package';
               const isCustomizable = isBundleOrPackage || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload || isVariable;
+
+              const isMismatchedType = 
+                (orderType === 'Buy Now' && p.order_type === 'Pre-order') ||
+                (orderType === 'Pre-Order' && p.order_type === 'Pick-up Today');
 
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
@@ -1128,9 +1036,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     )}
 
                     {isStockTracked && (
-                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut || (orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
                         <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {isSoldOut ? 'Sold Out' : `${currentStock} Available`}
+                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : isSoldOut ? 'Sold Out' : `${currentStock} Available`}
                         </span>
                       </div>
                     )}
@@ -1172,24 +1080,26 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     </p>
                     <button
                       onClick={() => {
-                        if (isSoldOut) return;
+                        if (isSoldOut || isMismatchedType) return;
                         if (isCustomizable) {
                           setModal(p);
                           return;
                         }
-                        // RESTORED: safety check bago direktang mai-add sa cart
-                        // (hindi dumadaan sa modal ang mga simpleng product).
                         if (!checkAndWarnLimit(p, 1)) return;
                         onAddToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
-                      disabled={isSoldOut}
+                      disabled={isSoldOut || isMismatchedType}
                       className={`w-full py-2 sm:py-2.5 lg:py-2.5 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
-                        isSoldOut
+                        (isSoldOut || isMismatchedType)
                           ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed'
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
                       }`}
                     >
-                      {isSoldOut ? 'Out of Stock' : (isCustomizable ? 'Select Options' : 'Add to Cart')}
+                      {isMismatchedType 
+                        ? (p.order_type === 'Pre-order' ? 'Pre-order Only' : 'Buy Now Only')
+                        : isSoldOut 
+                          ? 'Out of Stock' 
+                          : (isCustomizable ? 'Select Options' : 'Add to Cart')}
                     </button>
                   </div>
                 </div>
@@ -1201,9 +1111,6 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     });
   };
 
-  // Kapag may laman ang search box, palawakin ito nang buo at itago muna ang
-  // category pills row — babalik ito sa dati (naka-shrink ulit ang search,
-  // babalik ang mga pills) kapag na-clear ang text (sa X button o pag-delete).
   const isSearching = (searchQuery || '').trim().length > 0;
 
   return (
@@ -1290,10 +1197,6 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
         <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : null}
 
-      {/* RESTORED: exceed-limit / validation warning toast — parehong
-          style/z-index gaya ng dati (z-[6000]) para lumitaw ito kahit
-          bukas ang PosProductModal/PosBundleModal (z-[4000]). Simpleng
-          banner lang ito, walang backdrop — hindi modal. */}
       {toast && (
         <div
           className={`fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200 ${

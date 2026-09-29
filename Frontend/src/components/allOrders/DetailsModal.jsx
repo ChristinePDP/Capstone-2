@@ -246,11 +246,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
 
   // Special instructions ay nasa order_items.special_instructions (iisang text
   // na inuulit sa bawat row), kaya dine-dedupe para isang beses lang ipakita.
-  const specialInstructions = [...new Set(
-    items
-      .map(it => (it.special_instructions ?? it.specialInstructions ?? '').toString().trim())
-      .filter(Boolean)
-  )];
+  // Fallback: kung nasa order level (order.special_instructions) ang text.
+  const specialInstructions = [...new Set([
+    ...items.map(it => (it.special_instructions ?? it.specialInstructions ?? '').toString().trim()),
+    (order.special_instructions ?? order.specialInstructions ?? '').toString().trim(),
+  ].filter(Boolean))];
 
   // Grouped by Bundle / Package / Standalone Item na kasama na ang specific reference images per component
   const orderSlipCards = (() => {

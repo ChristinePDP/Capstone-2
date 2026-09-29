@@ -369,12 +369,20 @@ export const getAllBundles = async (filters = {}) => {
       )
     );
 
+    // `?category=Bundle` o `?category=Package` — para hiwalay ang dalawa sa
+    // POS/storefront. Walang param = lahat (admin). Lumang rows na walang
+    // category ay 'Bundle'.
+    const wantedCategory = filters.category;
+    const byCategory = (wantedCategory === 'Bundle' || wantedCategory === 'Package')
+      ? bundlesWithPricing.filter(b => (b.category || 'Bundle') === wantedCategory)
+      : bundlesWithPricing;
+
     const visibleOnly = filters.visibleOnly === 'true' || filters.visibleOnly === true;
     if (visibleOnly) {
-      return bundlesWithPricing.filter(b => b.is_active && b.is_within_date_range);
+      return byCategory.filter(b => b.is_active && b.is_within_date_range);
     }
 
-    return bundlesWithPricing;
+    return byCategory;
   } catch (error) {
     throw new Error(`Service Error (getAllBundles): ${error.message}`);
   }
@@ -398,6 +406,10 @@ export const getBundleById = async (id) => {
 // package_items (component products + quantity) at ang presyo mismo
 // (hindi discount %), sa halip na product_ids/bundle_options/event/date
 // availability na ginagamit lang ng Bundle.
+const VALID_ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
+// Iniiwasan ang check-constraint error: kapag invalid/wala ang order_type, 'Both' ang default.
+const normalizeOrderType = (value) => (VALID_ORDER_TYPES.includes(value) ? value : 'Both');
+
 const buildPackageInsertRow = (bundleData) => ({
   category: 'Package',
   bundle_name: bundleData.bundle_name,
@@ -407,6 +419,7 @@ const buildPackageInsertRow = (bundleData) => ({
   custom_image_url: bundleData.custom_image_url || null,
   event_tag: null,
   is_active: bundleData.is_active ?? true,
+  order_type: normalizeOrderType(bundleData.order_type),
   start_month: null,
   start_day: null,
   end_month: null,
@@ -429,9 +442,11 @@ const buildBundleInsertRow = (bundleData) => ({
   start_day: bundleData.start_day || null,
   end_month: bundleData.end_month || null,
   end_day: bundleData.end_day || null,
+  order_type: normalizeOrderType(bundleData.order_type),
   package_items: [],
-  daily_limit: 0,
-  date_exceptions: []
+  // Bundle na rin ay may Pre-Order Limits (daily_limit + date exceptions).
+  daily_limit: bundleData.daily_limit || 0,
+  date_exceptions: Array.isArray(bundleData.dateExceptions) ? bundleData.dateExceptions : []
 });
 
 export const createBundle = async (bundleData) => {
@@ -468,6 +483,7 @@ export const updateBundle = async (id, bundleData) => {
         custom_image_url: bundleData.custom_image_url,
         is_active: bundleData.is_active,
         package_items: bundleData.package_items,
+        order_type: bundleData.order_type !== undefined ? normalizeOrderType(bundleData.order_type) : undefined,
         daily_limit: bundleData.daily_limit,
         date_exceptions: bundleData.dateExceptions,
         // Package rows never carry these — explicitly clear them in case an
@@ -492,7 +508,12 @@ export const updateBundle = async (id, bundleData) => {
         start_month: bundleData.start_month,
         start_day: bundleData.start_day,
         end_month: bundleData.end_month,
-        end_day: bundleData.end_day
+        end_day: bundleData.end_day,
+        order_type: bundleData.order_type !== undefined ? normalizeOrderType(bundleData.order_type) : undefined,
+        daily_limit: bundleData.daily_limit,
+        date_exceptions: bundleData.dateExceptions,
+        // Package-only field — nililinis kapag Package → Bundle ang pinalitan.
+        package_items: []
       };
 
   Object.keys(bundleToUpdate).forEach((key) => {

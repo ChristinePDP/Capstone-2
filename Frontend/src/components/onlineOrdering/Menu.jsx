@@ -101,9 +101,7 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Cart Item Row — collapsible (name+price lang pag closed, buong
-// detalye pag open), may thumbnail preview, at swipe-to-delete
-// (variant="mobile") o plain na "Remove" button (variant="desktop").
+// Cart Item Row
 // ─────────────────────────────────────────────────────────────
 function CartItemRow({
   item, index, changeQty, onRemove, expanded, onToggleExpand,
@@ -113,9 +111,6 @@ function CartItemRow({
   const swipeStartX = useRef(null);
   const replaceInputRef = useRef(null);
 
-  // Pointer Events (hindi lang Touch Events) — gumagana ito parehong sa
-  // totoong touchscreen AT sa ordinaryong mouse-drag (hal. habang nagte-test
-  // sa desktop browser/DevTools na naka-off ang touch emulation).
   const handlePointerDown = (e) => { swipeStartX.current = e.clientX; };
   const handlePointerMove = (e) => {
     if (swipeStartX.current === null) return;
@@ -125,10 +120,6 @@ function CartItemRow({
   };
   const handlePointerUp = () => { swipeStartX.current = null; };
 
-  // Compact gaya ng POS cart: price options lang ang nakalista, tapos
-  // "Includes: ..." (bundle/package) o "Customized" (single item). Ang buong
-  // order slip ay makikita sa Order Summary sa checkout — para hindi humaba
-  // ang cart kapag madami ang customized na items.
   const isMulti = item.type === 'bundle' || item.type === 'package';
   const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof File);
   const displayVal = (v) => (Array.isArray(v) ? v.join(', ') : (v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')));
@@ -139,7 +130,7 @@ function CartItemRow({
 
   const slipKeys = isPlainObject(item.order_slip_details) ? Object.keys(item.order_slip_details) : [];
   const includesText = isMulti && slipKeys.length > 0
-    ? slipKeys.map(prodId => item.products?.find(p => p.id === prodId)?.name || 'Item').join(', ')
+    ? slipKeys.map(prodId => (item.products || item.package_components)?.find(p => String(p.id) === String(prodId))?.name || 'Item').join(', ')
     : null;
   const isCustomized = !isMulti && slipKeys.length > 0;
 
@@ -195,9 +186,6 @@ function CartItemRow({
                   View
                 </button>
               )}
-              {/* Palitan lang ang picture nang direkta rito — hindi na kailangang
-                  ulitin ang buong modal (details, atbp.) para lang baguhin ang image.
-                  Sa ngayon, non-bundle items lang muna (isang File slot). */}
               {!isMulti && onReplaceImage && (
                 <>
                   <button
@@ -250,9 +238,6 @@ function CartItemRow({
     return <div className="pb-4 border-b border-[#F1EBE6] last:border-0 last:pb-0">{content}</div>;
   }
 
-  // Mobile: swipeable wrapper — i-drag pakaliwa para lumabas ang delete button
-  // sa likod (parang Shopee/Lazada), sa halip na palaging kailangang mag-expand
-  // muna bago makapag-delete.
   return (
     <div className="border-b border-[#F1EBE6] last:border-0 pb-4 last:pb-0">
       <div className="grid overflow-hidden rounded-2xl">
@@ -279,18 +264,17 @@ function CartItemRow({
 }
 
 // ─────────────────────────────────────────────────────────────
-// Bundle Stepper Modal (NEW)
+// Bundle Stepper Modal
 // ─────────────────────────────────────────────────────────────
 function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
-  const [bundleImages, setBundleImages] = useState({}); // { [productId]: File }
-  const [bundleImagePreviews, setBundleImagePreviews] = useState({}); // { [productId]: objectURL }
-  const [bundleImageErrors, setBundleImageErrors] = useState({}); // { [productId]: string }
+  const [bundleImages, setBundleImages] = useState({});
+  const [bundleImagePreviews, setBundleImagePreviews] = useState({});
+  const [bundleImageErrors, setBundleImageErrors] = useState({});
+  const [errors, setErrors] = useState({});
+  const products = bundle.products || [];
 
-  // Live thumbnail per bundle component — parehong dahilan sa ProductModal:
-  // gustong makumpirma agad ng customer kung tama ang na-upload niya bago pa
-  // makarating sa Checkout Order Summary.
   useEffect(() => {
     const urls = {};
     Object.entries(bundleImages).forEach(([productId, file]) => {
@@ -301,8 +285,6 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
       Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
     };
   }, [bundleImages]);
-  const [errors, setErrors] = useState({});
-  const products = bundle.products || [];
 
   if (!bundle || products.length === 0) return null;
 
@@ -319,10 +301,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
         [label]: value
       }
     }));
-    setErrors(prev => ({
-      ...prev,
-      [label]: false
-    }));
+    setErrors(prev => ({ ...prev, [label]: false }));
   };
 
   const handleImageChange = (file) => {
@@ -332,10 +311,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
       return;
     }
     setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: '' }));
-    setBundleImages(prev => ({
-      ...prev,
-      [currentProduct.id]: file
-    }));
+    setBundleImages(prev => ({ ...prev, [currentProduct.id]: file }));
   };
 
   const handleNext = () => {
@@ -380,7 +356,6 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
   return (
     <div className="fixed inset-0 bg-[#1F1108]/60 z-[4000] flex items-center justify-center p-4">
       <div className="bg-[#FCFAF9] w-full max-w-[420px] lg:max-w-[500px] max-h-[90vh] rounded-2xl flex flex-col shadow-xl overflow-hidden">
-        
         <div className="flex flex-col gap-2 p-5 bg-white border-b border-[#EAE4E0] shrink-0 z-10">
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0">
@@ -526,23 +501,14 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
   );
 }
 
-
 // ─────────────────────────────────────────────────────────────
-// Package Stepper Modal (NEW)
-// Parehong stepper-per-component UX gaya ng BundleModal sa itaas — dinadaan
-// dito ang customer sa bawat product na LAMAN ng package (hal. cake, cupcake,
-// tarp) para masagutan ang ORDER SLIP FIELDS ng bawat isa (kinukuha mula sa
-// sariling record ng bawat component product — hindi ng package mismo, dahil
-// wala itong sariling order slip fields; tingnan ang Productmodal.jsx admin
-// form). Ganito rin dapat kasi ito ang binabasa ng backend
-// (resolvePackageLineItem sa onlineOrdering.services.js): `item.orderSlip`
-// keyed by componentProductId.
+// Package Stepper Modal
 // ─────────────────────────────────────────────────────────────
 function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [packageAnswers, setPackageAnswers] = useState({});
-  const [packageImages, setPackageImages] = useState({}); // { [productId]: File }
-  const [packageImageErrors, setPackageImageErrors] = useState({}); // { [productId]: string }
+  const [packageImages, setPackageImages] = useState({}); 
+  const [packageImageErrors, setPackageImageErrors] = useState({}); 
   const [errors, setErrors] = useState({});
   const components = pkg.package_components || [];
 
@@ -606,7 +572,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
         price: pkg.price,
         type: 'package',
         packageId: pkg.id,
-        products: components, // para sa cart/receipt display, gaya ng bundle.products
+        products: components, 
         selected_price_options: null,
         order_slip_details: packageAnswers,
         inspiration_image: hasAnyImage ? packageImages : null
@@ -764,9 +730,8 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
   );
 }
 
-
 // ─────────────────────────────────────────────────────────────
-// Normal Product Modal (Preserved)
+// Normal Product Modal
 // ─────────────────────────────────────────────────────────────
 function ProductModal({ product, onClose, onAddToCart, showToast }) {
   const [slipAnswers, setSlipAnswers] = useState({});
@@ -777,9 +742,6 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
   const [errors, setErrors] = useState({});
 
-  // Live thumbnail ng napiling file — para makumpirma agad ng customer na
-  // TAMA ang na-upload niya, sa halip na malaman lang niya sa Checkout
-  // Order Summary (huli na 'yon para makapag-reselect).
   useEffect(() => {
     if (!imageFile) {
       setImagePreviewUrl(null);
@@ -857,7 +819,6 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
     }
 
     if (isVariable && missingCombo) {
-      // Kung missing combo, disabled na rin ang Add Button sa UI
       return;
     }
 
@@ -1112,51 +1073,31 @@ function ImagePreviewModal({ product, onClose }) {
   );
 }
 
-// I-de-derive ang order_type ng isang BUNDLE base sa mga products na talagang
-// laman nito — hindi na basta i-hahardcode sa 'Pick-up Today'. Parehong
-// priority rule ang ginagamit dito gaya sa Checkout.jsx: kapag may kahit
-// isang product sa loob ng bundle na 'Pre-order' (e.g. customize cake na may
-// lead time), dapat 'Pre-order' na rin ang buong bundle — kahit may ibang
-// kasamang product na 'Pick-up Today' o 'Both'.
 function resolveBundleOrderType(products = []) {
   if (products.some(p => p.order_type === 'Pre-order')) return 'Pre-order';
   if (products.some(p => p.order_type === 'Pick-up Today')) return 'Pick-up Today';
   return 'Both';
 }
 
-// ─────────────────────────────────────────────────────────────
-// Quantity tracking helpers — dating "stock" lang (stock_quantity) ang
-// may limit-checking dito, kaya Pre-order products ay hindi na-a-apply
-// ang limit kahit may daily_limit na sila. Ngayon, parehong daily_limit
-// (Pre-order slots) at stock_quantity (Pick-up Today produced stock) ay
-// tinitignan gamit ang parehong priority rule: kung may laman (di null,
-// > 0) ang daily_limit, ITO ang babasahin kahit may laman din ang
-// stock_quantity; kung wala, babalik sa stock_quantity. Bundles ay hindi
-// tracked dito dahil hiwalay ang stock-checking nila per component.
-// ─────────────────────────────────────────────────────────────
 function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
 function isQuantityTracked(item) {
   if (!item) return false;
-  if (item.type === 'bundle') return item.is_tracked; 
+  if (item.type === 'bundle' || item.type === 'package') return item.is_tracked; 
   if (item.is_celebration_material) return true;
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
 function getQuantityLimit(item) {
-  if (item.type === 'bundle') return item.available_stock;
+  if (item.type === 'bundle' || item.type === 'package') return item.available_stock;
   const basis = hasDailyLimitSet(item) ? item.daily_limit : item.stock_quantity;
   return item.available_stock ?? basis ?? 0;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Module-level cache — hindi React state, kaya hindi ito nawawala kada
-// mag-unmount/mag-mount ulit ang Menu (hal. paglipat papunta sa Home
-// tapos balik). Unang tawag lang talaga mag-fefetch; sa mga susunod na
-// mount, ibabalik na lang nito ang parehong promise/resulta — isang
-// request lang sa buong buhay ng tab.
+// Module-level cache
 // ─────────────────────────────────────────────────────────────
 let menuProductsFetchPromise = null;
 function getMenuProducts() {
@@ -1207,7 +1148,7 @@ export default function Menu({ cart, setCart }) {
   const [rawBundles, setRawBundles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const [toast, setToast] = useState(null); // { message }
+  const [toast, setToast] = useState(null); 
   const toastTimerRef = useRef(null);
   const productListRef = useRef(null);
 
@@ -1223,8 +1164,6 @@ export default function Menu({ cart, setCart }) {
     };
   }, []);
 
-  // Laging mag-scroll sa taas pag pumasok dito (hal. galing sa "View promo bundles"
-  // na pindot sa Home, na baka naka-scroll pababa na ang page).
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -1264,80 +1203,117 @@ export default function Menu({ cart, setCart }) {
     const allProducts = rawProducts;
     const bundlesData = rawBundles;
 
-    // FIX: dating basta pinapasa ang "Package" products as-is, kaya walang
-    // ibang paraan ang cart-adding UI (PackageModal sa ibaba) na malaman
-    // ang order_slip_fields/allow_file_upload ng bawat COMPONENT ng
-    // package — ang `package_items` na dala ng backend ay minimal lang
-    // ({ product_id, quantity, name }), hindi kumpletong product record.
-    // Dito na natin ini-hydrate ang bawat package sa `package_components`:
-    // ang FULL product record (kasama ang order_slip_fields nito) ng bawat
-    // component, kinuha mula sa allProducts — parehong pattern gaya ng
-    // `bundleProducts` sa ibaba para sa Promo Bundle.
-    const hydratedProducts = allProducts.map(p => {
-      if (p.category !== 'Package' || !Array.isArray(p.package_items) || p.package_items.length === 0) {
-        return p;
-      }
-      const packageComponents = p.package_items
-        .map(pi => allProducts.find(cp => cp.id === pi.product_id))
-        .filter(Boolean);
-
-      return {
-        ...p,
-        type: 'package',
-        packageId: p.id,
-        package_components: packageComponents,
-      };
-    });
-
-    if (bundlesData.length === 0) return hydratedProducts;
-
-    // Gaya ng sa admin Promo Bundles page: ipakita lang ang mga bundle na
-    // active AT nasa loob ng promo date range nito (kung meron man).
-    const activeBundles = bundlesData
+    const activeBundlesAndPackages = bundlesData
       .filter(b => b.is_active && b.is_within_date_range !== false)
       .map(b => {
-       const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
-       const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => p.id === id)).filter(Boolean);
+        const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
 
-       const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-       const isTracked = trackedComponents.length > 0;
-       const bundleStock = isTracked
-         ? Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0))
-         : 999;
+        if (b.category === 'Package') {
+           const packageComponents = (b.package_items || [])
+              .map(pi => {
+                  const cp = allProducts.find(p => String(p.id) === String(pi.product_id));
+                  return cp ? { ...cp, package_qty: pi.quantity } : null;
+              })
+              .filter(Boolean);
 
-       return {
-           id: `bundle-${b.id}`, 
-           name: b.bundle_name,
-           category: 'Promo Bundle',
-           price: Number(b.bundle_price || b.discounted_price || 0), 
-           original_price: Number(b.original_total || 0),
-           discount_percent: Number(b.discount_percent || 0),
-           event_tag: b.event_tag || null,
-           bundle_options: b.bundle_options || {},
-           image_url: b.custom_image_url || fallbackImage,
-           custom_image_url: b.custom_image_url,
-           
-           products: bundleProducts,
-           order_type: resolveBundleOrderType(bundleProducts),
-           pricing_mode: 'fixed',
-           
-           available_stock: Math.max(0, bundleStock), 
-           is_tracked: isTracked,
-           
-           type: 'bundle',       
-           bundleId: b.id,
-           order_slip_fields: [],
-           price_groups: [],
-           price_matrix: []
-       };
-    });
+           const packageOrderType = b.order_type || 'Both';
+           let packageStock = 999;
+           let isPackageTracked = false;
 
-    return [...activeBundles, ...hydratedProducts];
+           if (packageOrderType === 'Pre-order') {
+               isPackageTracked = true;
+               packageStock = hasDailyLimitSet(b) ? Number(b.daily_limit) : 999;
+           } else {
+               const trackedComponents = packageComponents.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
+               isPackageTracked = trackedComponents.length > 0;
+               if (isPackageTracked) {
+                   packageStock = Math.min(...trackedComponents.map(p => {
+                       const requiredQty = Number(p.package_qty) || 1;
+                       const available = p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0;
+                       return Math.floor(available / requiredQty);
+                   }));
+               }
+               if (hasDailyLimitSet(b)) {
+                   isPackageTracked = true;
+                   packageStock = Math.min(packageStock, Number(b.daily_limit));
+               }
+           }
+
+           return {
+              ...b,
+              id: `package-${b.id}`,
+              name: b.bundle_name,
+              category: 'Package',
+              type: 'package',
+              packageId: b.id,
+              package_components: packageComponents,
+              image_url: b.custom_image_url || fallbackImage,
+              custom_image_url: b.custom_image_url,
+              price: Number(b.bundle_price || b.discounted_price || 0),
+              original_price: Number(b.original_total || 0),
+              order_type: packageOrderType, 
+              pricing_mode: 'fixed',
+              available_stock: Math.max(0, packageStock), 
+              is_tracked: isPackageTracked,
+              order_slip_fields: [],
+              price_groups: [],
+              price_matrix: []
+           };
+        }
+
+        const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => String(p.id) === String(id))).filter(Boolean);
+        const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
+        
+        let bundleStock = 999;
+        let isBundleTracked = false;
+
+        if (bundleOrderType === 'Pre-order') {
+            isBundleTracked = true;
+            bundleStock = hasDailyLimitSet(b) ? Number(b.daily_limit) : 999;
+        } else {
+            const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
+            isBundleTracked = trackedComponents.length > 0;
+            if (isBundleTracked) {
+                bundleStock = Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0));
+            }
+            if (hasDailyLimitSet(b)) {
+                isBundleTracked = true;
+                bundleStock = Math.min(bundleStock, Number(b.daily_limit));
+            }
+        }
+
+        return {
+          id: `bundle-${b.id}`,
+          name: b.bundle_name,
+          category: 'Promo Bundle',
+          price: Number(b.bundle_price || b.discounted_price || 0),
+          original_price: Number(b.original_total || 0),
+          discount_percent: Number(b.discount_percent || 0),
+          event_tag: b.event_tag || null,
+          bundle_options: b.bundle_options || {},
+          image_url: b.custom_image_url || fallbackImage,
+          custom_image_url: b.custom_image_url,
+          products: bundleProducts,
+          order_type: bundleOrderType,
+          pricing_mode: 'fixed',
+          available_stock: Math.max(0, bundleStock),
+          is_tracked: isBundleTracked,
+          type: 'bundle',
+          bundleId: b.id,
+          order_slip_fields: [],
+          price_groups: [],
+          price_matrix: []
+        };
+      });
+
+    const regularProducts = allProducts.filter(p => p.category !== 'Package');
+
+    return [...activeBundlesAndPackages, ...regularProducts];
   }, [rawProducts, rawBundles]);
 
   const categories = useMemo(() => {
     const base = ['Package', 'Cake', 'Pastry', 'Celebration Material'];
-    const hasActiveBundles = rawBundles.some(b => b.is_active && b.is_within_date_range !== false);
+    const hasActiveBundles = rawBundles.some(b => b.is_active && b.is_within_date_range !== false && b.category !== 'Package');
     return hasActiveBundles ? ['Promo Bundle', ...base] : base;
   }, [rawBundles]);
 
@@ -1373,15 +1349,10 @@ export default function Menu({ cart, setCart }) {
 
   const removeItem = (index) => setCart(prev => prev.filter((_, i) => i !== index));
 
-  // Palitan lang ang na-upload na picture ng isang item na nasa cart na —
-  // para hindi na kailangang i-redo ang buong form (details, atbp.) kung
-  // ang gusto lang palitan ay ang larawan.
   const replaceCartItemImage = (index, file) => setCart(prev => prev.map(
     (item, i) => (i === index ? { ...item, inspiration_image: file } : item)
   ));
 
-  // ── Cart item UI state: collapsible rows, swipe-to-delete (mobile), at
-  // image preview lightbox — walang kinalaman sa checkout/backend logic. ──
   const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
   const toggleCartItemExpanded = (i) => {
     setExpandedCartIndexes(prev => {
@@ -1393,9 +1364,6 @@ export default function Menu({ cart, setCart }) {
   const [openSwipeIndex, setOpenSwipeIndex] = useState(null);
   const [cartImagePreviewSrc, setCartImagePreviewSrc] = useState(null);
 
-  // Blob URLs para sa File-based na inspiration images sa loob ng cart —
-  // ginagawa/dini-nirevoke lang tuwing magbabago ang cart, para hindi
-  // tumagas ang memory (parehong pattern gaya ng ginawa sa upload preview).
   const [cartImageBlobUrls, setCartImageBlobUrls] = useState({});
   useEffect(() => {
     const urls = {};
@@ -1422,14 +1390,9 @@ export default function Menu({ cart, setCart }) {
     return src;
   };
 
-  // Thumbnail sa cart = MISMONG larawan ng product/package/bundle (gaya ng
-  // POS Order Summary na `item.image_url`) — HINDI ang reference image na
-  // in-upload ng customer para sa isang component (hal. balloons).
   const resolveCartImageSrc = (item) =>
     normalizeCartSrc(item.custom_image_url || item.image_url || item.image);
 
-  // Ang in-upload na reference image ng customer (File -> blob URL, o
-  // string/URL galing backend) — para lang sa "View" link ng "Image Attached".
   const resolveAttachedImageSrc = (item, i) => {
     let src = cartImageBlobUrls[i];
     if (!src) {
@@ -1603,12 +1566,6 @@ export default function Menu({ cart, setCart }) {
                     <button
                       onClick={() => {
                         if (isSoldOut) return;
-                        // Para sa bundles, i-check kung may any custom fields sa mga products
-                        // Laging idadaan sa modal kapag bundle para makita nila ang Stepper
-                        // FIX: dating hindi kasama ang Package dito, kaya
-                        // deretso itong naidadagdag sa cart nang walang
-                        // pagkakataong sagutan ang order slip ng mga
-                        // components nito (BundleModal-style stepper).
                         const needsModal = p.type === 'bundle' || p.type === 'package' || isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
                         
                         needsModal ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
@@ -1620,7 +1577,7 @@ export default function Menu({ cart, setCart }) {
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
                       }`}
                     >
-                      {isSoldOut ? 'Out of Stock' : (isVariable || p.type === 'bundle' ? 'Select Options' : 'Add to Cart')}
+                      {isSoldOut ? 'Out of Stock' : (isVariable || p.type === 'bundle' || p.type === 'package' ? 'Select Options' : 'Add to Cart')}
                     </button>
                   </div>
                 </div>
