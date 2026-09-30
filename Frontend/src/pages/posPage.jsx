@@ -5,6 +5,8 @@ import PosCart from '../components/pos/posCart';
 import { invalidatePosBundlesCache } from '../components/pos/posMenu';
 import OrderSlip from '../components/pos/orderSlip';
 import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
+import { usePersistedCart } from '../components/shared/usePersistedCart';
+import { slipSignature } from '../components/shared/orderSlipUploads';
 
 // FIX: dating naka-loob ito sa useEffect ng component (component state),
 // kaya tuwing mag-uunmount/mag-remount ang PosPage (nangyayari tuwing
@@ -69,11 +71,12 @@ export default function PosPage() {
     };
   }, []);
 
-  // 1. Initialized mula sa Local Storage
-  const [cart, setCart] = useState(() => {
-    const savedCart = localStorage.getItem('pos_cart');
-    return savedCart ? JSON.parse(savedCart) : [];
-  });
+  // 1. Cart na naka-persist: ang cart JSON ay nasa localStorage['pos_cart']
+  //    (kapareho ng dati), at ang mga larawang naka-attach (reference image at
+  //    Multi-image order slip fields) ay nasa IndexedDB — kaya hindi na
+  //    nawawala ang mga larawan kapag nag-refresh. Hindi na kailangan ng
+  //    hiwalay na localStorage effect para sa cart; ang hook na ang bahala.
+  const [cart, setCart, cartReady] = usePersistedCart('pos_cart');
 
   const [orderType, setOrderType] = useState(() => {
     return localStorage.getItem('pos_orderType') || 'Buy Now';
@@ -88,11 +91,7 @@ export default function PosPage() {
   // Bagong State para sa Mobile Drawer Cart
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  // 2. Syncing Cart at OrderType sa Local Storage tuwing may pagbabago
-  useEffect(() => {
-    localStorage.setItem('pos_cart', JSON.stringify(cart));
-  }, [cart]);
-
+  // 2. Syncing OrderType sa Local Storage tuwing may pagbabago
   useEffect(() => {
     localStorage.setItem('pos_orderType', orderType);
   }, [orderType]);
@@ -134,7 +133,10 @@ export default function PosPage() {
   }, []);
 
   useEffect(() => {
-    if (products.length === 0) return;
+    // Hintayin munang matapos ang pag-restore ng cart mula sa IndexedDB bago
+    // i-trim ayon sa stock — kung hindi, walang ma-ta-trim kapag mas nauna
+    // ang products kaysa sa restore.
+    if (products.length === 0 || !cartReady) return;
 
     setCart(prev => prev.flatMap(item => {
       const product = products.find(candidate => candidate.id === item.id);
@@ -148,7 +150,7 @@ export default function PosPage() {
       if (limit <= 0) return [];
       return [{ ...item, qty: limit }];
     }));
-  }, [products, orderType]);
+  }, [products, orderType, cartReady]);
 
   useEffect(() => {
     const handleDataChanged = (event) => {
@@ -197,12 +199,15 @@ export default function PosPage() {
     };
 
     setCart(prev => {
-      const currentSlipStr = JSON.stringify(finalItem.order_slip_details);
+      // slipSignature (hindi JSON.stringify): ang File ay nagiging `{}` kapag
+      // na-stringify, kaya magmumukhang pareho ang dalawang item na magkaiba
+      // ang larawan at mag-me-merge sa iisang line.
+      const currentSlipStr = slipSignature(finalItem.order_slip_details);
       const currentOptionsStr = JSON.stringify(finalItem.selected_price_options);
       
       const idx = prev.findIndex(i => 
         i.id === finalItem.id && 
-        JSON.stringify(i.order_slip_details) === currentSlipStr &&
+        slipSignature(i.order_slip_details) === currentSlipStr &&
         JSON.stringify(i.selected_price_options) === currentOptionsStr
       );
 
@@ -233,6 +238,12 @@ export default function PosPage() {
 
   const handleClearCart = () => setCart([]);
 
+  // Para sa PosCart: palitan/idagdag/burahin ang mga larawan (Multi-image
+  // order slip fields) ng isang cart line.
+  const handleUpdateItem = (index, patch) => {
+    setCart(prev => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+
   return (
     <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] overflow-x-hidden lg:overflow-hidden w-full max-w-full text-[#3B1F0A] bg-transparent p-3 sm:p-4">
       {/* Binigyan ng pb-24 (padding-bottom) para hindi matakpan ng FAB ang ilalim sa mobile view */}
@@ -258,6 +269,7 @@ export default function PosPage() {
         orderType={orderType}
         setOrderType={setOrderType}
         onUpdateQty={handleUpdateQty}
+        onUpdateItem={handleUpdateItem}
         onClearCart={handleClearCart}
         isCartOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}

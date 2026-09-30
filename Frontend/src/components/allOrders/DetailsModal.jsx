@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText } from 'lucide-react';
+import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -117,6 +117,81 @@ function formatSlipValue(value) {
   return String(value);
 }
 
+// ── customer-uploaded images (Multi-image order slip fields) ──────
+// Ang sagot sa Multi-image field ay array ng image URLs sa loob ng
+// order_slip_details, kaya dito natin nakikilala at ipinapakita bilang gallery
+// sa halip na i-join bilang text.
+const IMAGE_URL_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|bmp|heic|heif)(\?.*)?$/i;
+const isImageUrl = (v) => typeof v === 'string' && IMAGE_URL_RE.test(v);
+const isImageUrlList = (v) => Array.isArray(v) && v.length > 0 && v.every(isImageUrl);
+
+const imageExt = (url) => {
+  const m = String(url).match(/\.([a-z0-9]+)(?:\?|$)/i);
+  return m ? m[1].toLowerCase() : 'jpg';
+};
+const safeName = (str) => String(str || 'image').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
+
+// Cross-origin ang storage URL kaya hindi gagana ang plain <a download> —
+// kinukuha muna bilang blob. Kapag pumalya (CORS, atbp.), bubuksan na lang sa
+// bagong tab para makapag-"Save image as" pa rin ang admin.
+async function downloadImage(url, filename) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Download failed');
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch {
+    window.open(url, '_blank', 'noopener');
+  }
+}
+
+async function downloadAllImages(urls, baseName) {
+  for (let i = 0; i < urls.length; i += 1) {
+    await downloadImage(urls[i], `${baseName}-${i + 1}.${imageExt(urls[i])}`);
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+function SlipImageGallery({ label, urls, baseName, onView }) {
+  return (
+    <div className="pt-1">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="text-sm text-[#8A7264]">
+          {label} <span className="text-[10px] font-bold text-[#B7A99F]">({urls.length})</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => downloadAllImages(urls, baseName)}
+          className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-[#5A453C] hover:text-[#3B1F0A] underline underline-offset-2"
+        >
+          <Download size={12} /> Download {urls.length > 1 ? 'all' : ''}
+        </button>
+      </div>
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        {urls.map((url, i) => (
+          <button
+            key={`${url}-${i}`}
+            type="button"
+            onClick={() => onView(urls, i)}
+            aria-label={`View image ${i + 1}`}
+            className="group relative aspect-square rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] cursor-zoom-in"
+          >
+            <img src={url} alt="" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function getItemSlipFields(item) {
   const slip = parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails);
   if (!slip) return null;
@@ -184,7 +259,13 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 // ── DETAILS MODAL ────────────────────────────────────────────
 export default function DetailsModal({ order, isOpen, onClose, onStatusChange }) {
   const [activeTab, setActiveTab] = useState('order');
-  const [lightboxImage, setLightboxImage] = useState(null);
+  // { images: string[], index: number } — pwedeng isa lang (reference image) o marami (Multi-image field)
+  const [lightbox, setLightbox] = useState(null);
+  const openLightbox = (images, index = 0) => setLightbox({ images, index });
+  const closeLightbox = () => setLightbox(null);
+  const stepLightbox = (delta) => setLightbox(prev => (
+    prev ? { ...prev, index: (prev.index + delta + prev.images.length) % prev.images.length } : prev
+  ));
 
   const items = order ? (order.items || order.order_items || []) : [];
   
@@ -201,6 +282,18 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
       setActiveTab('order');
     }
   }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setLightbox(null); }
+      else if (lightbox.images.length > 1 && e.key === 'ArrowLeft') stepLightbox(-1);
+      else if (lightbox.images.length > 1 && e.key === 'ArrowRight') stepLightbox(1);
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lightbox]);
 
   useEffect(() => {
     if (!isOpen || !order) return;
@@ -521,7 +614,17 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                             </p>
                           )}
                           {fields ? Object.entries(fields).map(([key, value], j) => (
-                            <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
+                            isImageUrlList(value) ? (
+                              <SlipImageGallery
+                                key={`${key}-${j}`}
+                                label={formatSlipKey(key)}
+                                urls={value}
+                                baseName={safeName(`${orderNumber}-${item.name || item.product_name || 'item'}-${key}`)}
+                                onView={openLightbox}
+                              />
+                            ) : (
+                              <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
+                            )
                           )) : (
                             <p className="text-xs text-[#8A7264] italic">No slip details provided.</p>
                           )}
@@ -536,7 +639,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                              </div>
                              <button
                                type="button"
-                               onClick={() => setLightboxImage(image)}
+                               onClick={() => openLightbox([image])}
                                className="w-full group relative cursor-zoom-in rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center aspect-video md:aspect-square"
                                aria-label="View reference image"
                              >
@@ -562,7 +665,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                   <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center max-w-sm">
                     <button
                       type="button"
-                      onClick={() => setLightboxImage(globalReferenceImage)}
+                      onClick={() => openLightbox([globalReferenceImage])}
                       className="w-full group relative cursor-zoom-in"
                     >
                       <img src={globalReferenceImage} alt="reference" className="w-full h-auto object-cover" />
@@ -605,26 +708,63 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         )}
       </div>
 
-      {/* Lightbox para sa Specific Image URL */}
-      {lightboxImage && (
+      {/* Lightbox — isa o maraming larawan (may prev/next at download) */}
+      {lightbox && lightbox.images[lightbox.index] && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
-          onClick={(e) => { e.stopPropagation(); setLightboxImage(null); }}
+          onClick={(e) => { e.stopPropagation(); closeLightbox(); }}
         >
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
-              onClick={() => setLightboxImage(null)}
-              className="absolute -top-3 -right-3 w-9 h-9 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
+              onClick={closeLightbox}
+              className="absolute -top-3 -right-3 z-10 w-9 h-9 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
               aria-label="Close"
             >
               <X size={18} />
             </button>
             <img
-              src={lightboxImage}
+              src={lightbox.images[lightbox.index]}
               alt="reference full size"
               className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl block"
             />
+            {lightbox.images.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => stepLightbox(-1)}
+                  aria-label="Previous image"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepLightbox(1)}
+                  aria-label="Next image"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </>
+            )}
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2">
+              {lightbox.images.length > 1 && (
+                <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold">
+                  {lightbox.index + 1} / {lightbox.images.length}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => downloadImage(
+                  lightbox.images[lightbox.index],
+                  `${safeName(orderNumber)}-image-${lightbox.index + 1}.${imageExt(lightbox.images[lightbox.index])}`
+                )}
+                className="flex items-center gap-1 px-3 py-1 rounded-full bg-white/95 hover:bg-white text-[#3B1F0A] text-[11px] font-bold shadow"
+              >
+                <Download size={12} /> Save
+              </button>
+            </div>
           </div>
         </div>
       )}

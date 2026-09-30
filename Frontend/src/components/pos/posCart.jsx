@@ -5,6 +5,10 @@ import {
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, TIME_SLOTS } from './orderSum';
+import MultiImageField from '../shared/MultiImageField';
+import CartSlipImages from '../shared/CartSlipImages';
+import CartReferenceImage from '../shared/CartReferenceImage';
+import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages } from '../shared/orderSlipUploads';
 
 // ─────────────────────────────────────────────────────────────
 // Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
@@ -30,9 +34,11 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
-export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced }) {
+export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
 
@@ -186,7 +192,27 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   };
 
   const handlePlaceOrder = async () => {
+    // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
+    const missingImages = cart.flatMap(item =>
+      findMissingRequiredSlipImages(item).map(label => `${item.name}: ${label}`)
+    );
+    if (missingImages.length > 0) {
+      showToast(`Please add the required photo(s) — ${missingImages.join(', ')}.`, 'error');
+      return;
+    }
+
     setIsProcessing(true);
+
+    // Bilangin ang lahat ng larawang ia-upload para sa progress ("2 of 4").
+    const totalUploads = cart.reduce(
+      (n, it) => n + countReferenceFiles(it.inspiration_image) + countSlipFiles(it.order_slip_details), 0
+    );
+    let doneUploads = 0;
+    const tickUpload = () => {
+      doneUploads += 1;
+      setUploadProgress({ phase: 'uploading', done: doneUploads, total: totalUploads });
+    };
+    setUploadProgress(totalUploads > 0 ? { phase: 'uploading', done: 0, total: totalUploads } : null);
 
     // FIX: dati'y wala talagang upload step dito kaya kahit may na-attach
     // na larawan ang cashier sa "Upload Reference Image", hindi ito
@@ -215,6 +241,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         } catch (err) {
           console.error('Item image upload error:', err);
         }
+        tickUpload();
       } else if (img && typeof img === 'object') {
         const urls = {};
         for (const [productId, file] of Object.entries(img)) {
@@ -233,12 +260,32 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           } catch (err) {
             console.error(`Bundle item image upload error (product ${productId}):`, err);
           }
+          tickUpload();
         }
         if (Object.keys(urls).length > 0) {
           updatedCart[i].inspiration_urls = urls;
         }
       }
     }
+
+    // Multi-image order slip fields: i-upload ang bawat File at palitan ng URL
+    // sa loob ng order_slip_details (array of URLs, JSONB sa DB).
+    try {
+      for (let i = 0; i < updatedCart.length; i++) {
+        const slip = updatedCart[i].order_slip_details;
+        if (slipHasFiles(slip)) {
+          updatedCart[i] = { ...updatedCart[i], order_slip_details: await uploadSlipImages(slip, tickUpload) };
+        }
+      }
+    } catch (err) {
+      console.error('Order slip image upload error:', err);
+      setIsProcessing(false);
+      setUploadProgress(null);
+      showToast(err.message || 'Image upload failed. Please try again.', 'error');
+      return;
+    }
+
+    if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
     // FIX: dating ang product ID at price lang ang ipinapasa dito — nawawala
     // ang order_slip_details / selected_price_options na kinukuha na ng
@@ -253,7 +300,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           type: 'bundle',
           bundleId: item.bundleId,
           quantity: item.qty,
-          orderSlip: item.order_slip_details || {},
+          orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
           specialInstructions: item.details || '',
           // FIX: idinagdag — per-component image URLs, binabasa na ng
           // resolveBundleLineItem sa backend.
@@ -271,7 +318,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           type: 'package',
           packageId: item.packageId,
           quantity: item.qty,
-          orderSlip: item.order_slip_details || {},
+          orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
           specialInstructions: item.details || '',
           inspirationUrls: item.inspiration_urls || null
         };
@@ -282,7 +329,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         quantity: item.qty,
         unitPrice: item.price,
         subtotal: item.price * item.qty,
-        orderSlip: item.order_slip_details || null,
+        orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || null,
         selectedPriceOptions: item.selected_price_options || null,
         specialInstructions: item.details || '',
         // FIX: idinagdag — dating wala kaya laging null ang
@@ -412,6 +459,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       showToast(error.message || 'An error occurred while processing your order.', 'error');
     } finally {
       setIsProcessing(false);
+      setUploadProgress(null);
     }
   };
 
@@ -604,13 +652,19 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                       )
                     )}
 
-                    {item.inspiration_image && (
-                      <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">
-                        {(item.type === 'bundle' || item.type === 'package')
-                          ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
-                          : 'Image Attached'}
-                      </p>
-                    )}
+                    <CartSlipImages
+                      item={item}
+                      className="mt-1.5"
+                      readOnly={!onUpdateItem}
+                      onChange={(next) => onUpdateItem?.(idx, { order_slip_details: next })}
+                    />
+
+                    <CartReferenceImage
+                      item={item}
+                      className="mt-0.5"
+                      readOnly={!onUpdateItem}
+                      onChange={(file) => onUpdateItem?.(idx, { inspiration_image: file })}
+                    />
 
                     <div className="flex items-center gap-2 mt-2">
                       <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
@@ -700,6 +754,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           amountDue={amountDue}
           isProcessing={isProcessing}
           onPlaceOrder={handlePlaceOrder}
+          uploadProgress={uploadProgress}
           onValidate={validateOrderForm}
         />
 

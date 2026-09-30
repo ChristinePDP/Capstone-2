@@ -4,6 +4,9 @@ import {
   User, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Calendar as CalendarIcon, Clock, Check, Lock, Receipt, AlertTriangle
 } from 'lucide-react';
+import CartSlipImages from '../shared/CartSlipImages';
+import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
+import { formatSlipValueForCart } from '../shared/orderSlipUploads';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -145,6 +148,7 @@ export default function OrderSummaryModal({
   cartTotal,
   amountDue,
   isProcessing,
+  uploadProgress,
   onPlaceOrder,
   onValidate,
 }) {
@@ -499,7 +503,7 @@ export default function OrderSummaryModal({
 
                   {item.selected_price_options && Object.entries(item.selected_price_options).map(([label, value]) => (
                     <p key={`sum-opt-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                      <span className="font-medium">{label}:</span> {value}
+                      <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                     </p>
                   ))}
 
@@ -521,7 +525,7 @@ export default function OrderSummaryModal({
                             <div className="flex flex-col gap-0.5">
                               {Object.entries(answers).map(([label, value]) => (
                                 <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                  <span className="font-medium">{label}:</span> {value}
+                                  <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                                 </p>
                               ))}
                             </div>
@@ -532,10 +536,12 @@ export default function OrderSummaryModal({
                   ) : (
                     item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
                       <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                        <span className="font-medium">{label}:</span> {value}
+                        <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                       </p>
                     ))
                   )}
+
+                  <CartSlipImages item={item} readOnly className="mt-1" />
 
                   {item.inspiration_image && (
                     <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug">
@@ -608,6 +614,10 @@ export default function OrderSummaryModal({
             </div>
           </div>
 
+          {isProcessing && (
+            <UploadProgressNote progress={uploadProgress} finalLabel="Saving your order..." className="mb-3" />
+          )}
+
           <div className="flex gap-2.5">
             <button
               onClick={onBack}
@@ -630,7 +640,7 @@ export default function OrderSummaryModal({
               disabled={isProcessing}
               className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
             >
-              {isProcessing ? 'Processing...' : 'Place Order'}
+              {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Saving order...') : 'Place Order'}
             </button>
           </div>
         </div>
@@ -669,7 +679,7 @@ export default function OrderSummaryModal({
                 disabled={isProcessing}
                 className="w-1/2 bg-[#3B1F0A] text-white py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
               >
-                {isProcessing ? 'Processing...' : 'Yes, Place Order'}
+                {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Saving order...') : 'Yes, Place Order'}
               </button>
             </div>
           </div>

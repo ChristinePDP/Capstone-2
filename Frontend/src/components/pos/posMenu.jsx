@@ -1,5 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
+import MultiImageField from '../shared/MultiImageField';
+import CartSlipImages from '../shared/CartSlipImages';
+import { isSlipAnswerEmpty, pruneEmptySlipAnswers } from '../shared/orderSlipUploads';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
 // ng customer, para hindi mabilis maubos ang Supabase Storage.
@@ -224,7 +227,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
         const isOptional = field.optional === true || field.isOptional === true || field.required === false;
         if (!isOptional) {
           const answer = slipAnswers[field.label];
-          if (!answer || answer.trim() === '') {
+          if (isSlipAnswerEmpty(field, answer)) {
             newErrors[field.label] = true;
           }
         }
@@ -243,7 +246,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
       qty: 1,
       price: isVariable ? resolvedPrice : product.price,
       selected_price_options: isVariable ? selectedPriceOptions : null,
-      order_slip_details: hasFields ? slipAnswers : null,
+      order_slip_details: hasFields ? pruneEmptySlipAnswers(slipAnswers) : null,
       inspiration_image: imageFile
     });
     onClose();
@@ -310,6 +313,19 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
                   const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                   const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
 
+                  if (field.type === 'Multi-image') {
+                    return (
+                      <div key={index} className="flex flex-col w-full basis-full">
+                        <MultiImageField
+                          label={labelText}
+                          value={slipAnswers[field.label] || []}
+                          onChange={files => handleAnswerChange(field.label, files)}
+                          max={field.maxImages}
+                          error={!!errors[field.label]}
+                        />
+                      </div>
+                    );
+                  }
                   if (field.type === 'Select') {
                     return (
                       <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
@@ -456,7 +472,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
         const isOptional = field.optional === true || field.isOptional === true || field.required === false;
         if (isOptional) return false;
         const answer = bundleAnswers[currentProduct.id]?.[field.label];
-        return !answer || answer.trim() === '';
+        return isSlipAnswerEmpty(field, answer);
       });
       if (missingFields.length > 0) {
         showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
@@ -475,7 +491,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
         qty: 1,
         price: bundle.price,
         selected_price_options: null,
-        order_slip_details: bundleAnswers,
+        order_slip_details: pruneEmptySlipAnswers(bundleAnswers),
         inspiration_image: hasAnyImage ? bundleImages : null
       });
       onClose();
@@ -524,6 +540,19 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
                 const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                 const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
 
+                if (field.type === 'Multi-image') {
+                  return (
+                    <div key={index} className="flex flex-col w-full basis-full">
+                      <MultiImageField
+                        label={labelText}
+                        value={bundleAnswers[currentProduct.id]?.[field.label] || []}
+                        onChange={files => handleAnswerChange(field.label, files)}
+                        max={field.maxImages}
+                        error={false}
+                      />
+                    </div>
+                  );
+                }
                 if (field.type === 'Select') {
                   return (
                     <div key={index} className="flex flex-col w-full">
@@ -656,7 +685,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
         const isOptional = field.optional === true || field.isOptional === true || field.required === false;
         if (isOptional) return false;
         const answer = packageAnswers[currentProduct.id]?.[field.label];
-        return !answer || answer.trim() === '';
+        return isSlipAnswerEmpty(field, answer);
       });
       if (missingFields.length > 0) {
         showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
@@ -678,7 +707,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
         packageId: pkg.id,
         products: components,
         selected_price_options: null,
-        order_slip_details: packageAnswers,
+        order_slip_details: pruneEmptySlipAnswers(packageAnswers),
         inspiration_image: hasAnyImage ? packageImages : null
       });
       onClose();
@@ -727,6 +756,19 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
                 const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                 const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
 
+                if (field.type === 'Multi-image') {
+                  return (
+                    <div key={index} className="flex flex-col w-full basis-full">
+                      <MultiImageField
+                        label={labelText}
+                        value={packageAnswers[currentProduct.id]?.[field.label] || []}
+                        onChange={files => handleAnswerChange(field.label, files)}
+                        max={field.maxImages}
+                        error={false}
+                      />
+                    </div>
+                  );
+                }
                 if (field.type === 'Select') {
                   return (
                     <div key={index} className="flex flex-col w-full">

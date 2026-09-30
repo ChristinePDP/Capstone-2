@@ -4,6 +4,10 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
+import MultiImageField from '../shared/MultiImageField';
+import CartSlipImages from '../shared/CartSlipImages';
+import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
+import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages, formatSlipValueForCart } from '../shared/orderSlipUploads';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -160,6 +164,8 @@ export default function Checkout({ cart, setCart }) {
   const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [errors, setErrors] = useState({});
   const [showCalendar, setShowCalendar] = useState(false);
@@ -367,8 +373,29 @@ export default function Checkout({ cart, setCart }) {
       return;
     }
 
+    // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
+    const missingImages = cart.flatMap(item =>
+      findMissingRequiredSlipImages(item).map(label => `${item.name}: ${label}`)
+    );
+    if (missingImages.length > 0) {
+      setShowSummaryModal(false);
+      setToastMessage(`Please add the required photo(s) — ${missingImages.join(', ')}.`);
+      return;
+    }
+
     setIsProcessing(true);
     let updatedCart = [...cart];
+
+    // Bilangin ang lahat ng larawang ia-upload para sa progress ("2 of 4").
+    const totalUploads = cart.reduce(
+      (n, it) => n + countReferenceFiles(it.inspiration_image) + countSlipFiles(it.order_slip_details), 0
+    );
+    let doneUploads = 0;
+    const tickUpload = () => {
+      doneUploads += 1;
+      setUploadProgress({ phase: 'uploading', done: doneUploads, total: totalUploads });
+    };
+    setUploadProgress(totalUploads > 0 ? { phase: 'uploading', done: 0, total: totalUploads } : null);
 
     for (let i = 0; i < updatedCart.length; i++) {
       const img = updatedCart[i].inspiration_image;
@@ -391,6 +418,7 @@ export default function Checkout({ cart, setCart }) {
         } catch (err) {
           console.error('Item image upload error:', err);
         }
+        tickUpload();
       } else if (img && typeof img === 'object') {
         // FIX: Bundle item — `inspiration_image` dito ay `{ [productId]: File }`
         // (isang larawan per component, mula sa BundleModal). Dating hindi
@@ -419,12 +447,34 @@ export default function Checkout({ cart, setCart }) {
           } catch (err) {
             console.error(`Bundle item image upload error (product ${productId}):`, err);
           }
+          tickUpload();
         }
         if (Object.keys(urls).length > 0) {
           updatedCart[i].inspiration_urls = urls;
         }
       }
     }
+
+    // Multi-image order slip fields: i-upload ang bawat File at palitan ng URL
+    // sa loob ng order_slip_details (array of URLs, JSONB sa DB). Kapag pumalya
+    // ang kahit isa, ihihinto ang pag-place ng order para hindi mawalan ng larawan.
+    try {
+      for (let i = 0; i < updatedCart.length; i++) {
+        const slip = updatedCart[i].order_slip_details;
+        if (slipHasFiles(slip)) {
+          updatedCart[i] = { ...updatedCart[i], order_slip_details: await uploadSlipImages(slip, tickUpload) };
+        }
+      }
+    } catch (err) {
+      console.error('Order slip image upload error:', err);
+      setIsProcessing(false);
+      setUploadProgress(null);
+      setShowSummaryModal(false);
+      setToastMessage(err.message || 'Image upload failed. Please try again.');
+      return;
+    }
+
+    if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
     // 2. BUILD PAYLOAD
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
@@ -450,7 +500,7 @@ export default function Checkout({ cart, setCart }) {
           quantity: item.qty,
           unitPrice: item.price,
           subtotal: item.price * item.qty,
-          orderSlip: item.order_slip_details || {},
+          orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
           selectedPriceOptions: item.selected_price_options || null, 
           inspirationUrl: item.inspiration_url || null,
           // FIX: idinagdag para sa bundle items — per-component image URLs
@@ -520,11 +570,13 @@ if (data.success && data.checkoutUrl) {
         // Basahin ang error message galing backend (data.message), kung wala, tsaka gamitin ang fallback
         setToastMessage(data.message || 'Failed to generate payment link. Please try again.');
         setIsProcessing(false);
+      setUploadProgress(null);
       }
     } catch (error) {
       console.error('Error initiating payment:', error);
       setToastMessage('Network error. Please try again later.');
       setIsProcessing(false);
+      setUploadProgress(null);
     }
   };
 
@@ -971,7 +1023,7 @@ if (data.success && data.checkoutUrl) {
                             <div className="flex flex-col gap-0.5">
                               {Object.entries(item.selected_price_options).map(([label, value]) => (
                                 <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                  <span className="font-medium">{label}:</span> {value}
+                                  <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                                 </p>
                               ))}
                             </div>
@@ -993,7 +1045,7 @@ if (data.success && data.checkoutUrl) {
                                     <div className="flex flex-col gap-0.5">
                                       {Object.entries(answers).map(([label, value]) => (
                                         <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                          <span className="font-medium">{label}:</span> {value}
+                                          <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                                         </p>
                                       ))}
                                     </div>
@@ -1006,12 +1058,14 @@ if (data.success && data.checkoutUrl) {
                               <div className="flex flex-col gap-0.5 mt-1">
                                 {Object.entries(item.order_slip_details).map(([label, value]) => (
                                   <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
-                                    <span className="font-medium">{label}:</span> {value}
+                                    <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                                   </p>
                                 ))}
                               </div>
                             )
                           )}
+
+                          <CartSlipImages item={item} readOnly className="mt-1.5" />
 
                           {item.inspiration_image && (
                             <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug mt-1">
@@ -1066,6 +1120,8 @@ if (data.success && data.checkoutUrl) {
                 </div>
               </div>
 
+              {isProcessing && <UploadProgressNote progress={uploadProgress} finalLabel="Connecting to payment..." className="mb-3" />}
+
               {/* Action Buttons side by side */}
               <div className="flex gap-2.5">
                 <button
@@ -1080,7 +1136,7 @@ if (data.success && data.checkoutUrl) {
                   disabled={isProcessing}
                   className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
                 >
-                  {isProcessing ? 'Processing...' : 'Place Order'}
+                  {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Processing...') : 'Place Order'}
                 </button>
               </div>
             </div>

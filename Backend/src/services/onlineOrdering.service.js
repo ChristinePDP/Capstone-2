@@ -126,24 +126,66 @@ export const getStorageBaseUrl = (bucketName) => {
   return data.publicUrl.replace(/\/$/, '');
 };
 
+// Mga error na dahil sa network/koneksyon papuntang Supabase (hindi sa policy o
+// sa file mismo) — ito lang ang nire-retry. Ang "fetch failed" ay generic na
+// mensahe ng Node; ang totoong dahilan ay nasa `cause` (hal. ETIMEDOUT,
+// ENOTFOUND, UND_ERR_CONNECT_TIMEOUT), kaya ni-la-log natin ito sa ibaba.
+const TRANSIENT_NETWORK_CODES = [
+  'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+];
+
+const getErrorCause = (error) =>
+  error?.originalError?.cause || error?.cause || error?.originalError || null;
+
+const isTransientStorageError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  const code = getErrorCause(error)?.code || '';
+  return message.includes('fetch failed') || TRANSIENT_NETWORK_CODES.includes(code);
+};
+
+const UPLOAD_MAX_ATTEMPTS = 3;
+
 export const uploadImageToBucket = async (file, bucketName = 'inspiration-images') => {
   const fileExt = file.originalname.split('.').pop();
-  const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+  let lastError = null;
 
-  const { data, error } = await supabase.storage
-    .from(bucketName)
-    .upload(fileName, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false
-    });
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    // Bagong filename sa bawat subok — kung natuloy pala ang naunang upload
+    // kahit pumalya ang response, hindi ito babangga ("already exists").
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-  if (error) throw new Error(`Supabase Storage Error: ${error.message}`);
+    try {
+      const { error } = await supabase.storage
+        .from(bucketName)
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false
+        });
 
-  const { data: urlData } = supabase.storage
-    .from(bucketName)
-    .getPublicUrl(fileName);
+      if (!error) {
+        const { data: urlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(fileName);
+        return urlData.publicUrl;
+      }
+      lastError = error;
+    } catch (thrown) {
+      lastError = thrown;
+    }
 
-  return urlData.publicUrl;
+    const cause = getErrorCause(lastError);
+    console.error(
+      `[UPLOAD] Attempt ${attempt}/${UPLOAD_MAX_ATTEMPTS} failed for "${file.originalname}" (${file.size} bytes):`,
+      lastError?.message,
+      cause ? `| cause: ${cause.code || ''} ${cause.message || cause}` : ''
+    );
+
+    if (!isTransientStorageError(lastError) || attempt === UPLOAD_MAX_ATTEMPTS) break;
+    await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+  }
+
+  throw new Error(`Supabase Storage Error: ${lastError?.message || 'Upload failed'}`);
 };
 
 // --- PENDING ORDERS LOGIC ---

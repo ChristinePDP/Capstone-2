@@ -15,7 +15,9 @@ const BLANK_PRODUCT = {
   eventTags: [],
 };
 
-const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select'];
+const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select', 'Multi-image'];
+const DEFAULT_MAX_IMAGES = 3;
+const MAX_IMAGES_CEILING = 10;
 const NEEDS_OPTIONS = ['Select', 'Multi-select'];
 
 // FIX: dating fetchTags() lang ang laman ng useEffect na naka-bind sa
@@ -323,7 +325,12 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   }, [previewUrl]);
 
   const addField = () => setFields(prev => [...prev, { id: crypto.randomUUID(), label: '', type: 'Text', options: '' }]);
-  const updateField = (id, key, value) => setFields(prev => prev.map(f => (f.id === id ? { ...f, [key]: value } : f)));
+  const updateField = (id, key, value) => setFields(prev => prev.map(f => {
+    if (f.id !== id) return f;
+    const next = { ...f, [key]: value };
+    if (key === 'type' && value === 'Multi-image' && !next.maxImages) next.maxImages = DEFAULT_MAX_IMAGES;
+    return next;
+  }));
   const removeField = (id) => setFields(prev => prev.filter(f => f.id !== id));
 
   const addException = () => {
@@ -405,6 +412,9 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             options: NEEDS_OPTIONS.includes(f.type)
                 ? (Array.isArray(f.options) ? f.options : (f.options || '').split(',')).map(o => o.trim()).filter(Boolean)
                 : [],
+            ...(f.type === 'Multi-image'
+                ? { maxImages: Math.min(MAX_IMAGES_CEILING, Math.max(1, Number(f.maxImages) || DEFAULT_MAX_IMAGES)) }
+                : {}),
         }));
 
         const payload = {
@@ -510,7 +520,22 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                 <select value={field.type} onChange={e => updateField(field.id, 'type', e.target.value)} className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white">
                   {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <input value={field.options} onChange={e => updateField(field.id, 'options', e.target.value)} placeholder={NEEDS_OPTIONS.includes(field.type) ? 'Comma-separated choices' : '—'} disabled={!NEEDS_OPTIONS.includes(field.type)} className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] disabled:bg-[#F5EFEB] bg-white" />
+                {field.type === 'Multi-image' ? (
+                  <div className="w-full sm:flex-[1.5] min-w-0 flex items-center gap-2 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 bg-white">
+                    <label htmlFor={`maxImages-${field.id}`} className="font-semibold text-[#8A7264] whitespace-nowrap">Max photos:</label>
+                    <input
+                      id={`maxImages-${field.id}`}
+                      type="number"
+                      min="1"
+                      max={MAX_IMAGES_CEILING}
+                      value={field.maxImages ?? DEFAULT_MAX_IMAGES}
+                      onChange={e => updateField(field.id, 'maxImages', e.target.value === '' ? '' : Math.min(MAX_IMAGES_CEILING, Math.max(1, Number(e.target.value) || 1)))}
+                      className="w-14 text-xs border border-[#DED4CC] rounded-lg px-2 py-1 outline-none focus:border-[#5A453C] bg-white text-center"
+                    />
+                  </div>
+                ) : (
+                  <input value={field.options} onChange={e => updateField(field.id, 'options', e.target.value)} placeholder={NEEDS_OPTIONS.includes(field.type) ? 'Comma-separated choices' : '—'} disabled={!NEEDS_OPTIONS.includes(field.type)} className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] disabled:bg-[#F5EFEB] bg-white" />
+                )}
                 <button type="button" onClick={() => removeField(field.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors self-end sm:self-auto"><Trash2 size={14} /></button>
               </div>
             ))}

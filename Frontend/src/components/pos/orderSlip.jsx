@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import MultiImageField from '../shared/MultiImageField';
+import { pruneEmptySlipAnswers } from '../shared/orderSlipUploads';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
 // ng customer, para hindi mabilis maubos ang Supabase Storage.
@@ -104,7 +106,11 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
         
         if (!isOptional) {
           const answer = slipAnswers[field.label];
-          if (!answer || answer.trim() === '') {
+          // Multi-image: array ng File ang sagot — kailangan ng kahit isa kapag required.
+          const isEmpty = field.type === 'Multi-image'
+            ? !Array.isArray(answer) || answer.length === 0
+            : !answer || String(answer).trim() === '';
+          if (isEmpty) {
             newErrors[field.label] = true;
           }
         }
@@ -123,7 +129,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
       qty: 1, 
       price: isVariable ? resolvedPrice : product.price,
       selected_price_options: isVariable ? selectedPriceOptions : null,
-      order_slip_details: hasFields ? slipAnswers : null,
+      order_slip_details: hasFields ? pruneEmptySlipAnswers(slipAnswers) : null,
       inspiration_image: imageFile 
     });
   };
@@ -195,6 +201,19 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
                   const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                   const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
 
+                  if (field.type === 'Multi-image') {
+                    return (
+                      <div key={index} className="flex flex-col w-full basis-full">
+                        <MultiImageField
+                          label={labelText}
+                          value={slipAnswers[field.label] || []}
+                          onChange={files => handleAnswerChange(field.label, files)}
+                          max={field.maxImages}
+                          error={!!errors[field.label]}
+                        />
+                      </div>
+                    );
+                  }
                   if (field.type === 'Select') {
                     return (
                       <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">

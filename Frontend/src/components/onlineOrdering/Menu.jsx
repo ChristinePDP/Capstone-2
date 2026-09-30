@@ -3,6 +3,9 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
+import MultiImageField from '../shared/MultiImageField';
+import CartSlipImages from '../shared/CartSlipImages';
+import { isSlipAnswerEmpty, pruneEmptySlipAnswers, slipSignature } from '../shared/orderSlipUploads';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
 // ng customer, para hindi mabilis maubos ang Supabase Storage.
@@ -105,7 +108,7 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 // ─────────────────────────────────────────────────────────────
 function CartItemRow({
   item, index, changeQty, onRemove, expanded, onToggleExpand,
-  imageSrc, attachedImageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage,
+  imageSrc, attachedImageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage, onUpdateSlip,
 }) {
   const isMobile = variant === 'mobile';
   const swipeStartX = useRef(null);
@@ -197,6 +200,15 @@ function CartItemRow({
                   >
                     <Pencil size={11} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => onReplaceImage(index, null)}
+                    aria-label="Remove picture"
+                    title="Remove picture"
+                    className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-[#DED4CC] text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 size={11} />
+                  </button>
                   <input
                     ref={replaceInputRef}
                     type="file"
@@ -212,6 +224,13 @@ function CartItemRow({
               )}
             </p>
           )}
+
+          <CartSlipImages
+            item={item}
+            className="mt-2"
+            readOnly={!onUpdateSlip}
+            onChange={(next) => onUpdateSlip?.(index, next)}
+          />
 
           <div className="flex items-center justify-between mt-2.5">
             <div className="flex items-center gap-2">
@@ -319,7 +338,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
       const newErrors = {};
       currentProduct.order_slip_fields.forEach(field => {
         const answer = bundleAnswers[currentProduct.id]?.[field.label];
-        if (!answer || answer.trim() === '') {
+        if (isSlipAnswerEmpty(field, answer)) {
           newErrors[field.label] = true;
         }
       });
@@ -339,7 +358,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
         qty: 1,
         price: bundle.price,
         selected_price_options: null, 
-        order_slip_details: bundleAnswers, 
+        order_slip_details: pruneEmptySlipAnswers(bundleAnswers), 
         inspiration_image: hasAnyImage ? bundleImages : null 
       });
       onClose();
@@ -387,6 +406,19 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
           ) : (
             <div className="flex flex-col gap-4">
               {hasFields && currentProduct.order_slip_fields.map((field, index) => {
+                if (field.type === 'Multi-image') {
+                  return (
+                    <div key={index} className="flex flex-col w-full basis-full">
+                      <MultiImageField
+                        label={field.label}
+                        value={bundleAnswers[currentProduct.id]?.[field.label] || []}
+                        onChange={files => handleAnswerChange(field.label, files)}
+                        max={field.maxImages}
+                        error={!!errors[field.label]}
+                      />
+                    </div>
+                  );
+                }
                 if (field.type === 'Select') {
                   return (
                     <div key={index} className="flex flex-col w-full">
@@ -551,7 +583,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
       const newErrors = {};
       currentProduct.order_slip_fields.forEach(field => {
         const answer = packageAnswers[currentProduct.id]?.[field.label];
-        if (!answer || answer.trim() === '') {
+        if (isSlipAnswerEmpty(field, answer)) {
           newErrors[field.label] = true;
         }
       });
@@ -574,7 +606,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
         packageId: pkg.id,
         products: components, 
         selected_price_options: null,
-        order_slip_details: packageAnswers,
+        order_slip_details: pruneEmptySlipAnswers(packageAnswers),
         inspiration_image: hasAnyImage ? packageImages : null
       });
       onClose();
@@ -623,6 +655,19 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
           ) : (
             <div className="flex flex-col gap-4">
               {hasFields && currentProduct.order_slip_fields.map((field, index) => {
+                if (field.type === 'Multi-image') {
+                  return (
+                    <div key={index} className="flex flex-col w-full basis-full">
+                      <MultiImageField
+                        label={field.label}
+                        value={packageAnswers[currentProduct.id]?.[field.label] || []}
+                        onChange={files => handleAnswerChange(field.label, files)}
+                        max={field.maxImages}
+                        error={!!errors[field.label]}
+                      />
+                    </div>
+                  );
+                }
                 if (field.type === 'Select') {
                   return (
                     <div key={index} className="flex flex-col w-full">
@@ -825,7 +870,7 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
     if (hasFields) {
       product.order_slip_fields.forEach(field => {
         const answer = slipAnswers[field.label];
-        if (!answer || answer.trim() === '') {
+        if (isSlipAnswerEmpty(field, answer)) {
           newErrors[field.label] = true;
         }
       });
@@ -841,7 +886,7 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
       qty: 1, 
       price: isVariable ? resolvedPrice : product.price,
       selected_price_options: isVariable ? selectedPriceOptions : null,
-      order_slip_details: hasFields ? slipAnswers : null,
+      order_slip_details: hasFields ? pruneEmptySlipAnswers(slipAnswers) : null,
       inspiration_image: imageFile 
     });
     onClose();
@@ -905,6 +950,19 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
               <p className="text-[11px] font-bold text-[#5A453C] uppercase tracking-wider">Customization Details</p>
               <div className="flex flex-wrap gap-x-4 gap-y-4">
                 {product.order_slip_fields.map((field, index) => {
+                  if (field.type === 'Multi-image') {
+                    return (
+                      <div key={index} className="flex flex-col w-full basis-full">
+                        <MultiImageField
+                          label={field.label}
+                          value={slipAnswers[field.label] || []}
+                          onChange={files => handleAnswerChange(field.label, files)}
+                          max={field.maxImages}
+                          error={!!errors[field.label]}
+                        />
+                      </div>
+                    );
+                  }
                   if (field.type === 'Select') {
                     return (
                       <div key={index} className="flex flex-col flex-1 basis-[160px] min-w-[160px]">
@@ -1319,12 +1377,12 @@ export default function Menu({ cart, setCart }) {
 
   const addToCart = (item) => {
     setCart(prev => {
-      const currentSlipStr = JSON.stringify(item.order_slip_details);
+      const currentSlipStr = slipSignature(item.order_slip_details);
       const currentOptionsStr = JSON.stringify(item.selected_price_options);
       
       const idx = prev.findIndex(i => 
         i.id === item.id && 
-        JSON.stringify(i.order_slip_details) === currentSlipStr &&
+        slipSignature(i.order_slip_details) === currentSlipStr &&
         JSON.stringify(i.selected_price_options) === currentOptionsStr
       );
 
@@ -1351,6 +1409,12 @@ export default function Menu({ cart, setCart }) {
 
   const replaceCartItemImage = (index, file) => setCart(prev => prev.map(
     (item, i) => (i === index ? { ...item, inspiration_image: file } : item)
+  ));
+
+  // Multi-image order slip fields: palitan / idagdag / burahin ang mga larawan
+  // ng isang cart line (nire-replace ang buong order_slip_details ng line na iyon).
+  const updateCartItemSlip = (index, nextSlip) => setCart(prev => prev.map(
+    (item, i) => (i === index ? { ...item, order_slip_details: nextSlip } : item)
   ));
 
   const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
@@ -1706,6 +1770,7 @@ export default function Menu({ cart, setCart }) {
                     onPreviewImage={setCartImagePreviewSrc}
                     variant="desktop"
                     onReplaceImage={replaceCartItemImage}
+                    onUpdateSlip={updateCartItemSlip}
                   />
                 ))}
               </div>
@@ -1765,6 +1830,7 @@ export default function Menu({ cart, setCart }) {
                   onPreviewImage={setCartImagePreviewSrc}
                   variant="mobile"
                   onReplaceImage={replaceCartItemImage}
+                  onUpdateSlip={updateCartItemSlip}
                   openSwipeIndex={openSwipeIndex}
                   setOpenSwipeIndex={setOpenSwipeIndex}
                 />
