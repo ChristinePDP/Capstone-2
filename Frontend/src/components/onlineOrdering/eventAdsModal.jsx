@@ -109,6 +109,7 @@ export default function EventAdsModal() {
   const [closed, setClosed] = useState(false);
   const [headerOffset, setHeaderOffset] = useState(76);
   const trackRef = useRef(null);
+  const [activeIdx, setActiveIdx] = useState(0);
 
   // Sinusukat ang TUNAY na height ng <header> (hindi hardcoded number),
   // kaya kahit magbago ang laki nito (mobile hamburger, promo bar, atbp.)
@@ -164,6 +165,24 @@ export default function EventAdsModal() {
     const el = trackRef.current;
     if (!el) return;
     el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: 'smooth' });
+  };
+
+  // Sinusundan ang swipe/scroll position para ma-highlight ang tamang dot
+  // sa mobile (dots lang ang indicator — ang swipe mismo ay native scroll-snap).
+  const handleTrackScroll = () => {
+    const el = trackRef.current;
+    if (!el || !el.firstElementChild) return;
+    const step = el.firstElementChild.getBoundingClientRect().width
+      + (parseFloat(getComputedStyle(el).columnGap) || 0);
+    if (step > 0) setActiveIdx(Math.round(el.scrollLeft / step));
+  };
+
+  const scrollToIndex = (i) => {
+    const el = trackRef.current;
+    if (!el || !el.firstElementChild) return;
+    const step = el.firstElementChild.getBoundingClientRect().width
+      + (parseFloat(getComputedStyle(el).columnGap) || 0);
+    el.scrollTo({ left: i * step, behavior: 'smooth' });
   };
 
   // Escape key para makasara — konting polish na hindi naman event-specific
@@ -238,7 +257,7 @@ export default function EventAdsModal() {
           // Available height = full viewport minus header minus breathing
           // room top/bottom (kasama na dito ang space para sa medallion
           // stamp na pumapasok 24px sa itaas ng card).
-          maxHeight: `calc(100vh - ${headerOffset}px - 64px)`,
+          maxHeight: `calc(100dvh - ${headerOffset}px - 64px)`,
         }}
       >
         {/* Close button */}
@@ -319,10 +338,11 @@ export default function EventAdsModal() {
             // nakaupo ang arrow buttons nang buo, kaya hindi na sila
             // na-cclip ng overflow-x-hidden ng scroll wrapper sa itaas
             // (dati, kalahati lang nila ang lumalabas dahil doon).
-            <div className="relative px-9 md:px-12">
+            <div className="relative px-0 sm:px-[52px] md:px-14">
               <div
                 ref={trackRef}
-                className="event-ads-track flex gap-3 md:gap-4 overflow-x-auto py-2.5 snap-x snap-mandatory scroll-smooth"
+                className="event-ads-track flex gap-3 md:gap-4 overflow-x-auto overscroll-x-contain px-4 sm:px-0 scroll-px-4 sm:scroll-px-0 pt-2.5 pb-4 snap-x snap-mandatory scroll-smooth"
+                onScroll={handleTrackScroll}
               >
                 {products.slice(0, 8).map((p) => {
                   const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
@@ -344,7 +364,7 @@ export default function EventAdsModal() {
                           ibaba-kanan ng image — may "hole" notch at bahagyang
                           tilt para magmukhang literal na price tag. */}
                       <div
-                        className="relative rounded-2xl overflow-visible border transition-all duration-300 group-hover:-translate-y-1 shadow-[0_2px_8px_-4px_rgba(42,22,8,0.25)] group-hover:shadow-[0_14px_22px_-10px_rgba(42,22,8,0.35)]"
+                        className="relative rounded-2xl overflow-visible border transition-all duration-200 ease-out shadow-[0_2px_8px_-4px_rgba(42,22,8,0.25)] group-hover:-translate-y-0.5 group-hover:border-[#CDBFB5] group-hover:shadow-[0_8px_14px_-8px_rgba(42,22,8,0.3)]"
                         style={{ backgroundColor: BRAND.cream, borderColor: BRAND.border }}
                       >
                         <div
@@ -355,7 +375,7 @@ export default function EventAdsModal() {
                             <img
                               src={p.image_url}
                               alt={p.name}
-                              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 ease-out"
+                              className="w-full h-full object-cover transition-none group-hover:scale-100"
                             />
                           ) : (
                             <Icon size={26} style={{ color: BRAND.ink }} className="opacity-30" />
@@ -366,7 +386,7 @@ export default function EventAdsModal() {
                             details, may hole notch at kaunting tilt */}
                         {minPrice != null && (
                           <div
-                            className="absolute right-2 -bottom-3 z-10 transition-transform duration-300 group-hover:-rotate-3"
+                            className="absolute right-2 -bottom-3 z-10"
                             style={{ transform: 'rotate(-8deg)' }}
                           >
                             <div
@@ -404,12 +424,30 @@ export default function EventAdsModal() {
                   kung may sapat na products para talagang may saysay
                   mag-scroll. */}
               {products.length > 2 && (
+                <div className="flex sm:hidden justify-center gap-1.5 pb-1">
+                  {products.slice(0, 8).map((p, i) => (
+                    <button
+                      key={`dot-${p.id}`}
+                      type="button"
+                      onClick={() => scrollToIndex(i)}
+                      aria-label={`Go to product ${i + 1}`}
+                      className="h-1.5 rounded-full transition-all"
+                      style={{
+                        width: i === activeIdx ? 16 : 6,
+                        backgroundColor: i === activeIdx ? BRAND.ink : `${BRAND.ink}33`,
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {products.length > 2 && (
                 <>
                   <button
                     type="button"
                     onClick={() => scrollTrack(-1)}
                     aria-label="Previous products"
-                    className="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full items-center justify-center border-2 shadow-md bg-white hover:scale-105 hover:shadow-lg transition-all z-10"
+                    className="hidden sm:flex absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full items-center justify-center border-2 shadow-sm bg-white hover:bg-[#F5EFEB] transition-colors z-10"
                     style={{ borderColor: BRAND.ink, color: BRAND.ink }}
                   >
                     <ChevronLeft size={17} strokeWidth={2.5} />
@@ -418,7 +456,7 @@ export default function EventAdsModal() {
                     type="button"
                     onClick={() => scrollTrack(1)}
                     aria-label="Next products"
-                    className="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full items-center justify-center border-2 shadow-md bg-white hover:scale-105 hover:shadow-lg transition-all z-10"
+                    className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full items-center justify-center border-2 shadow-sm bg-white hover:bg-[#F5EFEB] transition-colors z-10"
                     style={{ borderColor: BRAND.ink, color: BRAND.ink }}
                   >
                     <ChevronRight size={17} strokeWidth={2.5} />
@@ -432,7 +470,7 @@ export default function EventAdsModal() {
           <div className="px-7 md:px-10 pb-4 md:pb-5 pt-0.5 flex flex-col items-center gap-1.5">
             <button
               onClick={handleShopNow}
-              className="w-auto min-w-[160px] flex items-center justify-center gap-2 text-white font-bold text-xs uppercase tracking-[0.15em] py-2.5 px-8 rounded-full transition-transform hover:scale-[1.02] shadow-lg"
+              className="w-auto min-w-[160px] flex items-center justify-center gap-2 text-white font-bold text-xs uppercase tracking-[0.15em] py-2.5 px-8 rounded-full transition-opacity hover:opacity-90 shadow-md"
               style={{ backgroundColor: BRAND.ink }}
             >
               Shop Now!

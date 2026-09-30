@@ -44,6 +44,18 @@ function getBundleDescription(bundle) {
   }).join(' + ');
 }
 
+// Inclusion ng Package = ang mga produktong bumubuo rito (package_items),
+// gaya ng description ng Bundle — hindi ito tina-type na field.
+function getPackageInclusion(bundle, productList = []) {
+  return (bundle.package_items || []).map(pi => {
+    const name = pi.product?.name || pi.name
+      || productList.find(p => String(p.id) === String(pi.product_id))?.name;
+    if (!name) return null;
+    const qty = Number(pi.quantity) || 1;
+    return qty > 1 ? `${qty}x ${name}` : name;
+  }).filter(Boolean).join(' + ');
+}
+
 // ─────────────────────────────────────────────────────────────
 // Bundle Image Grid
 // ─────────────────────────────────────────────────────────────
@@ -325,7 +337,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
 
   const handleImageChange = (file) => {
     if (file && file.size > MAX_FILE_SIZE_BYTES) {
-      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.` }));
       setBundleImages(prev => ({ ...prev, [currentProduct.id]: null }));
       return;
     }
@@ -567,7 +579,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
 
   const handleImageChange = (file) => {
     if (file && file.size > MAX_FILE_SIZE_BYTES) {
-      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.` }));
       setPackageImages(prev => ({ ...prev, [currentProduct.id]: null }));
       return;
     }
@@ -806,7 +818,7 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
       return;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageError(`File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.`);
       setImageFile(null);
       return;
     }
@@ -1197,7 +1209,6 @@ export default function Menu({ cart, setCart }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState(location.state?.category || 'All');
-  const [orderTypeFilter, setOrderTypeFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
@@ -1305,6 +1316,7 @@ export default function Menu({ cart, setCart }) {
               type: 'package',
               packageId: b.id,
               package_components: packageComponents,
+              inclusion: getPackageInclusion(b, allProducts),
               image_url: b.custom_image_url || fallbackImage,
               custom_image_url: b.custom_image_url,
               price: Number(b.bundle_price || b.discounted_price || 0),
@@ -1499,10 +1511,8 @@ export default function Menu({ cart, setCart }) {
   
   const displayItems = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
-    const typeMatches = item => orderTypeFilter === 'All'
-      || (orderTypeFilter === 'Buy Now' ? item.order_type === 'Pick-up Today' : item.order_type === orderTypeFilter);
-    return products.filter(p => typeMatches(p) && (!q || p.name.toLowerCase().includes(q)));
-  }, [products, searchQuery, orderTypeFilter]);
+    return products.filter(p => !q || p.name.toLowerCase().includes(q));
+  }, [products, searchQuery]);
 
   const renderProductGrid = () => {
     const categoriesToRender = activeTab === 'All' 
@@ -1549,9 +1559,7 @@ export default function Menu({ cart, setCart }) {
               const isStockTracked = isQuantityTracked(p);
               const currentStock = getQuantityLimit(p);
               const isSoldOut = isStockTracked && currentStock <= 0;
-
-              const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
-              const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
+              const inclusionText = p.type !== 'bundle' ? (p.inclusion || '') : '';
 
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
@@ -1563,11 +1571,13 @@ export default function Menu({ cart, setCart }) {
                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105 group-hover:blur-[3px] group-hover:brightness-[0.55]" />
                     )}
 
-                    {isStockTracked && isSoldOut && (
+                    {isSoldOut ? (
                       <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-red-500/90 text-white">
-                        <span className="text-[10px] font-bold uppercase tracking-wider">
-                          Sold Out
-                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Sold Out</span>
+                      </div>
+                    ) : p.order_type === 'Pre-order' && (
+                      <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Pre-order Only</span>
                       </div>
                     )}
 
@@ -1595,7 +1605,6 @@ export default function Menu({ cart, setCart }) {
                   </div>
                   <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                    {p.type !== 'bundle' && <span className="self-start mb-1 rounded-full bg-[#F5EFEB] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#5A453C]">{p.order_type === 'Pick-up Today' ? 'Buy Now' : p.order_type}</span>}
                     <div className="flex-1 mb-2">
                       <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug line-clamp-2">{p.name}</h3>
 
@@ -1608,12 +1617,12 @@ export default function Menu({ cart, setCart }) {
                         </p>
                       )}
 
-                      {p.type !== 'bundle' && p.inclusion && (
+                      {inclusionText && (
                         <p
                           className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug line-clamp-2 mt-1"
-                          title={p.inclusion}
+                          title={inclusionText}
                         >
-                          {p.inclusion}
+                          {inclusionText}
                         </p>
                       )}
                     </div>
@@ -1624,13 +1633,13 @@ export default function Menu({ cart, setCart }) {
                            ₱{p.original_price.toLocaleString()}
                          </span>
                        )}
-                       {isVariable ? 'Starting at ' : ''}₱{Number(minPrice).toLocaleString()}
+                       ₱{Number(p.price).toLocaleString()}
                     </p>
 
                     <button
                       onClick={() => {
                         if (isSoldOut) return;
-                        const needsModal = p.type === 'bundle' || p.type === 'package' || isVariable || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
+                        const needsModal = p.type === 'bundle' || p.type === 'package' || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
                         
                         needsModal ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
@@ -1641,7 +1650,7 @@ export default function Menu({ cart, setCart }) {
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
                       }`}
                     >
-                      {isSoldOut ? 'Out of Stock' : (isVariable || p.type === 'bundle' || p.type === 'package' ? 'Select Options' : 'Add to Cart')}
+                      {isSoldOut ? 'Out of Stock' : 'Add to Cart'}
                     </button>
                   </div>
                 </div>
@@ -1709,13 +1718,6 @@ export default function Menu({ cart, setCart }) {
                       </button>
                     );
                   })}
-                </div>
-                <div className="flex gap-2 overflow-x-auto scrollbar-hide pt-2">
-                  {['All', 'Buy Now', 'Pre-order', 'Both'].map(type => (
-                    <button key={type} type="button" onClick={() => setOrderTypeFilter(type)} className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold ${orderTypeFilter === type ? 'border-[#3B1F0A] bg-[#3B1F0A] text-white' : 'border-[#DED4CC] bg-white text-[#8A7264]'}`}>
-                      {type}
-                    </button>
-                  ))}
                 </div>
               </div>
             </div>

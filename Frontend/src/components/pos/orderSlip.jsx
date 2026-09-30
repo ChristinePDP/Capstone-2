@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import MultiImageField from '../shared/MultiImageField';
@@ -17,6 +17,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
   
   // State para sa pag-track ng errors
   const [errors, setErrors] = useState({});
+  const bodyRef = useRef(null);
 
   
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
       return;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageError(`File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.`);
       setImageFile(null);
       return;
     }
@@ -120,6 +121,10 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
     // 3. Kung may error, i-set sa state at pigilang mag-add to cart
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      // I-scroll sa unang field na may error para kita agad kung alin ang kulang
+      requestAnimationFrame(() => {
+        bodyRef.current?.querySelector('.border-red-500')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
       return;
     }
 
@@ -161,7 +166,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
         </div>
 
         {/* SCROLLABLE CONTENT BODY */}
-        <div className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div ref={bodyRef} className="p-4 sm:p-6 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
 
           {isVariable && (
             <div className="flex flex-col gap-4 mb-6">

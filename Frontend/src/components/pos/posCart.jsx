@@ -124,6 +124,18 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     prevCartLength.current = cart.length;
   }, [cart.length, hasPreOrder, hasBuyNow, isPreOrderOnly, isBuyNowOnly, setOrderType]);
 
+  // Kapag Pre-order lang (o Buy Now lang) ang order type ng laman ng cart,
+  // laging naka-force ang order type ng cart — hindi lang kapag nagdagdag ng
+  // item (halimbawa kapag nag-restore ang cart/orderType mula localStorage o
+  // kapag nagbago ang orderType). Kapag both, same pa rin ang dating logic.
+  useEffect(() => {
+    if (isPreOrderOnly && orderType !== 'Pre-Order') {
+      setOrderType('Pre-Order');
+    } else if (isBuyNowOnly && orderType !== 'Buy Now') {
+      setOrderType('Buy Now');
+    }
+  }, [isPreOrderOnly, isBuyNowOnly, orderType, setOrderType]);
+
   const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, hasStrictPreOrder ? 3 : 1);
 
@@ -531,6 +543,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Buy Now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
               } ${isPreOrderOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isPreOrderOnly}
             >
               Buy Now
             </button>
@@ -542,6 +555,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Pre-Order' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
               } ${isBuyNowOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isBuyNowOnly}
             >
               Pre-Order
             </button>

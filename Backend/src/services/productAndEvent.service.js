@@ -417,6 +417,8 @@ const buildPackageInsertRow = (bundleData) => ({
   bundle_options: {},
   discounted_price: bundleData.price ?? bundleData.discounted_price ?? 0,
   custom_image_url: bundleData.custom_image_url || null,
+  // Ang inclusion ng Package ay nasa promo_bundles row na mismo (hindi na sa Product record).
+  inclusion: bundleData.inclusion || '',
   event_tag: null,
   is_active: bundleData.is_active ?? true,
   order_type: normalizeOrderType(bundleData.order_type),
@@ -481,6 +483,7 @@ export const updateBundle = async (id, bundleData) => {
         bundle_name: bundleData.bundle_name,
         discounted_price: bundleData.price ?? bundleData.discounted_price,
         custom_image_url: bundleData.custom_image_url,
+        inclusion: bundleData.inclusion,
         is_active: bundleData.is_active,
         package_items: bundleData.package_items,
         order_type: bundleData.order_type !== undefined ? normalizeOrderType(bundleData.order_type) : undefined,

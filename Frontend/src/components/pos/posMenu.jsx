@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
@@ -39,6 +39,15 @@ async function fetchPosBundles() {
   return posBundlesPromise;
 }
 
+// Nag-i-scroll papunta sa unang field na may error para kita agad ni user
+// kung alin ang kulang (lalo na kung nasa ilalim/taas pa ng modal body).
+function scrollToFirstError(container) {
+  requestAnimationFrame(() => {
+    const el = container?.querySelector('[data-field-error="true"], .border-red-500');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+
 const BASE_CATEGORIES = ['All', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
 
 // ─────────────────────────────────────────────────────────────
@@ -67,6 +76,18 @@ function getBundleDescription(bundle) {
     }
     return p.name;
   }).join(' + ');
+}
+
+// Inclusion ng Package = ang mga produktong bumubuo rito (package_items),
+// gaya ng description ng Bundle — hindi ito tina-type na field.
+function getPackageInclusion(bundle, productList = []) {
+  return (bundle.package_items || []).map(pi => {
+    const name = pi.product?.name || pi.name
+      || productList.find(p => String(p.id) === String(pi.product_id))?.name;
+    if (!name) return null;
+    const qty = Number(pi.quantity) || 1;
+    return qty > 1 ? `${qty}x ${name}` : name;
+  }).filter(Boolean).join(' + ');
 }
 
 function resolveBundleOrderType(products = []) {
@@ -158,6 +179,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
   const [imageError, setImageError] = useState('');
   const [selectedPriceOptions, setSelectedPriceOptions] = useState({});
   const [errors, setErrors] = useState({});
+  const bodyRef = useRef(null);
 
   const handleImagePick = (file) => {
     if (!file) {
@@ -166,7 +188,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
       return;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setImageError(`Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).`);
+      setImageError(`File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.`);
       setImageFile(null);
       return;
     }
@@ -236,6 +258,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
+      scrollToFirstError(bodyRef.current);
       return;
     }
 
@@ -273,7 +296,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
           </button>
         </div>
 
-        <div className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div ref={bodyRef} className="p-4 sm:p-6 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
 
           {isVariable && (
             <div className="flex flex-col gap-4 mb-6">
@@ -435,12 +458,21 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
 }
 
 // --- BUNDLE STEPPER MODAL ---
-function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
+function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({});
   const [bundleImageErrors, setBundleImageErrors] = useState({});
+  const [errors, setErrors] = useState({});
+  const bodyRef = useRef(null);
   const products = bundle.products || [];
+
+  // Sa bawat lipat ng item (Next/Back) at pag-open ng modal: laging magsimula sa itaas
+  // ng form at burahin ang error ng nakaraang item.
+  useLayoutEffect(() => {
+    setErrors({});
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [currentStep]);
 
   if (!bundle || products.length === 0) return null;
 
@@ -454,11 +486,12 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
       ...prev,
       [currentProduct.id]: { ...(prev[currentProduct.id] || {}), [label]: value }
     }));
+    setErrors(prev => ({ ...prev, [label]: false }));
   };
 
   const handleImageChange = (file) => {
     if (file && file.size > MAX_FILE_SIZE_BYTES) {
-      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setBundleImageErrors(prev => ({ ...prev, [currentProduct.id]: `File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.` }));
       setBundleImages(prev => ({ ...prev, [currentProduct.id]: null }));
       return;
     }
@@ -475,7 +508,10 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
         return isSlipAnswerEmpty(field, answer);
       });
       if (missingFields.length > 0) {
-        showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
+        const newErrors = {};
+        missingFields.forEach(f => { newErrors[f.label] = true; });
+        setErrors(newErrors);
+        scrollToFirstError(bodyRef.current);
         return;
       }
     }
@@ -527,7 +563,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
           </p>
         </div>
 
-        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div ref={bodyRef} className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           {!hasFields && !allowsImageUpload ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <Package size={32} className="text-[#DED4CC] mb-3" />
@@ -539,27 +575,32 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
               {hasFields && currentProduct.order_slip_fields.map((field, index) => {
                 const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                 const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
+                const hasError = !!errors[field.label];
+                const value = bundleAnswers[currentProduct.id]?.[field.label];
+                const labelClass = `text-xs font-semibold mb-1.5 ${hasError ? 'text-red-500' : 'text-[#8A7264]'}`;
+                const controlClass = `w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${hasError ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`;
+                const errorMsg = hasError && <span className="text-[10px] text-red-500 mt-1">This field is required</span>;
 
                 if (field.type === 'Multi-image') {
                   return (
-                    <div key={index} className="flex flex-col w-full basis-full">
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full basis-full">
                       <MultiImageField
                         label={labelText}
-                        value={bundleAnswers[currentProduct.id]?.[field.label] || []}
+                        value={value || []}
                         onChange={files => handleAnswerChange(field.label, files)}
                         max={field.maxImages}
-                        error={false}
+                        error={hasError}
                       />
                     </div>
                   );
                 }
                 if (field.type === 'Select') {
                   return (
-                    <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                      <label className={labelClass}>{labelText}</label>
                       <select
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
-                        value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
+                        className={controlClass}
+                        value={value || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)}
                       >
                         <option value="" disabled>Select {field.label}...</option>
@@ -567,33 +608,36 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
                           <option key={i} value={opt}>{opt}</option>
                         ))}
                       </select>
+                      {errorMsg}
                     </div>
                   );
                 }
                 if (field.type === 'Textarea') {
                   return (
-                    <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                      <label className={labelClass}>{labelText}</label>
                       <textarea
                         placeholder={`Enter ${field.label}...`}
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors"
+                        className={`${controlClass} resize-none`}
                         rows={3}
-                        value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
+                        value={value || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)}
                       />
+                      {errorMsg}
                     </div>
                   );
                 }
                 return (
-                  <div key={index} className="flex flex-col w-full">
-                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                  <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                    <label className={labelClass}>{labelText}</label>
                     <input
                       type={field.type === 'Number' ? 'number' : 'text'}
                       placeholder={`Enter ${field.label}...`}
-                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
-                      value={bundleAnswers[currentProduct.id]?.[field.label] || ''}
+                      className={controlClass}
+                      value={value || ''}
                       onChange={e => handleAnswerChange(field.label, e.target.value)}
                     />
+                    {errorMsg}
                   </div>
                 );
               })}
@@ -648,12 +692,21 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit, showT
 }
 
 // --- PACKAGE STEPPER MODAL ---
-function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToast }) {
+function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [packageAnswers, setPackageAnswers] = useState({});
   const [packageImages, setPackageImages] = useState({});
   const [packageImageErrors, setPackageImageErrors] = useState({});
+  const [errors, setErrors] = useState({});
+  const bodyRef = useRef(null);
   const components = pkg.package_components || [];
+
+  // Sa bawat lipat ng item (Next/Back) at pag-open ng modal: laging magsimula sa itaas
+  // ng form at burahin ang error ng nakaraang item.
+  useLayoutEffect(() => {
+    setErrors({});
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [currentStep]);
 
   if (!pkg || components.length === 0) return null;
 
@@ -667,11 +720,12 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
       ...prev,
       [currentProduct.id]: { ...(prev[currentProduct.id] || {}), [label]: value }
     }));
+    setErrors(prev => ({ ...prev, [label]: false }));
   };
 
   const handleImageChange = (file) => {
     if (file && file.size > MAX_FILE_SIZE_BYTES) {
-      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `Masyadong malaki ang file (max ${MAX_FILE_SIZE_LABEL} lang).` }));
+      setPackageImageErrors(prev => ({ ...prev, [currentProduct.id]: `File is too large. Maximum size is ${MAX_FILE_SIZE_LABEL}.` }));
       setPackageImages(prev => ({ ...prev, [currentProduct.id]: null }));
       return;
     }
@@ -688,7 +742,10 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
         return isSlipAnswerEmpty(field, answer);
       });
       if (missingFields.length > 0) {
-        showToast(`Mangyaring sagutan ang lahat ng required fields para sa ${currentProduct.name}.`, 'error');
+        const newErrors = {};
+        missingFields.forEach(f => { newErrors[f.label] = true; });
+        setErrors(newErrors);
+        scrollToFirstError(bodyRef.current);
         return;
       }
     }
@@ -743,7 +800,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
           </p>
         </div>
 
-        <div className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
+        <div ref={bodyRef} className="p-5 flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
           {!hasFields && !allowsImageUpload ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <Package size={32} className="text-[#DED4CC] mb-3" />
@@ -755,27 +812,32 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
               {hasFields && currentProduct.order_slip_fields.map((field, index) => {
                 const isOptional = field.optional === true || field.isOptional === true || field.required === false;
                 const labelText = isOptional ? `${field.label} (Optional)` : `${field.label} *`;
+                const hasError = !!errors[field.label];
+                const value = packageAnswers[currentProduct.id]?.[field.label];
+                const labelClass = `text-xs font-semibold mb-1.5 ${hasError ? 'text-red-500' : 'text-[#8A7264]'}`;
+                const controlClass = `w-full border bg-white p-3 rounded-xl text-sm focus:outline-none transition-colors ${hasError ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`;
+                const errorMsg = hasError && <span className="text-[10px] text-red-500 mt-1">This field is required</span>;
 
                 if (field.type === 'Multi-image') {
                   return (
-                    <div key={index} className="flex flex-col w-full basis-full">
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full basis-full">
                       <MultiImageField
                         label={labelText}
-                        value={packageAnswers[currentProduct.id]?.[field.label] || []}
+                        value={value || []}
                         onChange={files => handleAnswerChange(field.label, files)}
                         max={field.maxImages}
-                        error={false}
+                        error={hasError}
                       />
                     </div>
                   );
                 }
                 if (field.type === 'Select') {
                   return (
-                    <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                      <label className={labelClass}>{labelText}</label>
                       <select
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
-                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        className={controlClass}
+                        value={value || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)}
                       >
                         <option value="" disabled>Select {field.label}...</option>
@@ -783,33 +845,36 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
                           <option key={i} value={opt}>{opt}</option>
                         ))}
                       </select>
+                      {errorMsg}
                     </div>
                   );
                 }
                 if (field.type === 'Textarea') {
                   return (
-                    <div key={index} className="flex flex-col w-full">
-                      <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                    <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                      <label className={labelClass}>{labelText}</label>
                       <textarea
                         placeholder={`Enter ${field.label}...`}
-                        className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] resize-none transition-colors"
+                        className={`${controlClass} resize-none`}
                         rows={3}
-                        value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                        value={value || ''}
                         onChange={e => handleAnswerChange(field.label, e.target.value)}
                       />
+                      {errorMsg}
                     </div>
                   );
                 }
                 return (
-                  <div key={index} className="flex flex-col w-full">
-                    <label className="text-xs font-semibold text-[#8A7264] mb-1.5">{labelText}</label>
+                  <div key={index} data-field-error={hasError ? 'true' : undefined} className="flex flex-col w-full">
+                    <label className={labelClass}>{labelText}</label>
                     <input
                       type={field.type === 'Number' ? 'number' : 'text'}
                       placeholder={`Enter ${field.label}...`}
-                      className="w-full border border-[#EAE4E0] bg-white p-3 rounded-xl text-sm focus:outline-none focus:border-[#5A453C] transition-colors"
-                      value={packageAnswers[currentProduct.id]?.[field.label] || ''}
+                      className={controlClass}
+                      value={value || ''}
                       onChange={e => handleAnswerChange(field.label, e.target.value)}
                     />
+                    {errorMsg}
                   </div>
                 );
               })}
@@ -864,7 +929,6 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit, showToa
 }
 
 export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [] }) {
-  const [orderTypeFilter, setOrderTypeFilter] = useState('All');
   const [modal, setModal] = useState(null);
   const [bundles, setBundles] = useState([]);
   const [showBackToTop, setShowBackToTop] = useState(false);
@@ -940,6 +1004,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
            return {
               ...b,
+              inclusion: getPackageInclusion(b, products),
               id: `package-${b.id}`,
               name: b.bundle_name,
               category: 'Package',
@@ -996,14 +1061,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
   const displayItems = useMemo(() => {
     const regularProducts = products.filter(p => p.category !== 'Package');
-    const items = [...visibleBundleItems, ...regularProducts];
-    
-    return items.filter(item => {
-      if (orderTypeFilter === 'All') return true;
-      if (orderTypeFilter === 'Buy Now') return item.order_type === 'Pick-up Today';
-      return item.order_type === orderTypeFilter;
-    });
-  }, [visibleBundleItems, products, orderTypeFilter]);
+    return [...visibleBundleItems, ...regularProducts];
+  }, [visibleBundleItems, products]);
 
   const categories = useMemo(() => {
     return bundleItems.length > 0
@@ -1054,15 +1113,13 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
+              const inclusionText = !isBundle ? (p.inclusion || '') : '';
               const isStockTracked = isQuantityTracked(p, orderType);
               const currentStock = Math.max(0, getQuantityLimit(p, orderType) - getCartQtyForId(p.id));
               const isSoldOut = isStockTracked && currentStock <= 0;
               
-              const isVariable = p.pricing_mode === 'variable' && p.price_matrix?.length > 0;
-              const minPrice = isVariable ? Math.min(...p.price_matrix.map(m => m.price)) : p.price;
-              
               const isBundleOrPackage = isBundle || p.type === 'package';
-              const isCustomizable = isBundleOrPackage || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload || isVariable;
+              const isCustomizable = isBundleOrPackage || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
 
               const isMismatchedType = 
                 (orderType === 'Buy Now' && p.order_type === 'Pre-order') ||
@@ -1078,7 +1135,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     )}
 
                     {isStockTracked && (
-                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut || (orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
                         <span className="text-[10px] font-bold uppercase tracking-wider">
                           {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : isSoldOut ? 'Sold Out' : `${currentStock} Available`}
                         </span>
@@ -1103,12 +1160,16 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                   </div>
                   <div className="p-3 sm:p-4 lg:p-4 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                    {p.type !== 'bundle' && <span className="self-start mb-1 rounded-full bg-[#F5EFEB] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#5A453C]">{p.order_type === 'Pick-up Today' ? 'Buy Now' : p.order_type}</span>}
                     <div className="flex-1 mb-1.5 lg:mb-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.5rem]">
                       <h3 className={`font-bold text-xs sm:text-sm lg:text-sm text-[#3B1F0A] leading-snug ${isBundle ? 'line-clamp-1' : 'line-clamp-2'}`}>{p.name}</h3>
                       {isBundle && (
                         <p className="text-[10px] sm:text-[11px] text-[#8A7264] truncate mt-0.5" title={getBundleDescription(p)}>
                           {getBundleDescription(p)}
+                        </p>
+                      )}
+                      {inclusionText && (
+                        <p className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug line-clamp-2 mt-1" title={inclusionText}>
+                          {inclusionText}
                         </p>
                       )}
                     </div>
@@ -1118,7 +1179,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                           ₱{p.original_price.toLocaleString()}
                         </span>
                       )}
-                      {isVariable ? 'Starting at ' : ''}₱{Number(minPrice).toLocaleString()}
+                      ₱{Number(p.price).toLocaleString()}
                     </p>
                     <button
                       onClick={() => {
@@ -1141,7 +1202,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                         ? (p.order_type === 'Pre-order' ? 'Pre-order Only' : 'Buy Now Only')
                         : isSoldOut 
                           ? 'Out of Stock' 
-                          : (isCustomizable ? 'Select Options' : 'Add to Cart')}
+                          : 'Add to Cart'}
                     </button>
                   </div>
                 </div>
@@ -1202,13 +1263,6 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                 );
               })}
             </div>
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide pt-2">
-              {['All', 'Buy Now', 'Pre-order', 'Both'].map(type => (
-                <button key={type} type="button" onClick={() => setOrderTypeFilter(type)} className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-semibold ${orderTypeFilter === type ? 'border-[#3B1F0A] bg-[#3B1F0A] text-white' : 'border-[#DED4CC] bg-white text-[#8A7264]'}`}>
-                  {type}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -1232,9 +1286,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       </button>
 
       {modal && modal.type === 'bundle' ? (
-        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} showToast={showToast} />
+        <PosBundleModal bundle={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : modal && modal.type === 'package' ? (
-        <PosPackageModal pkg={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} showToast={showToast} />
+        <PosPackageModal pkg={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : modal ? (
         <PosProductModal product={modal} onClose={() => setModal(null)} onAddToCart={onAddToCart} checkAndWarnLimit={checkAndWarnLimit} />
       ) : null}
