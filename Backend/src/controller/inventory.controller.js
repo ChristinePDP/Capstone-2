@@ -1,5 +1,5 @@
 import { ok, created } from '../utils/response.js';
-import { StockItemSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema   } from '../schemas/index.js';
+import { StockItemSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema, MaterialCreateSchema } from '../schemas/index.js';
 import { MaterialService, ProductService, ProductionService, RecipeService, WasteService, IngredientService, InventoryLogService } from '../services/inventory.service.js';
 
 const IngredientController = {
@@ -48,7 +48,8 @@ const MaterialController = {
   },
   create: async (req, res, next) => {
     try {
-      const body = StockItemSchema.parse(req.body);
+      // This schema requires material_type ('celebration' | 'product')
+      const body = MaterialCreateSchema.parse(req.body);
       created(res, await MaterialService.create(body), 'Material added');
     } catch (err) { next(err); }
   },

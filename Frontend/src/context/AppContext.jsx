@@ -150,6 +150,9 @@ export function AppProvider({ children }) {
         minimum_stock: Number(item.minimum_stock ?? 0),
         cost_per_unit: Number(item.cost_per_unit ?? 0),
         category: item.category,
+        // 'celebration' | 'product' - used by CelebrationTab to split the two tabs
+        materialType: item.material_type,
+        material_type: item.material_type,
       }));
 
       const normalizedRecipes = (rec.data || []).map(recipe => {

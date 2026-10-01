@@ -16,18 +16,12 @@ const MATERIAL_VIEWS = [
   { key: 'product',     label: 'Product Material',     category: 'Product Material' },
 ];
 
-// A material is a "Celebration Material" when it's linked to a Celebration
-// Material product that's actually being sold. Everything else (materials
-// linked to other product types, like boxes for cakes/pastries, or not
-// linked to any product at all) is a "Product Material".
-// This is only used as a fallback for OLDER records that don't have a
-// `category` saved yet — going forward, the type is set manually by the
-// user via the toggle in the Add/Edit form.
-function getMaterialViewKey(material, productsById = {}) {
-  if (material?.category === 'Product Material') return 'product';
-  if (material?.category === 'Celebration Material') return 'celebration';
-  const linkedProduct = productsById[material?.productId || material?.product_id];
-  return linkedProduct?.category === 'Celebration Material' ? 'celebration' : 'product';
+// The material type is stored in the database (column: material_type,
+// 'celebration' | 'product'). We simply read it here - no more guessing
+// from the linked product, so the two tabs can never get mixed up.
+function getMaterialViewKey(material) {
+  const type = material?.materialType ?? material?.material_type;
+  return type === 'product' ? 'product' : 'celebration';
 }
 
 export default function CelebrationTab() {
@@ -73,8 +67,8 @@ export default function CelebrationTab() {
   };
 
   const materialsInView = useMemo(
-    () => materials.filter(m => getMaterialViewKey(m, productsById) === materialView),
-    [materials, materialView, productsById]
+    () => materials.filter(m => getMaterialViewKey(m) === materialView),
+    [materials, materialView]
   );
 
   const filtered = materialsInView.filter(m => {
@@ -87,9 +81,9 @@ export default function CelebrationTab() {
   // Total per material type — shown as a small count beside each view tab.
   const viewCounts = useMemo(() => {
     const counts = { celebration: 0, product: 0 };
-    materials.forEach(m => { counts[getMaterialViewKey(m, productsById)] += 1; });
+    materials.forEach(m => { counts[getMaterialViewKey(m)] += 1; });
     return counts;
-  }, [materials, productsById]);
+  }, [materials]);
 
   // Counts shown in the status dropdown (for the material type currently
   // in view). Uses the same ingStatus() as the table's Status column and the
@@ -460,10 +454,10 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   const [expiry, setExpiry] = useState(''); // New: expiration date input
   const [productId, setProductId] = useState(material?.productId || material?.product_id || '');
 
-  // The user manually picks whether this is a Celebration Material or a
-  // Product Material — this is not guessed automatically.
-  const initialMaterialType = material ? getMaterialViewKey(material, productsById) : defaultView;
-  const [materialType, setMaterialType] = useState(initialMaterialType);
+  // The material type is fixed: for a new material it comes from the tab the
+  // modal was opened in (defaultView); for an existing one it comes from the
+  // saved material_type. The user no longer picks or changes it.
+  const materialType = material?.id ? getMaterialViewKey(material) : defaultView;
 
   // Name-suggestion source depende sa uri: Celebration Materials ay
   // naka-link sa Celebration Material products, samantalang Product
@@ -492,7 +486,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     String(min) !== String(material?.min ?? '') ||
     String(detailsCost) !== String(material?.costPerUnit ?? '')
     || productId !== (material?.productId || material?.product_id || '')
-    || materialType !== initialMaterialType
   );
 
   const handleDetailsHeaderClick = () => {
@@ -517,7 +510,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     setMin(material?.min ?? '');
     setDetailsCost(String(material?.costPerUnit ?? ''));
     setProductId(material?.productId || material?.product_id || '');
-    setMaterialType(initialMaterialType);
     setEditingDetails(false);
   };
 
@@ -543,7 +535,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
           stock_quantity: addedQty, 
           minimum_stock: parseFloat(min), 
           cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
-          category: defaultView === 'product' ? 'Product Material' : 'Celebration Material',
+          material_type: defaultView, // 'celebration' | 'product' - taken from the active tab
           expiration_date: expiry || null // New field
         },
         addedQty,
@@ -579,7 +571,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
           unit,
           minimum_stock: parseFloat(min) || 0,
           cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0,
-          category: materialType === 'product' ? 'Product Material' : 'Celebration Material',
         }
       : null;
       
@@ -823,24 +814,11 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                     </>
                   ) : (
                     <>
-                      <div className="col-span-2">
-                        <span className="block text-[10px] font-bold uppercase text-brand-400 mb-1.5">Material Type</span>
-                        <div className="flex gap-2">
-                          {MATERIAL_VIEWS.map(view => (
-                            <button
-                              key={view.key}
-                              type="button"
-                              onClick={() => setMaterialType(view.key)}
-                              className={`flex-1 px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-                                materialType === view.key
-                                  ? 'bg-brand-800 text-white border-brand-800 shadow-sm'
-                                  : 'bg-white text-brand-500 border-brand-200 hover:text-brand-800'
-                              }`}
-                            >
-                              {view.label}
-                            </button>
-                          ))}
-                        </div>
+                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
+                        <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
+                        <span className="text-sm font-bold text-brand-800 block">
+                          {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
+                        </span>
                       </div>
                       <div>
                         {materialType === 'celebration' ? (

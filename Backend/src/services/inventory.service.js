@@ -134,6 +134,9 @@ const MaterialService = {
   },
 
   create: async (body) => {
+    if (!['celebration', 'product'].includes(body.material_type)) {
+      throw new AppError("material_type must be 'celebration' or 'product'.", 400);
+    }
     const { data, error } = await MaterialModel.create(body);
     if (error) throw error;
 
@@ -160,7 +163,11 @@ const MaterialService = {
   },
 
   update: async (id, body) => {
-    const { data, error } = await MaterialModel.update(id, body);
+    // material_type is immutable after creation, so an item can never
+    // "move" to the other tab and mix the data.
+    // eslint-disable-next-line no-unused-vars
+    const { material_type, ...safeBody } = body;
+    const { data, error } = await MaterialModel.update(id, safeBody);
     if (error) throw new AppError(`Failed to update material: ${error.message}`, 500);
     return data;
   },

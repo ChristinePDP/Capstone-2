@@ -128,6 +128,16 @@ const StockItemSchema = z.object({
 
 const UpdateStockItemSchema = StockItemSchema.partial();
 
+// Materials only (celebration_materials table). material_type is required
+// on create - it comes from the tab the user added the item in.
+// Intentionally NOT part of UpdateStockItemSchema: the type can't be changed
+// after creation, so an item never moves to the other tab.
+const MaterialTypeSchema = z.enum(['celebration', 'product']);
+
+const MaterialCreateSchema = StockItemSchema.extend({
+  material_type: MaterialTypeSchema,
+});
+
 const RestockSchema = z.object({
   qty: z.coerce.number().positive('Restock quantity must be positive'),
 });
@@ -188,6 +198,8 @@ export {
   UpdateOrderStatusSchema,
   StockItemSchema,
   UpdateStockItemSchema,
+  MaterialTypeSchema,
+  MaterialCreateSchema,
   RestockSchema,
   RecipeIngredientSchema,
   CreateRecipeSchema,
