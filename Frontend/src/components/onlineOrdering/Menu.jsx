@@ -615,7 +615,10 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
         qty: 1,
         price: pkg.price,
         type: 'package',
-        packageId: pkg.id,
+        // Ang `pkg.id` ay may `package-` prefix (cart id) — ang totoong uuid ng
+        // package ay nasa `pkg.packageId`. Dati, ang prefixed id ang naipapasa sa
+        // backend kaya pumapalya ang pagbuo ng order pagkatapos ng bayad.
+        packageId: pkg.packageId || pkg.id,
         products: components, 
         selected_price_options: null,
         order_slip_details: pruneEmptySlipAnswers(packageAnswers),

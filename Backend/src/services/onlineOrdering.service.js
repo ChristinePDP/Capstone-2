@@ -334,25 +334,68 @@ const resolveBundleLineItem = async (item) => {
 // `pkg.price` (ang binayaran ng customer para sa buong package) ay
 // nananatiling nakatago lang sa `orders.grand_total`, hindi na kailangang
 // i-allocate/i-scale papunta sa mga component rows.
+// Ang Package sa cart ng frontend ay may id na `package-<uuid>` (para hindi
+// mabangga sa product id sa cart), pero uuid lang ang tinatanggap ng database.
+// Kapag may prefix pa ang dumating (hal. `packageId` na naka-fallback sa
+// `item.id`), tanggalin muna ito bago maghanap — kung hindi, "invalid input
+// syntax for type uuid" ang error at hindi nagagawa ang order pagkatapos ng bayad.
+const stripPackagePrefix = (id) => (typeof id === 'string' ? id.replace(/^package-/, '') : id);
+
+// Hinahanap ang Package. Sa kasalukuyang disenyo, ang Package ay isang row sa
+// `promo_bundles` (category 'Package') — hindi na sa `products` table — kaya
+// `getBundleById` ang unang tinitignan. Kapag wala doon, babalik sa dating
+// disenyo (Package bilang product record) para hindi masira ang mga lumang
+// package. Ibinabalik ang { name, is_active, package_items, componentProducts }
+// o null kung walang makita.
+const loadPackageDefinition = async (rawId) => {
+  const id = stripPackagePrefix(rawId);
+  if (!id) return null;
+
+  try {
+    const bundle = await getBundleById(id);
+    if (bundle && bundle.category === 'Package') {
+      const items = Array.isArray(bundle.package_items) ? bundle.package_items : [];
+      return {
+        name: bundle.bundle_name || bundle.name,
+        is_active: bundle.is_active,
+        package_items: items,
+        // `enrichPackageBundle` ay naglalagay na ng `product` sa bawat package item.
+        componentProducts: items.map(pi => pi.product).filter(Boolean),
+      };
+    }
+  } catch (err) {
+    console.warn(`[PACKAGE] promo_bundles lookup failed for ${id}:`, err.message);
+  }
+
+  try {
+    const legacy = await ProductModel.findById(id);
+    if (legacy && legacy.category === 'Package') {
+      const items = Array.isArray(legacy.package_items) ? legacy.package_items : [];
+      const componentProducts = await ProductModel.findByIds(items.map(c => c.product_id).filter(Boolean));
+      return { name: legacy.name, is_active: legacy.is_active, package_items: items, componentProducts };
+    }
+  } catch {
+    // walang ganoong product — ituloy sa "not found"
+  }
+
+  return null;
+};
+
 const resolvePackageLineItem = async (item) => {
-  const pkg = await ProductModel.findById(item.packageId || item.productId);
+  const packageLookupId = stripPackagePrefix(item.packageId || item.productId);
+  const pkg = await loadPackageDefinition(packageLookupId);
 
   if (!pkg) {
-    throw new Error(`Package not found: ${item.packageId || item.productId}`);
-  }
-  if (pkg.category !== 'Package') {
-    throw new Error(`"${pkg.name}" is not a Package product.`);
+    throw new Error(`Package not found: ${packageLookupId}`);
   }
   if (pkg.is_active === false) {
     throw new Error(`"${pkg.name}" is no longer available.`);
   }
-  if (!Array.isArray(pkg.package_items) || pkg.package_items.length === 0) {
+  if (pkg.package_items.length === 0) {
     throw new Error(`"${pkg.name}" has no products configured yet.`);
   }
 
-  const componentIds = pkg.package_items.map(c => c.product_id).filter(Boolean);
-  const componentProducts = await ProductModel.findByIds(componentIds);
-  const componentById = new Map(componentProducts.map(p => [String(p.id), p]));
+  const componentById = new Map(pkg.componentProducts.map(p => [String(p.id), p]));
 
   const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
   const packageGroupId = randomUUID();
@@ -454,11 +497,11 @@ const isPackageItem = async (item) => {
   if (item.type === 'package') return true;
   if (item.type === 'bundle' || item.bundleId) return false;
 
-  const candidateId = item.packageId || item.productId;
+  const candidateId = stripPackagePrefix(item.packageId || item.productId);
   if (!candidateId) return false;
 
-  const product = await ProductModel.findById(candidateId);
-  return product?.category === 'Package';
+  const pkg = await loadPackageDefinition(candidateId);
+  return Boolean(pkg);
 };
 
 export const resolveOrderItems = async (items = []) => {
