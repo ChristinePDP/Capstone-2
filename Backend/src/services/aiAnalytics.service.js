@@ -210,20 +210,23 @@ const SALES_MIN_ACTIVE_DAYS = { "7d": 30, "30d": 60 };
 // Hindi isinasama sa forecast ang produktong bago, kaunti ang benta, o
 // kalat-kalat — dahil ingay lang ang lalabas na "+200%" mula sa 1→3 units.
 const PRODUCT_FORECAST_RULES = {
+  // Pinaluwag para sa maliit na volume: bawat produkto ay may sariling series
+  // kaya manipis ang data. Ang natitirang rule na lang ay "may konting
+  // history at may konting benta kamakailan".
   "7d": {
-    minDaysSinceFirstSale: 28,
-    minActiveDays: 8,
-    minUnitsRecent: 10,       // units sa huling levelWindowDays
-    minAbsChange: 3,          // units — pinakamaliit na diff na papasok sa list
-    minPctChange: 10,         // %  — pinakamaliit na pagbabago na papasok sa list
+    minDaysSinceFirstSale: 14,
+    minActiveDays: 2,
+    minUnitsRecent: 3,        // units sa huling levelWindowDays
+    minAbsChange: 2,          // units — pinakamaliit na diff na papasok sa list
+    minPctChange: 0,          // walang minimum %
     seasonalityMinActiveDays: 20,
   },
   "30d": {
-    minDaysSinceFirstSale: 84,
-    minActiveDays: 20,
-    minUnitsRecent: 30,
-    minAbsChange: 8,
-    minPctChange: 10,
+    minDaysSinceFirstSale: 14,
+    minActiveDays: 2,
+    minUnitsRecent: 3,
+    minAbsChange: 2,
+    minPctChange: 0,
     seasonalityMinActiveDays: 40,
   },
 };
@@ -1314,6 +1317,28 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
     .filter((p) => p.series.length > 0);
   const eligible = scoped.filter((p) => isProductEligible(p.series, horizonKey));
 
+  // DIAGNOSTIC LOG (walang epekto sa forecast): ipakita kung bakit pumasa/bagsak
+  // ang bawat produkto, para makita kung aling rule ang humaharang.
+  {
+    const lw = FORECAST_MODEL.levelWindowDays[horizonKey];
+    const rows = scoped
+      .map((p) => {
+        const days = p.series.length;
+        const active = p.series.filter((x) => x.value > 0).length;
+        const recent = sumOf(p.series.slice(-lw).map((x) => x.value));
+        const fails = [];
+        if (days < rules.minDaysSinceFirstSale) fails.push(`days ${days}<${rules.minDaysSinceFirstSale}`);
+        if (active < rules.minActiveDays) fails.push(`active ${active}<${rules.minActiveDays}`);
+        if (recent < rules.minUnitsRecent) fails.push(`recent ${recent}<${rules.minUnitsRecent}`);
+        return { name: p.productName, total: sumOf(p.series.map((x) => x.value)), days, active, recent, fails };
+      })
+      .sort((a, b) => b.total - a.total);
+    console.log(`[ProductForecastService][${horizonKey}] ${eligible.length}/${scoped.length} products eligible. Top 15 by units:`);
+    for (const r of rows.slice(0, 15)) {
+      console.log(`  - ${r.name}: total=${r.total}, daysSinceFirstSale=${r.days}, activeDays=${r.active}, recentUnits=${r.recent} -> ${r.fails.length ? 'FAIL (' + r.fails.join(', ') + ')' : 'OK'}`);
+    }
+  }
+
   if (eligible.length === 0) {
     return productInsufficientPart(
       horizonKey,
@@ -1340,6 +1365,8 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
     .sort((a, b) => a.diff - b.diff)
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
+
+  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length}, risk=${risk.length} (after meaningful-change filter: >=${rules.minAbsChange} units & >=${rules.minPctChange}%)`);
 
   return {
     label: PF_TIMEFRAME_LABELS[horizonKey],
