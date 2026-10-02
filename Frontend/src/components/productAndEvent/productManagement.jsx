@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Edit2, Trash2, X, Search, Package, Loader2 } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
-import { BundleCard, BUNDLES_API, clearBundlesPageCache } from './PromoBundles';
+import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 
@@ -285,6 +285,11 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   const [bundlesLoading, setBundlesLoading] = useState(true);
   const [deleteBundleTarget, setDeleteBundleTarget] = useState(null);
 
+  // Edit ng Bundle/Package: bubuksan ang form modal DITO MISMO (hindi na lilipat
+  // sa Promo Bundles tab), kaya mananatili ka sa kasalukuyang category/tab.
+  const [bundleModal, setBundleModal] = useState({ open: false, bundle: null, allProducts: [], events: [] });
+  const [openingBundleId, setOpeningBundleId] = useState(null);
+
   const { toast, show: showToast } = useToast();
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
@@ -427,12 +432,35 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     }
   };
 
-  // Pag-edit ng isang bundle mula dito, punta muna tayo sa Promo Bundles
-  // tab kung saan handa na ang allProducts/events na kailangan ng edit
-  // form; ipinapasa lang ang target bundle id para awtomatikong bumukas
-  // doon ang tamang Edit modal.
-  const handleEditBundle = (bundle) => {
-    navigate('/productAndEvent/bundles', { state: { editBundleId: bundle.id } });
+  // Ang edit form ay nangangailangan ng allProducts at events (shared cache sa
+  // PromoBundles.jsx). Naka-prefetch ito pagbukas ng page, kaya halos agad
+  // bumubukas ang modal; kung wala pa sa cache, saglit lang hihintayin.
+  useEffect(() => {
+    fetchBundlesPageFromApi().catch(() => {});
+  }, []);
+
+  const handleEditBundle = async (bundle) => {
+    if (openingBundleId) return;
+    setOpeningBundleId(bundle.id);
+    try {
+      const { allProducts, events } = await fetchBundlesPageFromApi();
+      setBundleModal({ open: true, bundle, allProducts, events });
+    } catch (err) {
+      console.error('Open Bundle Editor Error:', err);
+      showToast(err.message || 'Failed to open editor.', 'warning');
+    } finally {
+      setOpeningBundleId(null);
+    }
+  };
+
+  const handleCloseBundleModal = () => setBundleModal(prev => ({ ...prev, open: false }));
+
+  const handleBundleSaved = async ({ category, isUpdate } = {}) => {
+    clearBundlesPageCache(); // sariwa ang datos pag-balik sa Promo Bundles tab
+    bundlesListCache = null;
+    await fetchBundles(true, true);
+    const noun = category === 'Package' ? 'Package' : 'Bundle';
+    showToast(isUpdate ? `${noun} updated.` : `${noun} added.`);
   };
 
   const handleDeleteBundle = (bundle) => setDeleteBundleTarget(bundle);
@@ -527,6 +555,16 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         title="Delete Product"
         message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
         confirmLabel="Delete"
+      />
+
+      <BundleFormModal
+        isOpen={bundleModal.open}
+        onClose={handleCloseBundleModal}
+        bundle={bundleModal.bundle}
+        editPackageProduct={null}
+        allProducts={bundleModal.allProducts}
+        events={bundleModal.events}
+        onSaved={handleBundleSaved}
       />
 
       <ConfirmModal

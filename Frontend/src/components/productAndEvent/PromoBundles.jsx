@@ -41,7 +41,7 @@ const parseResponse = async (res) => {
 let bundlesPageCache = null; // { bundles, allProducts, events }
 let bundlesPageCachePromise = null;
 
-async function fetchBundlesPageFromApi(force = false) {
+export async function fetchBundlesPageFromApi(force = false) {
   if (bundlesPageCache && !force) return bundlesPageCache;
   if (bundlesPageCachePromise && !force) return bundlesPageCachePromise;
 
@@ -404,6 +404,7 @@ const MONTH_OPTIONS = [
 // Products") kung kailangang baguhin ang napili.
 const MAX_BUNDLE_PRODUCTS = 3;
 // Packages are capped at 8 different component products.
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 const MIN_PACKAGE_PRODUCTS = 2;
 const MAX_PACKAGE_PRODUCTS = 8;
 
@@ -437,7 +438,7 @@ const emptyForm = {
 
 const ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
 
-function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
+export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
   const [form, setForm] = useState(emptyForm);
   const [productSearch, setProductSearch] = useState('');
   const [productListOpen, setProductListOpen] = useState(false);
@@ -467,6 +468,10 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   // may pulang border + error message mismo sa field, hindi na banner sa taas.
   // `formError` (banner) ay para na lang sa save/upload/limit errors.
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // Error ng image upload (laki/uri/server) — ipinapakita mismo sa image field,
+  // hindi sa banner sa taas ng modal.
+  const [imageError, setImageError] = useState(null);
 
   const computeFieldErrors = () => {
     const errors = {};
@@ -601,6 +606,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       setPendingBundleProductId('');
       setFormError(null);
       setFieldErrors({});
+      setImageError(null);
     }
   }, [isOpen, bundle, editPackageProduct]);
 
@@ -742,7 +748,20 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
 
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
+    // I-reset ang input para mapili ulit kahit ang parehong file pagkatapos ng error.
+    e.target.value = '';
     if (!file) return;
+
+    setImageError(null);
+    if (!file.type.startsWith('image/')) {
+      setImageError('Please choose an image file.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      setImageError('Image is too large. Maximum size is 5MB.');
+      return;
+    }
+
     setUploadingImage(true);
     try {
       const fd = new FormData();
@@ -761,7 +780,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       sessionUploadsRef.current.add(result.url);
       setForm(prev => ({ ...prev, custom_image_url: result.url }));
     } catch (err) {
-      setFormError(err.message || 'Failed to upload image.');
+      setImageError(err.message || 'Failed to upload image.');
     } finally {
       setUploadingImage(false);
     }
@@ -938,8 +957,8 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
             </p>
             <div className="flex flex-col sm:flex-row gap-4 items-start">
               
-              <div className="relative shrink-0 flex flex-col gap-2">
-                <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm">
+              <div data-invalid={imageError ? 'true' : undefined} className="relative shrink-0 flex flex-col gap-2 w-36">
+                <div className={`rounded-2xl overflow-hidden border bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm transition-colors ${imageError ? 'border-red-500' : 'border-[#DED4CC]'}`}>
                   {form.custom_image_url ? (
                     <img
                         src={form.custom_image_url}
@@ -961,6 +980,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
                         discardUploadedImage(form.custom_image_url);
                       }
                       setForm(prev => ({ ...prev, custom_image_url: '' }));
+                      setImageError(null);
                     }}
                     title="Remove image"
                     className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
@@ -969,11 +989,14 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
                   </button>
                 )}
                 <label className="cursor-pointer w-full">
-                  <span className="flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs px-4 py-2.5 bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] transition-colors w-full text-center">
+                  <span className={`flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs px-4 py-2.5 bg-white border hover:bg-[#F5EFEB] transition-colors w-full text-center ${imageError ? 'border-red-500 text-red-500' : 'border-[#DED4CC] text-[#5A453C]'}`}>
                     {uploadingImage ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Choose File
                   </span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploadingImage} />
                 </label>
+                {imageError && (
+                  <p role="alert" className="text-[10px] leading-3 text-red-500 font-medium px-1">{imageError}</p>
+                )}
               </div>
 
               <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
