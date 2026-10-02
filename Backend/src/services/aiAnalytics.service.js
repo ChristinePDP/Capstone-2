@@ -1127,6 +1127,32 @@ const PF_TIMEFRAME_LABELS = { "7d": "Next 7 Days", "30d": "Next 30 Days" };
 const PRODUCT_COMBINED_CACHE_KEY = "product_forecast:combined";
 const SUPABASE_DEFAULT_ROW_CAP = 1000;
 
+// Supabase/PostgREST pinuputol ang resulta sa 1000 rows. Ang Sales Forecast ay
+// 1 row kada ORDER kaya kasya; ang Product Forecast ay 1 row kada ORDER ITEM
+// (mas marami ng ilang beses) kaya sa 180 araw ay lumalampas sa cap at
+// NAPUPUTOL ang history (kulang ang recent days o ang lumang days) —
+// kaya walang produktong lumalabas na eligible. Solusyon: hatiin ang date
+// range; kapag ang isang hati ay eksaktong umabot sa cap, hatiin pa ulit.
+async function fetchRangeUncapped(fetchFn, startISO, endISO) {
+  const startMs = new Date(startISO).getTime();
+  const endMs = new Date(endISO).getTime();
+  const MIN_SPAN_MS = 60 * 60 * 1000; // hanggang 1 oras na lang ang pinakamaliit na hati
+
+  const rows = await fetchFn(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length < SUPABASE_DEFAULT_ROW_CAP || endMs - startMs <= MIN_SPAN_MS) {
+    if (list.length >= SUPABASE_DEFAULT_ROW_CAP) {
+      console.warn(`[Forecast] ${list.length} rows sa loob lang ng ${new Date(startMs).toISOString()} → ${new Date(endMs).toISOString()} — posibleng may naputol pa rin.`);
+    }
+    return list;
+  }
+
+  const midMs = Math.floor((startMs + endMs) / 2);
+  const left = await fetchRangeUncapped(fetchFn, new Date(startMs).toISOString(), new Date(midMs).toISOString());
+  const right = await fetchRangeUncapped(fetchFn, new Date(midMs + 1).toISOString(), new Date(endMs).toISOString());
+  return left.concat(right);
+}
+
 // Daily units kada produkto (Manila dates), mula KAHAPON pabalik. Ang
 // bilang ay nagsisimula sa FIRST SALE ng produkto — hindi nilalagyan ng 0
 // ang mga araw bago pa ito lumabas, kaya hindi nasisira ang average ng
@@ -1134,11 +1160,15 @@ const SUPABASE_DEFAULT_ROW_CAP = 1000;
 async function getProductDailySeries(days) {
   const { dateKeys, startISO, endISO, todayKey } = getManilaHistoryWindow(days);
 
-  const rows = await OrderItemsModel.getByOrderDateRange(startISO, endISO, {
-    columns: `quantity, products ( name, category ), orders!inner ( created_at, status )`,
-    excludeCancelled: true,
-  });
-  const items = Array.isArray(rows) ? rows : [];
+  const items = await fetchRangeUncapped(
+    (from, to) => OrderItemsModel.getByOrderDateRange(from, to, {
+      columns: `quantity, products ( name, category ), orders!inner ( created_at, status )`,
+      excludeCancelled: true,
+    }),
+    startISO,
+    endISO
+  );
+  console.log(`[ProductForecastService] Fetched ${items.length} order-item rows for ${days}-day window.`);
 
   if (items.length > 0 && items.length % SUPABASE_DEFAULT_ROW_CAP === 0) {
     console.warn(`[ProductForecastService] Query returned exactly ${items.length} rows — baka naputol ng row limit ang history. I-check ang pagination ng OrderItemsModel.getByOrderDateRange.`);
@@ -1443,12 +1473,15 @@ function buildSalesCacheKey(timeframe) {
 async function getSalesDailySeries(days) {
   const { dateKeys, startISO, endISO, todayKey } = getManilaHistoryWindow(days);
 
-  const rows = await OrdersModel.getByDateRange(startISO, endISO, {
-    columns: "amount_paid, created_at",
-    excludeCancelled: true,
-    ascending: true,
-  });
-  const orders = Array.isArray(rows) ? rows : [];
+  const orders = await fetchRangeUncapped(
+    (from, to) => OrdersModel.getByDateRange(from, to, {
+      columns: "amount_paid, created_at",
+      excludeCancelled: true,
+      ascending: true,
+    }),
+    startISO,
+    endISO
+  );
 
   if (orders.length > 0 && orders.length % SUPABASE_DEFAULT_ROW_CAP === 0) {
     console.warn(`[SalesForecastService] Query returned exactly ${orders.length} rows — baka naputol ng row limit ang history. I-check ang pagination ng OrdersModel.getByDateRange.`);
