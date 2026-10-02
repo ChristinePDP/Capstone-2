@@ -4,6 +4,8 @@ import {
   updateDatabaseProduct,
   deleteDatabaseProduct,
   uploadImageToProductBucket,
+  deleteImageFromBucket,
+  cleanOrphanImages,
   getAllEvents,
   getEventById,
   createEvent,
@@ -124,6 +126,42 @@ export const uploadProductImage = async (req, res) => {
   } catch (error) {
     console.error('Product Image Upload Error:', error);
     res.status(500).json({ success: false, message: 'Failed to upload product image' });
+  }
+};
+
+// Tinatawag ng frontend kapag may na-upload na image na hindi na gagamitin
+// (napalitan, inalis, na-cancel ang modal, o pumalya ang save). Ligtas ito:
+// buburahin lang kung galing sa product-images bucket AT walang product/bundle
+// na gumagamit pa ng URL.
+export const removeUploadedImage = async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ success: false, message: 'Image url is required.' });
+    }
+    const result = await deleteImageFromBucket(url);
+    res.status(200).json({ success: true, result });
+  } catch (error) {
+    console.error('Remove Uploaded Image Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to remove image.' });
+  }
+};
+
+// Admin-only (nasa likod ng authMiddlewareJwt). DRY RUN by default.
+//   POST /images/cleanup                         -> lista lang ng orphans
+//   POST /images/cleanup?dryRun=false            -> aktwal na magbubura
+//   POST /images/cleanup?dryRun=false&minAgeHours=48
+export const cleanupOrphanImages = async (req, res) => {
+  try {
+    const dryRun = req.query.dryRun !== 'false';
+    const parsedAge = Number(req.query.minAgeHours);
+    const minAgeHours = Number.isFinite(parsedAge) && parsedAge >= 0 ? parsedAge : 24;
+
+    const result = await cleanOrphanImages({ dryRun, minAgeHours });
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('Cleanup Orphan Images Error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

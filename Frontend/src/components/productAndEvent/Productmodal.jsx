@@ -378,6 +378,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
     setIsSubmitting(true);
     let finalImageUrl = form.image; 
+    let newlyUploadedUrl = null; // para ma-cleanup kapag pumalya ang save
 
     try {
         if (selectedFile) {
@@ -393,6 +394,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
             if (uploadData.success) {
                 finalImageUrl = uploadData.url; 
+                newlyUploadedUrl = uploadData.url;
             } else {
                 throw new Error(uploadData.message || 'Image upload failed.');
             }
@@ -454,6 +456,16 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         }
     } catch (error) {
         console.error("Save Error:", error);
+        // Na-upload na ang image pero hindi na-save ang product → burahin para hindi maging orphan.
+        // (Kapag retry, mag-a-upload ulit ang selectedFile, kaya ligtas itong burahin.)
+        if (newlyUploadedUrl) {
+            fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/upload-image`, {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: newlyUploadedUrl })
+            }).catch(() => {});
+        }
         showToast(`Failed to save: ${error.message}`, 'warning');
     } finally {
         setIsSubmitting(false);

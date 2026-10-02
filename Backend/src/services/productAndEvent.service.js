@@ -6,6 +6,168 @@ import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { AiCacheModel } from '../model/AiCache.model.js'; 
 
 // ============================================================
+// STORAGE (BUCKET) HELPERS
+// ============================================================
+// Ang mga images ay nasa Supabase Storage bucket; ang database ay URL string
+// lang ang hawak. Kaya kailangang manual na burahin ang file kapag:
+//   - nabura ang product/bundle,
+//   - napalitan o naalis ang image sa edit,
+//   - na-upload pero hindi na-save (tingnan ang DELETE /upload-image).
+//
+// IMPORTANT: i-verify na tama ang table/column names sa ibaba. Kapag mali o
+// nag-error ang query, ituturing na "may reference pa" ang image at HINDI
+// buburahin (safe default) — may lalabas na warning sa console.
+const IMAGE_BUCKET = 'product-images';
+
+const PRODUCTS_TABLE = 'products';
+const BUNDLES_TABLE = 'promo_bundles';
+
+// Lahat ng lugar sa DB na nagse-save ng URL galing sa bucket na ito.
+// Kapag may bagong column/table na gumagamit ng product-images, idagdag dito.
+export const IMAGE_REFERENCE_SOURCES = [
+  { table: PRODUCTS_TABLE, column: 'image_url' },
+  { table: BUNDLES_TABLE, column: 'custom_image_url' }
+];
+
+// Kinukuha ang path ng file sa loob ng bucket mula sa public URL.
+// Nagre-return ng null kung hindi galing sa bucket natin (hal. external URL),
+// para hindi tayo magbura ng hindi atin.
+export const extractStoragePath = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  const marker = `/storage/v1/object/public/${IMAGE_BUCKET}/`;
+  const idx = url.indexOf(marker);
+  if (idx === -1) return null;
+  const path = decodeURIComponent(url.slice(idx + marker.length).split('?')[0]);
+  if (!path || path.includes('..')) return null;
+  return path;
+};
+
+// May mga bundle/package na ginagamit ang parehong URL ng ibang record, kaya
+// huwag burahin ang file hangga't may row pang tumutukoy dito.
+const isImageStillReferenced = async (url) => {
+  try {
+    const results = await Promise.all(
+      IMAGE_REFERENCE_SOURCES.map(({ table, column }) =>
+        supabase.from(table).select('id', { count: 'exact', head: true }).eq(column, url)
+      )
+    );
+    for (const r of results) {
+      if (r.error) {
+        console.warn('[image cleanup] Reference check failed, skipping delete:', r.error.message);
+        return true; // safe default: huwag burahin
+      }
+    }
+    return results.some((r) => (r.count || 0) > 0);
+  } catch (err) {
+    console.warn('[image cleanup] Reference check error, skipping delete:', err.message);
+    return true;
+  }
+};
+
+// Best-effort: hindi ito nagta-throw, para hindi mabigo ang main operation
+// (delete/update ng product) dahil lang sa cleanup.
+// Returns: 'deleted' | 'in_use' | 'invalid' | 'failed'
+export const deleteImageFromBucket = async (url) => {
+  try {
+    const path = extractStoragePath(url);
+    if (!path) return 'invalid';
+    if (await isImageStillReferenced(url)) return 'in_use';
+
+    const { error } = await supabase.storage.from(IMAGE_BUCKET).remove([path]);
+    if (error) {
+      console.error('[image cleanup] Failed to remove from bucket:', error.message);
+      return 'failed';
+    }
+    return 'deleted';
+  } catch (err) {
+    console.error('[image cleanup] Unexpected error:', err);
+    return 'failed';
+  }
+};
+
+// Hinahanap (at optionally binubura) ang mga file sa bucket na wala nang
+// product/bundle na gumagamit — para sa mga orphan na naipon bago ang fix na ito.
+//  - dryRun = true (default): nagli-list lang, walang binubura.
+//  - Hindi ginagalaw ang mga file na mas bago sa minAgeHours (default 24h),
+//    para hindi mabura ang image na kaa-upload pa lang at hindi pa nase-save.
+//  - Kapag pumalya ang kahit anong query, mag-the-throw (walang buburahin).
+export const cleanOrphanImages = async ({ dryRun = true, minAgeHours = 24 } = {}) => {
+  // 1. Lahat ng file sa bucket (flat ang upload natin)
+  const files = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .list('', { limit: pageSize, offset, sortBy: { column: 'created_at', order: 'asc' } });
+    if (error) throw new Error(`Bucket list failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    files.push(...data.filter((f) => f.id)); // folders ay walang id
+    if (data.length < pageSize) break;
+  }
+
+  // 2. Lahat ng path na may reference pa sa DB
+  const referenced = new Set();
+  for (const { table, column } of IMAGE_REFERENCE_SOURCES) {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from(table)
+        .select(column)
+        .not(column, 'is', null)
+        .range(from, from + pageSize - 1);
+      if (error) throw new Error(`Reference query failed (${table}.${column}): ${error.message}`);
+      (data || []).forEach((row) => {
+        const p = extractStoragePath(row[column]);
+        if (p) referenced.add(p);
+      });
+      if (!data || data.length < pageSize) break;
+    }
+  }
+
+  // 3. Orphans = nasa bucket pero walang reference, at luma na
+  const cutoff = Date.now() - minAgeHours * 60 * 60 * 1000;
+  const orphans = files.filter((f) => {
+    if (referenced.has(f.name)) return false;
+    const created = new Date(f.created_at || f.updated_at || 0).getTime();
+    return created < cutoff;
+  });
+
+  const sizeOf = (list) => list.reduce((n, f) => n + (f.metadata?.size || 0), 0);
+  const toMB = (bytes) => Number((bytes / (1024 * 1024)).toFixed(2));
+
+  let removed = 0;
+  if (!dryRun) {
+    for (let i = 0; i < orphans.length; i += 100) {
+      const batch = orphans.slice(i, i + 100).map((f) => f.name);
+      const { error } = await supabase.storage.from(IMAGE_BUCKET).remove(batch);
+      if (error) console.error('[image cleanup] Batch failed:', error.message);
+      else removed += batch.length;
+    }
+  }
+
+  return {
+    dryRun,
+    minAgeHours,
+    totalFiles: files.length,
+    totalMB: toMB(sizeOf(files)),
+    referencedCount: referenced.size,
+    orphanCount: orphans.length,
+    orphanMB: toMB(sizeOf(orphans)),
+    removed,
+    sample: orphans.slice(0, 50).map((f) => f.name)
+  };
+};
+
+const getCurrentImageUrl = async (table, column, id) => {
+  try {
+    const { data, error } = await supabase.from(table).select(column).eq('id', id).maybeSingle();
+    if (error) return null;
+    return data?.[column] || null;
+  } catch {
+    return null;
+  }
+};
+
+// ============================================================
 // PRODUCT CRUD SERVICES
 // ============================================================
 
@@ -97,8 +259,17 @@ export const updateDatabaseProduct = async (id, productData) => {
   });
 
   try {
+    // Kunin ang lumang image BAGO mag-update para malaman kung napalitan/naalis.
+    const oldImageUrl = await getCurrentImageUrl(PRODUCTS_TABLE, 'image_url', id);
+
     const response = await ProductModel.update(id, productToUpdate);
     if (response.error) throw new Error(response.error.message);
+
+    // Burahin ang lumang file kung napalitan o naalis ang image (DB muna bago bucket).
+    if ('image_url' in productToUpdate && oldImageUrl && oldImageUrl !== (productToUpdate.image_url || null)) {
+      await deleteImageFromBucket(oldImageUrl);
+    }
+
     return response.data;
   } catch (error) {
     throw new Error(`Service Error (updateDatabaseProduct): ${error.message}`);
@@ -107,8 +278,14 @@ export const updateDatabaseProduct = async (id, productData) => {
 
 export const deleteDatabaseProduct = async (id) => {
   try {
+    const imageUrl = await getCurrentImageUrl(PRODUCTS_TABLE, 'image_url', id);
+
     const response = await ProductModel.delete(id);
     if (response.error) throw new Error(response.error.message);
+
+    // DB muna bago bucket: kung pumalya ang delete, hindi mawawalan ng image ang buhay na product.
+    await deleteImageFromBucket(imageUrl);
+
     return response.data;
   } catch (error) {
     throw new Error(`Service Error (deleteDatabaseProduct): ${error.message}`);
@@ -516,6 +693,8 @@ export const updateBundle = async (id, bundleData) => {
   });
 
   try {
+    const oldImageUrl = await getCurrentImageUrl(BUNDLES_TABLE, 'custom_image_url', id);
+
     const response = await BundleModel.update(id, bundleToUpdate);
     if (response.error) throw new Error(response.error.message);
 
@@ -523,6 +702,11 @@ export const updateBundle = async (id, bundleData) => {
     // dapat maging generic 500, kundi malinaw na "not found" signal papunta
     // sa controller.
     if (response.notFound) return null;
+
+    // Burahin ang lumang file kung napalitan o naalis ang custom image.
+    if ('custom_image_url' in bundleToUpdate && oldImageUrl && oldImageUrl !== (bundleToUpdate.custom_image_url || null)) {
+      await deleteImageFromBucket(oldImageUrl);
+    }
 
     if (isPackage) return enrichPackageBundle(response.data);
 
@@ -535,12 +719,16 @@ export const updateBundle = async (id, bundleData) => {
 
 export const deleteBundle = async (id) => {
   try {
+    const imageUrl = await getCurrentImageUrl(BUNDLES_TABLE, 'custom_image_url', id);
+
     const response = await BundleModel.delete(id);
     if (response.error) throw new Error(response.error.message);
 
     // Ganoon din dito: kapag wala nang row na na-delete (idempotent retry,
     // stale UI, atbp.), ibalik na lang ang null imbes na mag-throw.
     if (response.notFound) return null;
+
+    await deleteImageFromBucket(imageUrl);
 
     return response.data;
   } catch (error) {

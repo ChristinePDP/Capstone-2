@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload } from 'lucide-react';
 
@@ -7,6 +7,18 @@ const PRODUCTS_API = API_BASE;
 const EVENTS_API = `${API_BASE}/events`;
 export const BUNDLES_API = `${API_BASE}/bundles`;
 const UPLOAD_IMAGE_API = `${API_BASE}/upload-image`;
+
+// Binubura sa bucket ang image na na-upload pero hindi na gagamitin (best-effort).
+// Ligtas ito dahil tinatanggihan ng backend kung may product/bundle pang gumagamit ng URL.
+const discardUploadedImage = (url) => {
+  if (!url) return;
+  fetch(UPLOAD_IMAGE_API, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  }).catch(() => {});
+};
 
 // Parehong tab strip na makikita sa Product Catalog — "Promo Bundle" ang laging
 // naka-highlight dito. Pag-click sa ibang item, bumabalik sa Product Catalog.
@@ -434,6 +446,23 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formError, setFormError] = useState(null);
 
+  // Mga URL na na-upload sa modal session na ito pero hindi pa nase-save.
+  // Pag-upload agad ang nangyayari sa pagpili ng file, kaya kapag pinalitan,
+  // inalis, o na-cancel ang modal, binubura natin ang mga ito sa bucket.
+  const sessionUploadsRef = useRef(new Set());
+
+  const discardSessionUploads = (keepUrl = null) => {
+    sessionUploadsRef.current.forEach((u) => {
+      if (u !== keepUrl) discardUploadedImage(u);
+    });
+    sessionUploadsRef.current.clear();
+  };
+
+  const handleCancel = () => {
+    discardSessionUploads(null);
+    onClose();
+  };
+
   // Inline (per-field) validation — ang mga kulang/maling required field ay
   // may pulang border + error message mismo sa field, hindi na banner sa taas.
   // `formError` (banner) ay para na lang sa save/upload/limit errors.
@@ -723,6 +752,13 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       if (!res.ok || result.success === false || !result.url) {
         throw new Error(result.message || result.error || 'Upload failed.');
       }
+      // Kung ang kasalukuyang image ay na-upload din sa session na ito (hindi pa saved), burahin na.
+      const previousUrl = form.custom_image_url;
+      if (previousUrl && sessionUploadsRef.current.has(previousUrl)) {
+        sessionUploadsRef.current.delete(previousUrl);
+        discardUploadedImage(previousUrl);
+      }
+      sessionUploadsRef.current.add(result.url);
       setForm(prev => ({ ...prev, custom_image_url: result.url }));
     } catch (err) {
       setFormError(err.message || 'Failed to upload image.');
@@ -771,6 +807,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       });
       await parseResponse(res);
 
+      discardSessionUploads(payload.custom_image_url);
       onSaved({ category: 'Bundle', isUpdate });
       onClose();
     } catch (err) {
@@ -823,6 +860,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       });
       await parseResponse(res);
 
+      discardSessionUploads(payload.custom_image_url);
       onSaved({ category: 'Package', isUpdate });
       onClose();
     } catch (err) {
@@ -867,7 +905,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleCancel}
       title={
         form.category === 'Package'
           ? (isEditing ? 'Edit Package' : 'Add Package')
@@ -875,7 +913,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       }
       footer={
         <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" onClick={handleCancel} disabled={saving}>Cancel</Button>
           <Button variant="dark" onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
             {form.category === 'Package'
@@ -915,7 +953,15 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
                 {form.custom_image_url && (
                   <button
                     type="button"
-                    onClick={() => setForm(prev => ({ ...prev, custom_image_url: '' }))}
+                    onClick={() => {
+                      // Kung bagong upload pa lang (hindi pa saved), burahin agad sa bucket.
+                      // Ang naka-save nang image ay buburahin ng backend kapag na-save ang pagbabago.
+                      if (sessionUploadsRef.current.has(form.custom_image_url)) {
+                        sessionUploadsRef.current.delete(form.custom_image_url);
+                        discardUploadedImage(form.custom_image_url);
+                      }
+                      setForm(prev => ({ ...prev, custom_image_url: '' }));
+                    }}
                     title="Remove image"
                     className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
                   >
