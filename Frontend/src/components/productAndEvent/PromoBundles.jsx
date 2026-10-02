@@ -115,10 +115,11 @@ function Select({ label, children, className = '', ...props }) {
 
 function Input({ label, required, error, className = '', ...props }) {
   return (
-    <div className="w-full min-w-0">
+    <div className="w-full min-w-0 relative">
       {label && <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${error ? 'text-red-500' : 'text-[#8A7264]'}`}>{label} {required && <span className="text-red-500">*</span>}</label>}
-      <input className={`w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`} {...props} />
-      {error && <span className="text-[10px] text-red-500 mt-1 block">{error}</span>}
+      <input aria-invalid={!!error} data-invalid={error ? 'true' : undefined} className={`w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`} {...props} />
+      {/* Overlay: nakapuwesto sa ilalim ng field (sa loob ng gap), kaya hindi nagbabago ang taas ng form */}
+      {error && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{error}</span>}
     </div>
   );
 }
@@ -391,6 +392,7 @@ const MONTH_OPTIONS = [
 // Products") kung kailangang baguhin ang napili.
 const MAX_BUNDLE_PRODUCTS = 3;
 // Packages are capped at 8 different component products.
+const MIN_PACKAGE_PRODUCTS = 2;
 const MAX_PACKAGE_PRODUCTS = 8;
 
 // BAGO: "category" dropdown — pumipili kung "Bundle" (dating gawi, discount-
@@ -419,7 +421,6 @@ const emptyForm = {
   packageItems: [], // Holds { productId, name, quantity }
   // Order Type — same choices as Productmodal.jsx; applies to both Bundle and Package.
   orderType: 'Both',
-  dailyLimit: 0, // Pre-Order Limits — Bundle and Package, same feature as Productmodal.jsx
 };
 
 const ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
@@ -433,6 +434,56 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formError, setFormError] = useState(null);
 
+  // Inline (per-field) validation — ang mga kulang/maling required field ay
+  // may pulang border + error message mismo sa field, hindi na banner sa taas.
+  // `formError` (banner) ay para na lang sa save/upload/limit errors.
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const computeFieldErrors = () => {
+    const errors = {};
+    if (!form.bundle_name.trim()) {
+      errors.bundle_name = form.category === 'Package' ? 'Package name is required.' : 'Bundle name is required.';
+    }
+    if (form.category === 'Package') {
+      if (form.price === '' || form.price === null || form.price === undefined) errors.price = 'Price is required.';
+      else if (isNaN(Number(form.price)) || Number(form.price) < 0) errors.price = 'Please set a valid positive price.';
+      if (form.packageItems.length < MIN_PACKAGE_PRODUCTS) errors.products = `Add at least ${MIN_PACKAGE_PRODUCTS} products to this package`;
+    } else {
+      if (form.product_items.length < 2) errors.products = 'Select at least 2 products';
+      if (form.discount_percent === '' || form.discount_percent === null || form.discount_percent === undefined) {
+        errors.discount_percent = 'Discount % is required.';
+      } else if (isNaN(Number(form.discount_percent)) || Number(form.discount_percent) < 0 || Number(form.discount_percent) > 100) {
+        errors.discount_percent = 'Enter a value from 0 to 100.';
+      }
+      if (form.availabilityMode === 'event' && !form.event_tag) errors.event_tag = 'Please select an event.';
+    }
+    return errors;
+  };
+
+  // Habang nag-aayos ang admin, mawawala agad ang error ng field na tama na.
+  useEffect(() => {
+    setFieldErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = computeFieldErrors();
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      const same = Object.keys(next).length === keys.length && keys.every(k => next[k] === prev[k]);
+      return same ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+
+  // Ipakita ang mga error sa mismong field at i-scroll ang modal sa una.
+  const showFieldErrors = (errors) => {
+    setFormError(null);
+    setFieldErrors(errors);
+    setTimeout(() => {
+      document.querySelector('[data-invalid="true"]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
   // ── Package Contents (category === 'Package') ──────────────────────
   // Parehong dropdown-based picker na dati nasa Product modal: pumili ng
   // isang existing product + quantity, "Add" para isama sa listahan. Hindi
@@ -443,15 +494,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   const isEditingPackage = Boolean(editPackageProduct?.id) || (bundle?.category === 'Package' && Boolean(bundle?.id));
   // Anumang existing row (Bundle man o Package) — para sa title/button labels.
   const isEditing = Boolean(bundle?.id || editPackageProduct?.id);
-
-  // ── Pre-Order Limits (category === 'Package') ──────────────────────
-  // Same toggle + "Default Daily Capacity" + "Date Exceptions" UI as the
-  // "Pre-Order Limits" card in Productmodal.jsx, ported here since Package
-  // records are now created/edited from this modal instead.
-  const [dailyLimitEnabled, setDailyLimitEnabled] = useState(false);
-  const [exceptionDate, setExceptionDate] = useState('');
-  const [exceptionSlots, setExceptionSlots] = useState(0);
-  const [exceptions, setExceptions] = useState([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -481,8 +523,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         quantity: Number(pi.quantity) || 1,
       }));
 
-      const initialDailyLimit = Number(packageSource?.daily_limit || 0);
-
       if (isBundleAsPackage) {
         setForm({
           ...emptyForm,
@@ -493,10 +533,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           orderType: bundle.order_type || 'Both',
           price: bundle.discounted_price ?? bundle.bundle_price ?? '',
           packageItems: initialPackageItems,
-          dailyLimit: initialDailyLimit,
         });
-        setDailyLimitEnabled(initialDailyLimit > 0);
-        setExceptions(bundle.date_exceptions || []);
       } else if (editPackageProduct) {
         setForm({
           ...emptyForm,
@@ -507,10 +544,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           orderType: editPackageProduct.order_type || 'Both',
           price: editPackageProduct.price ?? '',
           packageItems: initialPackageItems,
-          dailyLimit: initialDailyLimit,
         });
-        setDailyLimitEnabled(initialDailyLimit > 0);
-        setExceptions(editPackageProduct.dateExceptions || editPackageProduct.date_exceptions || []);
       } else if (bundle) {
         setForm({
           ...emptyForm,
@@ -527,23 +561,17 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           end_month: bundle.end_month || 12,
           end_day: bundle.end_day || 31,
           orderType: bundle.order_type || 'Both',
-          dailyLimit: Number(bundle.daily_limit || 0),
         });
-        setDailyLimitEnabled(Number(bundle.daily_limit || 0) > 0);
-        setExceptions(bundle.date_exceptions || bundle.dateExceptions || []);
       } else {
         setForm(emptyForm);
-        setDailyLimitEnabled(false);
-        setExceptions([]);
       }
       setProductSearch('');
       setProductListOpen(false);
       setPendingPackageProductId('');
       setPendingPackageQty(1);
       setPendingBundleProductId('');
-      setExceptionDate('');
-      setExceptionSlots(0);
       setFormError(null);
+      setFieldErrors({});
     }
   }, [isOpen, bundle, editPackageProduct]);
 
@@ -597,13 +625,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
     }));
   };
 
-  const addException = () => {
-    if (!exceptionDate) return;
-    setExceptions(prev => [...prev.filter(e => e.date !== exceptionDate), { date: exceptionDate, slots: Number(exceptionSlots) }]);
-    setExceptionDate('');
-    setExceptionSlots(0);
-  };
-  const removeException = (date) => setExceptions(prev => prev.filter(e => e.date !== date));
 
   const filteredProducts = useMemo(() => {
     if (!productSearch) return allProducts;
@@ -711,20 +732,9 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   };
 
   const handleSubmitBundle = async () => {
-    if (!form.bundle_name.trim()) {
-      setFormError('Bundle name is required.');
-      return;
-    }
-    if (form.product_items.length < 2) {
-      setFormError('Select at least 2 products.');
-      return;
-    }
-    if (form.discount_percent === '' || Number(form.discount_percent) < 0 || Number(form.discount_percent) > 100) {
-      setFormError('A valid discount % (0–100) is required.');
-      return;
-    }
-    if (form.availabilityMode === 'event' && !form.event_tag) {
-      setFormError('Select an event.');
+    const errs = computeFieldErrors();
+    if (Object.keys(errs).length > 0) {
+      showFieldErrors(errs);
       return;
     }
 
@@ -745,8 +755,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         custom_image_url: form.custom_image_url || null,
         is_active: form.is_active,
         order_type: form.orderType,
-        daily_limit: dailyLimitEnabled ? Number(form.dailyLimit) : 0,
-        dateExceptions: dailyLimitEnabled ? exceptions : [],
         event_tag: form.availabilityMode === 'event' ? (form.event_tag || null) : null,
         start_month: form.availabilityMode === 'dates' ? Number(form.start_month) : null,
         start_day: form.availabilityMode === 'dates' ? Number(form.start_day) : null,
@@ -778,16 +786,9 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
   // hindi na dapat lumalabas ang isang na-add na Package sa Promo Bundle tab:
   // pareho lang sila ngayon ng table, pinaghihiwalay ng `category` field.
   const handleSubmitPackage = async () => {
-    if (!form.bundle_name.trim()) {
-      setFormError('Package name is required.');
-      return;
-    }
-    if (form.price === '' || isNaN(Number(form.price)) || Number(form.price) < 0) {
-      setFormError('Please set a valid positive price.');
-      return;
-    }
-    if (form.packageItems.length === 0) {
-      setFormError('Add at least one product to this package so its stock can be deducted correctly.');
+    const errs = computeFieldErrors();
+    if (Object.keys(errs).length > 0) {
+      showFieldErrors(errs);
       return;
     }
 
@@ -805,8 +806,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         is_active: form.is_active,
         order_type: form.orderType,
         package_items: cleanPackageItems,
-        daily_limit: dailyLimitEnabled ? Number(form.dailyLimit) : 0,
-        dateExceptions: dailyLimitEnabled ? exceptions : [],
       };
 
       // `bundle` carries the row being edited (category 'Package' or
@@ -850,6 +849,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
       onChange={e => {
         const nextCategory = e.target.value;
         setFormError(null);
+        setFieldErrors({});
         setForm(prev => ({
           ...emptyForm,
           category: nextCategory,
@@ -857,73 +857,11 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
           custom_image_url: prev.custom_image_url,
           is_active: prev.is_active,
           orderType: prev.orderType,
-          dailyLimit: prev.dailyLimit,
         }));
       }}
     >
       {BUNDLE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
     </Select>
-  );
-
-  // Pre-Order Limits card — shared by Bundle and Package (same UI/fields as
-  // the "Pre-Order Limits" card in Productmodal.jsx).
-  const preOrderLimitsCard = (
-    <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-      <div className="flex items-center gap-3 mb-2">
-        <input
-          type="checkbox"
-          id="preOrderLimitToggle"
-          checked={dailyLimitEnabled}
-          onChange={e => {
-            const enabled = e.target.checked;
-            setDailyLimitEnabled(enabled);
-            if (!enabled) setForm(prev => ({ ...prev, dailyLimit: 0 }));
-            else if (Number(form.dailyLimit) <= 0) setForm(prev => ({ ...prev, dailyLimit: 1 }));
-          }}
-          className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer"
-        />
-        <label htmlFor="preOrderLimitToggle" className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] select-none cursor-pointer">Pre-Order Limits</label>
-      </div>
-      <p className="text-xs text-[#8A7264] mb-4">
-        Set maximum order capacities per day or assign custom date exceptions.
-      </p>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
-        <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-          <Input
-            label="Default Daily Capacity (Slots)"
-            type="number"
-            min="0"
-            disabled={!dailyLimitEnabled}
-            value={form.dailyLimit}
-            onChange={e => setForm(prev => ({ ...prev, dailyLimit: e.target.value }))}
-            placeholder="0"
-          />
-        </div>
-
-        <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
-          <div className="flex flex-row items-center gap-2 mb-3 w-full">
-            <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} disabled={!dailyLimitEnabled} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB]" />
-            <input type="number" min="0" value={exceptionSlots} onChange={e => setExceptionSlots(e.target.value)} disabled={!dailyLimitEnabled} className="w-20 shrink-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white disabled:bg-[#F5EFEB] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" placeholder="Slots" />
-          </div>
-          <button type="button" onClick={addException} disabled={!dailyLimitEnabled} className="w-full border border-dashed border-[#DED4CC] rounded-xl py-2.5 text-xs font-bold text-[#5A453C] bg-white hover:bg-[#F5EFEB] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-            + Add Date Exception
-          </button>
-          {exceptions.length > 0 && (
-            <div className="mt-3 max-h-32 overflow-y-auto pr-1 scrollbar-thin flex flex-col gap-1.5">
-              {exceptions.map(ex => (
-                <div key={ex.date} className="flex items-center justify-between text-xs font-semibold text-[#3B1F0A] py-2 px-3 bg-white border border-[#DED4CC] rounded-xl">
-                  <span>{ex.date}</span>
-                  <span>{ex.slots} slots</span>
-                  <button type="button" onClick={() => removeException(ex.date)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
   );
 
   return (
@@ -993,11 +931,12 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
               </div>
 
               <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
-                    {form.category === 'Package' ? 'Package Name' : 'Bundle Name'}
+                <div className="relative">
+                  <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1.5 ${fieldErrors.bundle_name ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                    {form.category === 'Package' ? 'Package Name' : 'Bundle Name'} <span className="text-red-500">*</span>
                   </label>
-                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} aria-invalid={!!fieldErrors.bundle_name} data-invalid={fieldErrors.bundle_name ? 'true' : undefined} className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white transition-colors ${fieldErrors.bundle_name ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`} />
+                  {fieldErrors.bundle_name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.bundle_name}</span>}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {categorySelect}
@@ -1008,7 +947,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
 
                 {form.category === 'Package' ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Input label="Price" required type="number" min="0" value={form.price} onChange={e => setForm(prev => ({ ...prev, price: e.target.value }))} placeholder="0" />
+                    <Input label="Price" required error={fieldErrors.price} type="number" min="0" value={form.price} onChange={e => setForm(prev => ({ ...prev, price: e.target.value }))} placeholder="0" />
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Package Price</label>
                       <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center justify-between gap-2">
@@ -1032,9 +971,10 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
                 ) : (
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Discount %</label>
-                        <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white" />
+                      <div className="relative">
+                        <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1.5 ${fieldErrors.discount_percent ? 'text-red-500' : 'text-[#8A7264]'}`}>Discount % <span className="text-red-500">*</span></label>
+                        <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} aria-invalid={!!fieldErrors.discount_percent} data-invalid={fieldErrors.discount_percent ? 'true' : undefined} className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white transition-colors ${fieldErrors.discount_percent ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`} />
+                        {fieldErrors.discount_percent && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.discount_percent}</span>}
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Bundle Price</label>
@@ -1067,10 +1007,12 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         {/* 2. Product Selection Section */}
         {form.category === 'Package' ? (
           <>
-          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-            <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] mb-2">Package Contents</p>
-            <p className="text-xs text-[#8A7264] mb-4">
-              Pick 1 to {MAX_PACKAGE_PRODUCTS} products to include in this package ({form.packageItems.length}/{MAX_PACKAGE_PRODUCTS} added).
+          <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-3xl p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
+            <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${fieldErrors.products ? 'text-red-500' : 'text-[#3B1F0A]'}`}>Package Contents <span className="text-red-500">*</span></p>
+            <p className={`text-xs mb-4 ${fieldErrors.products ? 'text-red-500 font-medium' : 'text-[#8A7264]'}`} role={fieldErrors.products ? 'alert' : undefined}>
+              {fieldErrors.products
+                ? `${fieldErrors.products} (${form.packageItems.length}/${MAX_PACKAGE_PRODUCTS} added).`
+                : `Pick ${MIN_PACKAGE_PRODUCTS} to ${MAX_PACKAGE_PRODUCTS} products to include in this package (${form.packageItems.length}/${MAX_PACKAGE_PRODUCTS} added).`}
             </p>
 
             <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
@@ -1090,8 +1032,8 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
 
             <div className="mt-3">
               {form.packageItems.length === 0 ? (
-                <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
-                  No products added yet. Add 1 to {MAX_PACKAGE_PRODUCTS} products to create this package.
+                <div className={`text-xs italic p-3 rounded-xl border ${fieldErrors.products ? 'text-red-500 bg-red-50/40 border-red-500' : 'text-gray-400 bg-gray-50 border-gray-100'}`}>
+                  No products added yet. Add {MIN_PACKAGE_PRODUCTS} to {MAX_PACKAGE_PRODUCTS} products to create this package.
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -1115,13 +1057,14 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
             </div>
           </div>
 
-          {preOrderLimitsCard}
           </>
         ) : (
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-          <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A] mb-2">Bundle Products</p>
-          <p className="text-xs text-[#8A7264] mb-4">
-            Pick 2 to {MAX_BUNDLE_PRODUCTS} products to include in this bundle ({form.product_items.length}/{MAX_BUNDLE_PRODUCTS} added).
+        <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-3xl p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
+          <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${fieldErrors.products ? 'text-red-500' : 'text-[#3B1F0A]'}`}>Bundle Products <span className="text-red-500">*</span></p>
+          <p className={`text-xs mb-4 ${fieldErrors.products ? 'text-red-500 font-medium' : 'text-[#8A7264]'}`} role={fieldErrors.products ? 'alert' : undefined}>
+            {fieldErrors.products
+              ? `${fieldErrors.products} (${form.product_items.length}/${MAX_BUNDLE_PRODUCTS} added).`
+              : `Pick 2 to ${MAX_BUNDLE_PRODUCTS} products to include in this bundle (${form.product_items.length}/${MAX_BUNDLE_PRODUCTS} added).`}
           </p>
 
           <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
@@ -1140,7 +1083,7 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
 
           <div className="mt-3">
             {selectedProducts.length === 0 ? (
-              <div className="text-xs text-gray-400 italic bg-gray-50 p-3 rounded-xl border border-gray-100">
+              <div className={`text-xs italic p-3 rounded-xl border ${fieldErrors.products ? 'text-red-500 bg-red-50/40 border-red-500' : 'text-gray-400 bg-gray-50 border-gray-100'}`}>
                 No products added yet. Add 2 to {MAX_BUNDLE_PRODUCTS} products to create this bundle.
               </div>
             ) : (
@@ -1182,9 +1125,6 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
         </div>
         )}
 
-        {/* Pre-Order Limits — Bundle (Package renders its own above) */}
-        {form.category !== 'Package' && preOrderLimitsCard}
-
         {/* 3. Availability UI Section — Bundle only; Packages don't have this. */}
         {form.category !== 'Package' && (
         <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
@@ -1220,18 +1160,21 @@ function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProdu
             )}
 
             {form.availabilityMode === 'event' && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[#8A7264] mb-2">Select Event Tag</p>
+              <div className="relative">
+                <p className={`text-[10px] font-bold uppercase tracking-wide mb-2 ${fieldErrors.event_tag ? 'text-red-500' : 'text-[#8A7264]'}`}>Select Event Tag <span className="text-red-500">*</span></p>
                 <select
                   value={form.event_tag}
                   onChange={e => setForm(prev => ({ ...prev, event_tag: e.target.value }))}
-                  className="w-full px-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white text-[#3B1F0A]"
+                  aria-invalid={!!fieldErrors.event_tag}
+                  data-invalid={fieldErrors.event_tag ? 'true' : undefined}
+                  className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white text-[#3B1F0A] transition-colors ${fieldErrors.event_tag ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`}
                 >
                   <option value="">Select an event...</option>
                   {events.map(ev => (
                     <option key={ev.id} value={ev.event_tag}>{ev.event_name}</option>
                   ))}
                 </select>
+                {fieldErrors.event_tag && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.event_tag}</span>}
               </div>
             )}
 

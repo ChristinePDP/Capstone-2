@@ -192,10 +192,10 @@ export const addBundle = async (req, res) => {
           message: 'A valid package price is required.'
         });
       }
-      if (!Array.isArray(bundleData.package_items) || bundleData.package_items.length < 1) {
+      if (!Array.isArray(bundleData.package_items) || bundleData.package_items.length < 2) {
         return res.status(400).json({
           success: false,
-          message: 'Add at least 1 product to this package so its stock can be deducted correctly.'
+          message: 'Add at least 2 products to this package.'
         });
       }
     } else if (!Array.isArray(bundleData.product_ids) || bundleData.product_ids.length < 2) {
@@ -229,10 +229,10 @@ export const editBundle = async (req, res) => {
     const isPackage = bundleData.category === 'Package';
 
     if (isPackage) {
-      if (bundleData.package_items && bundleData.package_items.length < 1) {
+      if (bundleData.package_items && bundleData.package_items.length < 2) {
         return res.status(400).json({
           success: false,
-          message: 'Add at least 1 product to this package so its stock can be deducted correctly.'
+          message: 'Add at least 2 products to this package.'
         });
       }
     } else if (bundleData.product_ids && bundleData.product_ids.length < 2) {

@@ -22,13 +22,20 @@ function hasDailyLimitSet(item) {
 }
 
 function isQuantityTracked(item, orderType = 'Buy Now') {
-  if (!item || item.type === 'bundle') return false;
+  if (!item) return false;
   return item.order_type === 'Pre-order' || orderType === 'Pre-Order'
     || hasDailyLimitSet(item)
     || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
+  // Bundle/Package: limit galing sa components (kinuwenta sa posMenu.jsx).
+  if (item.type === 'bundle' || item.type === 'package') {
+    if (orderType === 'Buy Now' && item.order_type === 'Pre-order') return 0;
+    return orderType === 'Pre-Order'
+      ? Number(item.pre_order_available_stock ?? 0)
+      : Number(item.buy_now_available_stock ?? 0);
+  }
   if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
@@ -182,25 +189,51 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   // ang lalabas muna ay ang "Please complete all required fields (*)"
   // toast, hindi ang confirm dialog. Bumabalik ng `true` kung pwede nang
   // magpatuloy, `false` kung may error (may toast na ring lumabas dito).
-  const validateOrderForm = () => {
-    if (orderType === 'Pre-Order') {
-      if (!form.name || !form.phone || !form.pickupDate || !form.pickupTime) {
-        showToast('Please complete all required fields (*)', 'error');
-        return false;
-      }
-    }
+  // FIX (inline validation): hindi na toast ang ginagamit para sa required
+  // Customer Details. Ang bawat field na may mali ay may sariling pulang
+  // border + maliit na error message mismo sa ilalim ng field.
+  // `computeFormErrors` ay pure function: bumabalik ng { fieldName: message }.
+  const computeFormErrors = () => {
+    const errors = {};
     const phoneRegex = /^\d{11}$/;
+
+    if (orderType === 'Pre-Order') {
+      if (!form.name.trim()) errors.name = 'Customer name is required.';
+      if (!form.pickupDate) errors.pickupDate = 'Please select a date.';
+      if (!form.pickupTime) errors.pickupTime = 'Please select a time.';
+    }
     if (orderType === 'Pre-Order' || form.phone) {
-      if (!phoneRegex.test(form.phone)) {
-        showToast('Your Contact Number must be exactly 11 digits.', 'error');
-        return false;
-      }
+      if (!form.phone) errors.phone = 'Phone number is required.';
+      else if (!phoneRegex.test(form.phone)) errors.phone = 'Must be exactly 11 digits.';
     }
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
-      showToast('Your Alternative Number must be exactly 11 digits.', 'error');
-      return false;
+      errors.altPhone = 'Must be exactly 11 digits.';
     }
-    return true;
+    return errors;
+  };
+
+  const [formErrors, setFormErrors] = useState({});
+
+  // Habang nagta-type ang cashier, mawawala agad ang error ng field na
+  // naayos na (at mananatili ang sa mga field na mali pa rin).
+  useEffect(() => {
+    setFormErrors(prev => {
+      if (Object.keys(prev).length === 0) return prev;
+      const latest = computeFormErrors();
+      const next = {};
+      Object.keys(prev).forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === Object.keys(prev).length &&
+        Object.keys(next).every(k => next[k] === prev[k]) ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, orderType]);
+
+  // Tinatawag ng OrderSummaryModal bago ang "Are you sure?" confirm dialog.
+  // `true` = pwede nang magpatuloy, `false` = may field na may error.
+  const validateOrderForm = () => {
+    const errors = computeFormErrors();
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handlePlaceOrder = async () => {
@@ -451,6 +484,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       if (typeof onOrderPlaced === 'function') onOrderPlaced();
 
       setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '', instructions: '' });
+      setFormErrors({});
       setAdditionalCharge('');
       setDiscountName('');
       setDiscountPercentage('');
@@ -752,7 +786,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
         <OrderSummaryModal
           show={showSummaryModal}
-          onBack={() => setShowSummaryModal(false)}
+          onBack={() => { setShowSummaryModal(false); setFormErrors({}); }}
           cart={cart}
           orderType={orderType}
           form={form}
@@ -770,6 +804,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           onPlaceOrder={handlePlaceOrder}
           uploadProgress={uploadProgress}
           onValidate={validateOrderForm}
+          errors={formErrors}
         />
 
         {ereceiptData && createPortal(

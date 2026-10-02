@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS } from '../../utils/unitUtils';
@@ -10,6 +10,67 @@ import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
+
+// ── Inline-validated fields (EventManager layout) ─────────────────────────
+// Pulang border + pulang label, at ang error message ay nasa mismong field
+// (overlay sa ilalim ng input, hindi nagdadagdag ng taas kaya hindi gumagalaw
+// ang form). Kapag may `hint`, itinatago ito habang may error para hindi magpatong.
+const ERR_CLS = 'absolute left-1 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none';
+
+function FieldShell({ label, required, error, hint, children }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && (
+        <label className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 block ${error ? 'text-red-500' : 'text-brand-500'}`}>
+          {label} {required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        {children}
+        {!hint && error && <span role="alert" className={`${ERR_CLS} top-full mt-0.5`}>{error}</span>}
+      </div>
+      {hint && (
+        <div className="relative mt-1.5">
+          <p className={`text-[10px] text-[#8A7264] leading-snug ${error ? 'invisible' : ''}`}>{hint}</p>
+          {error && <span role="alert" className={`${ERR_CLS} top-0`}>{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormInput({ label, required, error, hint, suffix, className = '', ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <input
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl py-2.5 text-xs outline-none bg-white transition-colors ${suffix ? 'pl-3.5 pr-12' : 'px-3.5'} ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      />
+      {suffix && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-brand-400 pointer-events-none">
+          {suffix}
+        </span>
+      )}
+    </FieldShell>
+  );
+}
+
+function FormSelect({ label, required, error, hint, className = '', children, ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <select
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl px-3 py-2.5 text-xs outline-none bg-white transition-colors cursor-pointer ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      >
+        {children}
+      </select>
+    </FieldShell>
+  );
+}
 
 export default function IngredientsTab() {
   const context = useApp() || {};
@@ -229,25 +290,27 @@ export default function IngredientsTab() {
 }
 
 function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
-  const { show: showToast } = useToast();
-  
   const [name, setName]               = useState(ingredient?.name ?? '');
   const [unit, setUnit]               = useState(ingredient?.unit ?? 'kg');
   const [stock, setStock]             = useState('');
   const [min, setMin]                 = useState(ingredient?.min ?? '');
-  const [cost, setCost]               = useState(''); 
-  const [expiry, setExpiry]           = useState(''); // BAGONG DAGDAG
+  const [cost, setCost]               = useState('');
+  const [expiry, setExpiry]           = useState('');
   const [detailsCost, setDetailsCost] = useState(String(ingredient?.costPerUnit ?? ''));
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [isSaving, setIsSaving]             = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
 
+  // Inline validation: ang error ng bawat field ay lumalabas mismo sa field (EventManager style).
+  const [errors, setErrors]           = useState({});
+  const [serverError, setServerError] = useState(null);
+
   const isEdit = !!ingredient?.id;
 
   const finalizedStock = parseFractionInput(stock);
   const addedQty       = parseFloat(finalizedStock) || 0;
-  
+
   const qtyError         = stock ? getQtyError(finalizedStock, { max: MAX_QTY, label: isEdit ? 'Quantity to add' : 'Stock quantity' }) : '';
   const minError         = getQtyError(min, { max: MAX_QTY, label: 'Minimum safety stock' });
   const costError        = getCostError(cost);
@@ -260,20 +323,107 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     String(detailsCost) !== String(ingredient?.costPerUnit ?? '')
   );
 
+  // Errors ng "Ingredient Details" panel (edit mode)
+  const computeDetailsErrors = () => {
+    const next = {};
+    if (!name.trim()) next.name = 'Name is required.';
+    if (minError) next.min = minError;
+    if (detailsCostError) next.detailsCost = detailsCostError;
+    return next;
+  };
+
+  // Lahat ng error ng buong form, depende kung Add o Edit.
+  const computeErrors = () => {
+    const next = {};
+
+    if (!isEdit) {
+      if (!name.trim()) next.name = 'Ingredient name is required.';
+
+      if (!stock) next.stock = 'Stock quantity is required.';
+      else if (parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
+      else if (qtyError) next.stock = qtyError;
+
+      if (!min) next.min = 'Minimum stock is required.';
+      else if (minError) next.min = minError;
+
+      if (!cost) next.cost = 'Total amount is required.';
+      else if (costError) next.cost = costError;
+
+      return next;
+    }
+
+    if (isDetailsModified || editingDetails) Object.assign(next, computeDetailsErrors());
+
+    if (stock) {
+      if (addedQty <= 0) next.stock = 'Quantity must be greater than 0.';
+      else if (qtyError) next.stock = qtyError;
+
+      if (!cost) next.cost = 'Total cost is required when adding stock.';
+      else if (costError) next.cost = costError;
+    }
+
+    if (!isDetailsModified && !stock) {
+      next.general = 'Nothing was changed or added. Edit the details or enter a quantity to add.';
+    }
+
+    return next;
+  };
+
+  const scrollToFirstInvalid = () => {
+    setTimeout(() => {
+      document.querySelector('[data-invalid="true"]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
+  // Fresh na form sa tuwing bubukas ang modal.
+  useEffect(() => {
+    if (isOpen) {
+      setErrors({});
+      setServerError(null);
+    }
+  }, [isOpen]);
+
+  // Mawawala agad ang error ng field na naayos na habang nagta-type.
+  useEffect(() => {
+    setErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = computeErrors();
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === keys.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, unit, stock, min, cost, detailsCost, editingDetails]);
+
+  // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
+  const fieldErr = {
+    name:        errors.name,
+    stock:       errors.stock || qtyError,
+    min:         errors.min || minError,
+    cost:        errors.cost || costError,
+    detailsCost: errors.detailsCost || detailsCostError,
+  };
+
   const handleDetailsHeaderClick = () => {
     if (!editingDetails) {
       setEditingDetails(true);
-    } else {
-      if (isDetailsModified) {
-        if (!name.trim()) { showToast('Ingredient name is required.', 'error'); return; }
-        if (minError) { showToast(minError, 'error'); return; }
-        if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
-        
-        setEditingDetails(false);
-      } else {
-        setEditingDetails(false);
+      return;
+    }
+    if (isDetailsModified) {
+      const found = computeDetailsErrors();
+      if (Object.keys(found).length > 0) {
+        setErrors(prev => {
+          const rest = { ...prev };
+          delete rest.name; delete rest.min; delete rest.detailsCost;
+          return { ...rest, ...found };
+        });
+        scrollToFirstInvalid();
+        return;
       }
     }
+    setEditingDetails(false);
   };
 
   const handleCancelDetails = () => {
@@ -281,32 +431,37 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     setUnit(ingredient?.unit ?? 'kg');
     setMin(ingredient?.min ?? '');
     setDetailsCost(String(ingredient?.costPerUnit ?? ''));
+    setErrors(prev => {
+      const rest = { ...prev };
+      delete rest.name; delete rest.min; delete rest.detailsCost;
+      return rest;
+    });
     setEditingDetails(false);
   };
 
   const handleValidate = () => {
     if (isSaving) return;
+    setServerError(null);
+
+    const found = computeErrors();
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      scrollToFirstInvalid();
+      return;
+    }
+    setErrors({});
 
     if (!isEdit) {
-      if (!name.trim()) { showToast('Ingredient name is required.', 'error'); return; }
-      if (!stock) { showToast('Stock quantity is required.', 'error'); return; }
-      if (parseFloat(finalizedStock) < 0) { showToast('Stock quantity cannot be negative.', 'error'); return; }
-      if (!min) { showToast('Minimum safety stock is required.', 'error'); return; }
-      if (minError) { showToast(minError, 'error'); return; }
-      if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total amount / receipt is required.', 'error'); return; }
-      if (costError) { showToast(costError, 'error'); return; }
-
       setConfirmPayload({
         isNew: true,
-        newData: { 
-          name: name.trim(), 
-          unit, 
-          stock_quantity: addedQty, 
-          minimum_stock: parseFloat(min), 
-          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
+        newData: {
+          name: name.trim(),
+          unit,
+          stock_quantity: addedQty,
+          minimum_stock: parseFloat(min),
+          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0,
           category: 'Raw Material',
-          expiration_date: expiry || null // BAGONG DAGDAG
+          expiration_date: expiry || null
         },
         addedQty,
         itemName: name.trim(),
@@ -316,33 +471,14 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       return;
     }
 
-    if (isDetailsModified || editingDetails) {
-      if (!name.trim()) { showToast('Ingredient name is required.', 'error'); return; }
-      if (minError) { showToast(minError, 'error'); return; }
-      if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
-    }
-
-    if (stock) {
-      if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
-      if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total cost is required when adding stock.', 'error'); return; }
-      if (costError) { showToast(costError, 'error'); return; }
-    }
-
-    if (!isDetailsModified && !stock) {
-      showToast('Nothing was changed or added. Edit the details or enter a quantity to add.', 'error');
-      return;
-    }
-
     const detailsPayload = isDetailsModified || editingDetails
       ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
       : null;
-      
-    // BAGONG DAGDAG SA RESTOCK PAYLOAD
-    const restockPayload = stock ? { 
-      added_qty: addedQty, 
+
+    const restockPayload = stock ? {
+      added_qty: addedQty,
       total_cost: cost ? parseFloat(cost) : 0,
-      expiration_date: expiry || null 
+      expiration_date: expiry || null
     } : null;
 
     setConfirmPayload({
@@ -363,11 +499,12 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       setConfirmPayload(null);
       setStock('');
       setCost('');
-      setExpiry(''); // Reset
-      onClose(); 
+      setExpiry('');
+      onClose();
     } catch (err) {
-      showToast(err.message || 'Failed to save', 'error');
-      setConfirmPayload(null); 
+      // Ipinapakita sa loob ng modal (hindi toast sa labas)
+      setServerError(err.message || 'Failed to save');
+      setConfirmPayload(null);
     } finally {
       setIsSaving(false);
     }
@@ -387,10 +524,12 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
       : `Save the new details for "${confirmPayload?.itemName}"?`;
 
+  const bannerMessage = serverError || errors.general;
+
   return (
     <>
       <Modal
-        isOpen={isOpen} 
+        isOpen={isOpen}
         onClose={() => !isSaving && onClose()}
         title={isEdit ? `Manage Stock — ${ingredient?.name}` : 'Add New Ingredient'}
         subtitle={isEdit ? `Unit: ${ingredient?.unit}` : 'Record a newly purchased sack or bulk ingredient.'}
@@ -405,6 +544,13 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
         }
       >
         <div className="space-y-5">
+          {/* Server/save error o "nothing changed" — nasa loob ng modal mismo */}
+          {bannerMessage && (
+            <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+              {bannerMessage}
+            </div>
+          )}
+
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
@@ -427,20 +573,28 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <Tag size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">1. Basic Information</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Ingredient Name" required value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Wash Sugar" />
-                  <div>
-                    <Select label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
-                      {STOCK_UNIT_CATEGORIES.map(cat => (
-                        <optgroup key={cat.label} label={cat.label}>
-                          {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-                        </optgroup>
-                      ))}
-                    </Select>
-                    {UNIT_CONVERSION_HINTS[unit] && (
-                      <p className="text-[11px] text-brand-400 mt-1">{UNIT_CONVERSION_HINTS[unit]}</p>
-                    )}
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  <FormInput
+                    label="Ingredient Name"
+                    required
+                    error={fieldErr.name}
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    placeholder="e.g. Wash Sugar"
+                  />
+                  <FormSelect
+                    label="Unit of Measurement"
+                    required
+                    hint={UNIT_CONVERSION_HINTS[unit]}
+                    value={unit}
+                    onChange={e => setUnit(e.target.value)}
+                  >
+                    {STOCK_UNIT_CATEGORIES.map(cat => (
+                      <optgroup key={cat.label} label={cat.label}>
+                        {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
+                      </optgroup>
+                    ))}
+                  </FormSelect>
                 </div>
               </div>
 
@@ -451,15 +605,30 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <Package size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">2. Stock Levels</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="e.g. 0.25 or 1/4" />
-                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
-                  </div>
-                  <div>
-                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="e.g. 50" />
-                    {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  <FormInput
+                    label="Initial Stock Quantity"
+                    required
+                    error={fieldErr.stock}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={unit}
+                    value={stock}
+                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onBlur={() => setStock(current => parseFractionInput(current))}
+                    placeholder="e.g. 0.25 or 1/4"
+                  />
+                  <FormInput
+                    label="Minimum Safety Stock"
+                    required
+                    error={fieldErr.min}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={unit}
+                    value={min}
+                    onChange={e => setMin(sanitizeNumericText(e.target.value))}
+                    placeholder="e.g. 50"
+                  />
                 </div>
               </div>
 
@@ -470,20 +639,23 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Input label="Total Amount / Receipt" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
-                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-                  </div>
-                  <div>
-                    {/* BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA ADD NEW */}
-                    <Input 
-                      label="Expiration Date (Optional)" 
-                      type="date" 
-                      value={expiry} 
-                      onChange={e => setExpiry(e.target.value)} 
-                    />
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  <FormInput
+                    label="Total Amount / Receipt"
+                    required
+                    error={fieldErr.cost}
+                    type="text"
+                    inputMode="decimal"
+                    value={formatPesoLive(cost)}
+                    onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                    placeholder="₱0.00"
+                  />
+                  <FormInput
+                    label="Expiration Date (Optional)"
+                    type="date"
+                    value={expiry}
+                    onChange={e => setExpiry(e.target.value)}
+                  />
                 </div>
               </div>
             </div>
@@ -491,11 +663,11 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
           {isEdit && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-              
+
               <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-brand-100">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-500">Ingredient Details</span>
-                  
+
                   {editingDetails ? (
                     <div className="flex items-center gap-1.5">
                       {isDetailsModified && (
@@ -511,8 +683,8 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                         type="button"
                         onClick={handleDetailsHeaderClick}
                         className={`text-xs font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg border shadow-sm transition-all ${
-                          isDetailsModified 
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600' 
+                          isDetailsModified
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
                             : 'bg-white text-brand-600 hover:text-brand-800 border-brand-200'
                         }`}
                       >
@@ -536,7 +708,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-x-2.5 gap-y-6">
                   {!editingDetails ? (
                     <>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
@@ -558,26 +730,36 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     </>
                   ) : (
                     <>
-                      <div>
-                        <Input label="Name" required value={name} onChange={e => setName(e.target.value)} />
-                      </div>
-                      <div>
-                        <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
-                          {STOCK_UNIT_CATEGORIES.map(cat => (
-                            <optgroup key={cat.label} label={cat.label}>
-                              {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-                            </optgroup>
-                          ))}
-                        </Select>
-                      </div>
-                      <div>
-                        <Input label="Min. Stock" type="text" inputMode="decimal" value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} />
-                        {minError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{minError}</p>}
-                      </div>
-                      <div>
-                        <Input label="Cost/Unit (₱)" type="text" inputMode="decimal" value={formatPesoLive(detailsCost)} onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} />
-                        {detailsCostError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{detailsCostError}</p>}
-                      </div>
+                      <FormInput
+                        label="Name"
+                        required
+                        error={fieldErr.name}
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                      />
+                      <FormSelect label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
+                        {STOCK_UNIT_CATEGORIES.map(cat => (
+                          <optgroup key={cat.label} label={cat.label}>
+                            {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
+                          </optgroup>
+                        ))}
+                      </FormSelect>
+                      <FormInput
+                        label="Min. Stock"
+                        error={fieldErr.min}
+                        type="text"
+                        inputMode="decimal"
+                        value={min}
+                        onChange={e => setMin(sanitizeNumericText(e.target.value))}
+                      />
+                      <FormInput
+                        label="Cost/Unit (₱)"
+                        error={fieldErr.detailsCost}
+                        type="text"
+                        inputMode="decimal"
+                        value={formatPesoLive(detailsCost)}
+                        onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                      />
                     </>
                   )}
                 </div>
@@ -589,42 +771,33 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">Restock / Add Quantity</span>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <Input
-                      label="Quantity to Add"
-                      type="text" 
-                      inputMode="decimal"
-                      suffix={ingredient?.unit}
-                      value={stock} 
-                      onChange={e => setStock(sanitizeQtyText(e.target.value))}
-                      onBlur={() => setStock(current => parseFractionInput(current))}
-                      placeholder="e.g. 0.25 or 1/4"
-                    />
-                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
-                  </div>
-
-                  <div>
-                    <Input 
-                      label="Total Amount / Receipt" 
-                      type="text" 
-                      inputMode="decimal" 
-                      value={formatPesoLive(cost)} 
-                      onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} 
-                      placeholder="₱0.00" 
-                    />
-                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-                  </div>
-
-                  <div>
-                    {/* BAGONG DAGDAG NA EXPIRATION DATE INPUT PARA SA RESTOCK */}
-                    <Input 
-                      label="Expiration Date (Optional)" 
-                      type="date" 
-                      value={expiry} 
-                      onChange={e => setExpiry(e.target.value)} 
-                    />
-                  </div>
+                <div className="space-y-6">
+                  <FormInput
+                    label="Quantity to Add"
+                    error={fieldErr.stock}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={ingredient?.unit}
+                    value={stock}
+                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onBlur={() => setStock(current => parseFractionInput(current))}
+                    placeholder="e.g. 0.25 or 1/4"
+                  />
+                  <FormInput
+                    label="Total Amount / Receipt"
+                    error={fieldErr.cost}
+                    type="text"
+                    inputMode="decimal"
+                    value={formatPesoLive(cost)}
+                    onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                    placeholder="₱0.00"
+                  />
+                  <FormInput
+                    label="Expiration Date (Optional)"
+                    type="date"
+                    value={expiry}
+                    onChange={e => setExpiry(e.target.value)}
+                  />
                 </div>
               </div>
 

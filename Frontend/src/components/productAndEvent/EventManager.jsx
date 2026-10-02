@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td, Modal, Input } from '../ui';
+import { Badge, Button, Table, Tr, Td, Modal } from '../ui';
 
 // Base URL ng backend. Kinukuha mula sa VITE_API_URL sa .env
 // (hal. VITE_API_URL=http://localhost:3000/api — kasama na ang "/api"
@@ -48,6 +48,42 @@ const getDaysInMonth = (month) => {
   if (Number(month) === 2) return 29; 
   return 31;
 };
+
+// Text field na may inline validation: pulang border + pulang label, at ang
+// error message ay nasa mismong field (overlay sa ilalim nito, hindi
+// nagdadagdag ng taas kaya hindi gumagalaw ang form). Kapag may `hint`,
+// itinatago (invisible, pero nananatili ang espasyo) ang hint habang may
+// error para hindi magpatong ang dalawang text.
+function FormInput({ label, required, error, hint, className = '', ...props }) {
+  const errorCls = 'absolute left-1 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none';
+  return (
+    <div className="w-full min-w-0">
+      {label && (
+        <label className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 block ${error ? 'text-red-500' : 'text-brand-500'}`}>
+          {label} {required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      {/* Ang error ay laging nakakabit sa mismong input (hindi sa dulo ng buong field) */}
+      <div className="relative">
+        <input
+          aria-invalid={!!error}
+          data-invalid={error ? 'true' : undefined}
+          className={`w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white transition-colors ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+          {...props}
+        />
+        {!hint && error && <span role="alert" className={`${errorCls} top-full mt-0.5`}>{error}</span>}
+      </div>
+      {/* May hint: ang error ay pumapalit sa hint sa MISMONG puwesto nito (direkta sa ilalim ng input),
+          at nananatili ang taas ng hint kaya hindi gumagalaw ang layout. */}
+      {hint && (
+        <div className="relative mt-1.5">
+          <p className={`text-[10px] text-[#8A7264] leading-snug ${error ? 'invisible' : ''}`}>{hint}</p>
+          {error && <span role="alert" className={`${errorCls} top-0`}>{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CustomDropdown({ value, options, onChange, openUpwards = false }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -127,7 +163,8 @@ function EventModal({
   onClose, 
   isEditing = false,
   initialData, 
-  onSave
+  onSave,
+  serverError = null
 }) {
   useLockBodyScroll(isOpen);
   const [form, setForm] = useState({
@@ -140,6 +177,16 @@ function EventModal({
     is_active: true
   });
 
+  // Inline validation: ang error ng required field ay lumalabas mismo sa field.
+  const [errors, setErrors] = useState({});
+
+  const computeErrors = (f) => {
+    const next = {};
+    if (!String(f.event_name || '').trim()) next.event_name = 'Event name is required.';
+    if (!String(f.event_tag || '').trim()) next.event_tag = 'AI recommendation tag is required.';
+    return next;
+  };
+
   useEffect(() => {
     if (isOpen) {
       setForm(initialData || {
@@ -151,13 +198,35 @@ function EventModal({
         end_day: 1,
         is_active: true
       });
+      setErrors({});
     }
   }, [isOpen, initialData]);
+
+  // Mawawala agad ang error ng field na naayos na habang nagta-type.
+  useEffect(() => {
+    setErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = computeErrors(form);
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === keys.length ? prev : next;
+    });
+  }, [form]);
 
   if (!isOpen) return null;
 
   const handleSave = () => {
-    onSave(form);
+    const found = computeErrors(form);
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      setTimeout(() => {
+        document.querySelector('[data-invalid="true"]')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      return;
+    }
+    onSave({ ...form, event_name: form.event_name.trim(), event_tag: form.event_tag.trim() });
   };
 
   const monthOptions = MONTHS.map(m => ({ value: m.val, label: m.label }));
@@ -191,17 +260,26 @@ function EventModal({
     >
       <div className="flex flex-col gap-5">
 
-        <Input
+        {/* Server/save error — nasa loob ng modal mismo (hindi sa page sa likod ng overlay) */}
+        {serverError && (
+          <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+            {serverError}
+          </div>
+        )}
+
+        <FormInput
           label="Event Name"
           required
+          error={errors.event_name}
           value={form.event_name}
           onChange={(e) => setForm({ ...form, event_name: e.target.value })}
           placeholder="e.g. Valentine's Promo"
         />
 
-        <Input
+        <FormInput
           label="AI Recommendation Tag"
           required
+          error={errors.event_tag}
           value={form.event_tag}
           onChange={(e) => setForm({ ...form, event_tag: e.target.value })}
           placeholder="e.g. valentines"
@@ -366,6 +444,7 @@ export default function EventManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null); // error ng Add/Edit — ipinapakita sa loob ng modal
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -405,12 +484,14 @@ export default function EventManager() {
   const handleOpenAdd = () => {
     setSelectedEvent(null);
     setIsEditing(false);
+    setSaveError(null);
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (event) => {
     setSelectedEvent(event);
     setIsEditing(true);
+    setSaveError(null);
     setIsModalOpen(true);
   };
 
@@ -418,12 +499,13 @@ export default function EventManager() {
     if (isSaving) return; // huwag payagan mag-close habang nagse-save
     setIsModalOpen(false);
     setSelectedEvent(null);
+    setSaveError(null);
   };
 
   // Add / Edit — POST kung bagong event, PUT kung mayroon nang id
   const handleSave = async (formData) => {
     setIsSaving(true);
-    setError(null);
+    setSaveError(null);
     try {
       const isUpdate = isEditing && formData.id;
       const res = await fetch(`${API_BASE}/events${isUpdate ? `/${formData.id}` : ''}`, {
@@ -438,7 +520,7 @@ export default function EventManager() {
       handleCloseModal();
     } catch (err) {
       console.error('Save Event Error:', err);
-      setError(err.message);
+      setSaveError(err.message);
     } finally {
       setIsSaving(false);
     }
@@ -603,6 +685,7 @@ export default function EventManager() {
         isEditing={isEditing}
         initialData={selectedEvent}
         onSave={handleSave}
+        serverError={saveError}
       />
 
       <ConfirmToast

@@ -1156,6 +1156,32 @@ function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
+// Ang limit ng Bundle/Package ay galing LAMANG sa mga component products —
+// walang sariling limit. Para sa bawat component: floor(available ÷ kailangan
+// kada 1 bundle/package); ang pinakamaliit sa lahat ang bilang na pwedeng i-order.
+// `components`: [{ product, qty }] (product galing sa allProducts, may available_stock).
+function computeComponentStock(components = [], orderType = 'Both') {
+  const byId = new Map();
+  for (const { product, qty } of components) {
+    if (!product) continue;
+    const need = Number(qty) > 0 ? Number(qty) : 1;
+    const entry = byId.get(String(product.id));
+    if (entry) entry.need += need;
+    else byId.set(String(product.id), { product, need });
+  }
+  const tracked = [...byId.values()].filter(({ product: p }) =>
+    hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
+  if (tracked.length === 0) return { stock: 999, tracked: false };
+
+  const stock = Math.min(...tracked.map(({ product: p, need }) => {
+    const basis = hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity;
+    const preOrder = orderType === 'Pre-order' ? p.pre_order_available_stock : undefined;
+    const available = preOrder ?? p.available_stock ?? basis ?? 0;
+    return Math.floor(Number(available) / need);
+  }));
+  return { stock: Math.max(0, stock), tracked: true };
+}
+
 function isQuantityTracked(item) {
   if (!item) return false;
   if (item.type === 'bundle' || item.type === 'package') return item.is_tracked; 
@@ -1289,27 +1315,13 @@ export default function Menu({ cart, setCart }) {
               .filter(Boolean);
 
            const packageOrderType = b.order_type || 'Both';
-           let packageStock = 999;
-           let isPackageTracked = false;
-
-           if (packageOrderType === 'Pre-order') {
-               isPackageTracked = true;
-               packageStock = hasDailyLimitSet(b) ? Number(b.daily_limit) : 999;
-           } else {
-               const trackedComponents = packageComponents.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-               isPackageTracked = trackedComponents.length > 0;
-               if (isPackageTracked) {
-                   packageStock = Math.min(...trackedComponents.map(p => {
-                       const requiredQty = Number(p.package_qty) || 1;
-                       const available = p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0;
-                       return Math.floor(available / requiredQty);
-                   }));
-               }
-               if (hasDailyLimitSet(b)) {
-                   isPackageTracked = true;
-                   packageStock = Math.min(packageStock, Number(b.daily_limit));
-               }
-           }
+           const { stock: packageStock, tracked: isPackageTracked } = computeComponentStock(
+             (b.package_items || []).map(pi => ({
+               product: allProducts.find(p => String(p.id) === String(pi.product_id)),
+               qty: pi.quantity
+             })),
+             packageOrderType
+           );
 
            return {
               ...b,
@@ -1337,23 +1349,13 @@ export default function Menu({ cart, setCart }) {
         const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => String(p.id) === String(id))).filter(Boolean);
         const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
         
-        let bundleStock = 999;
-        let isBundleTracked = false;
-
-        if (bundleOrderType === 'Pre-order') {
-            isBundleTracked = true;
-            bundleStock = hasDailyLimitSet(b) ? Number(b.daily_limit) : 999;
-        } else {
-            const trackedComponents = bundleProducts.filter(p => hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-            isBundleTracked = trackedComponents.length > 0;
-            if (isBundleTracked) {
-                bundleStock = Math.min(...trackedComponents.map(p => p.available_stock ?? (hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity) ?? 0));
-            }
-            if (hasDailyLimitSet(b)) {
-                isBundleTracked = true;
-                bundleStock = Math.min(bundleStock, Number(b.daily_limit));
-            }
-        }
+        const { stock: bundleStock, tracked: isBundleTracked } = computeComponentStock(
+          (b.product_ids || []).map(id => ({
+            product: allProducts.find(p => String(p.id) === String(id)),
+            qty: 1
+          })),
+          bundleOrderType
+        );
 
         return {
           id: `bundle-${b.id}`,

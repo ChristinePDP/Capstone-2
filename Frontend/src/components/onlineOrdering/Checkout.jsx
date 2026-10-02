@@ -627,7 +627,7 @@ if (data.success && data.checkoutUrl) {
 
                   <div className="flex flex-col gap-3.5 shrink-0">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          <div>
+                          <div className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
@@ -639,9 +639,9 @@ if (data.success && data.checkoutUrl) {
                                   setErrors(prev => ({...prev, name: false}));
                                 }} 
                               />
-                              {errors.name && <span className="text-[10px] text-red-500 mt-1 block">{errors.name}</span>}
+                              {errors.name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.name}</span>}
                           </div>
-                          <div>
+                          <div className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.phone ? 'text-red-500' : 'text-[#8A7264]'}`}>Contact Number <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
@@ -656,10 +656,10 @@ if (data.success && data.checkoutUrl) {
                                   setErrors(prev => ({...prev, phone: false}));
                                 }} 
                               />
-                              {errors.phone && <span className="text-[10px] text-red-500 mt-1 block">{errors.phone}</span>}
+                              {errors.phone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.phone}</span>}
                           </div>
                       </div>
-                      <div>
+                      <div className="relative">
                           <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.altPhone ? 'text-red-500' : 'text-[#8A7264]'}`}>Alternative Number</label>
                           <input 
                             type="text" 
@@ -673,7 +673,7 @@ if (data.success && data.checkoutUrl) {
                                 setErrors(prev => ({...prev, altPhone: false}));
                             }} 
                           />
-                          {errors.altPhone && <span className="text-[10px] text-red-500 mt-1 block">{errors.altPhone}</span>}
+                          {errors.altPhone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.altPhone}</span>}
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
@@ -728,7 +728,7 @@ if (data.success && data.checkoutUrl) {
                                 </>
                               )}
                           </div>
-                          <div ref={timeDropdownRef}>
+                          <div ref={timeDropdownRef} className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupTime ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
                                 <button
@@ -795,7 +795,7 @@ if (data.success && data.checkoutUrl) {
                                   document.body
                                 )}
                               </div>
-                              {errors.pickupTime && <span className="text-[10px] text-red-500 mt-1 block">{errors.pickupTime}</span>}
+                              {errors.pickupTime && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.pickupTime}</span>}
                           </div>
                       </div>
 

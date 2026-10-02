@@ -151,8 +151,26 @@ export default function OrderSummaryModal({
   uploadProgress,
   onPlaceOrder,
   onValidate,
+  errors = {},
 }) {
   const isBuyNow = orderType === 'Buy Now';
+
+  // Inline field validation styles — pulang border kapag may error.
+  const baseField = 'w-full min-w-0 border px-3.5 py-2 text-xs rounded-xl focus:outline-none transition-colors bg-white';
+  const fieldCls = (key) =>
+    `${baseField} ${errors[key]
+      ? 'border-red-500 focus:border-red-500 bg-red-50/40'
+      : 'border-[#EAE4E0] focus:border-[#5A453C]'}`;
+  // FIX (fixed layout): laging may nakareserbang 14px na espasyo sa ilalim
+  // ng bawat field para sa error text — kaya kapag lumabas/nawala ang error,
+  // HINDI gumagalaw o humahaba ang form, at walang field na nababaan/naputol.
+  const FieldError = ({ name }) => (
+    <div className="h-[14px] mt-0.5 px-1 overflow-hidden">
+      {errors[name] && (
+        <p role="alert" className="text-[10px] leading-[14px] text-red-500 font-medium truncate">{errors[name]}</p>
+      )}
+    </div>
+  );
 
   // FIX (req #1): dagdag na "Are you sure?" confirmation bago talaga
   // isubmit ang order — hindi na direktang tumatawag ang "Place Order"
@@ -322,8 +340,8 @@ export default function OrderSummaryModal({
             ibaba (see closing tags) — kaya garantisadong visible na ito lagi, kahit
             gaano pa kahaba ang laman sa itaas. Parehong pattern gaya ng Checkout.jsx. */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden overscroll-contain scrollbar-thin">
-          <div className="w-full md:w-[340px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 md:overflow-y-auto scrollbar-thin">
-            <div className="flex items-center gap-2 mb-3">
+          <div className="w-full md:w-[340px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 md:overflow-y-auto scrollbar-thin">
+            <div className="flex items-center gap-2 mb-2">
               <User size={14} className="text-[#8A7264]" />
               <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider">
                 Customer Details
@@ -335,44 +353,59 @@ export default function OrderSummaryModal({
               </h4>
             </div>
 
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-1.5">
               <div className="flex flex-col gap-0.5">
                 <span className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Order Type</span>
                 <span className="text-xs text-[#3B1F0A] font-semibold">{orderType}</span>
               </div>
 
-              <input
-                type="text"
-                placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white"
-              />
-
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="flex flex-col">
                 <input
                   type="text"
-                  placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
-                  maxLength="11"
-                  value={form.phone}
-                  onChange={e => setForm({ ...form, phone: e.target.value.replace(/\D/g, '') })}
-                  className="w-full min-w-0 border border-[#EAE4E0] px-3 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white"
+                  placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  aria-invalid={!!errors.name}
+                  data-invalid={errors.name ? 'true' : undefined}
+                  className={fieldCls('name')}
                 />
-
-                <input
-                  type="text"
-                  placeholder="Alt. Phone"
-                  maxLength="11"
-                  value={form.altPhone}
-                  onChange={e => setForm({ ...form, altPhone: e.target.value.replace(/\D/g, '') })}
-                  className="w-full min-w-0 border border-[#EAE4E0] px-3 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white"
-                />
+                <FieldError name="name" />
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
+                <div className="flex flex-col min-w-0">
+                  <input
+                    type="text"
+                    placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
+                    maxLength="11"
+                    value={form.phone}
+                    onChange={e => setForm({ ...form, phone: e.target.value.replace(/\D/g, '') })}
+                    aria-invalid={!!errors.phone}
+                    data-invalid={errors.phone ? 'true' : undefined}
+                    className={fieldCls('phone')}
+                  />
+                  <FieldError name="phone" />
+                </div>
+
+                <div className="flex flex-col min-w-0">
+                  <input
+                    type="text"
+                    placeholder="Alt. Phone"
+                    maxLength="11"
+                    value={form.altPhone}
+                    onChange={e => setForm({ ...form, altPhone: e.target.value.replace(/\D/g, '') })}
+                    aria-invalid={!!errors.altPhone}
+                    data-invalid={errors.altPhone ? 'true' : undefined}
+                    className={fieldCls('altPhone')}
+                  />
+                  <FieldError name="altPhone" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
                 <div className="relative min-w-0" ref={calendarWrapRef}>
                   {orderType === 'Buy Now' ? (
-                    <div className="w-full border border-[#EAE4E0] px-3 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
+                    <div className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
                       <div className="flex items-center gap-1.5 truncate">
                         <Lock size={12} className="shrink-0" />
                         <span className="truncate">Today</span>
@@ -383,7 +416,8 @@ export default function OrderSummaryModal({
                       type="button"
                       ref={calendarTriggerRef}
                       onClick={() => (showCalendar ? setShowCalendar(false) : openCalendar())}
-                      className="w-full min-w-0 border border-[#EAE4E0] px-3 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors text-left bg-white flex items-center justify-between"
+                      data-invalid={errors.pickupDate ? 'true' : undefined}
+                      className={`${fieldCls('pickupDate')} text-left flex items-center justify-between`}
                     >
                       <span className={form.pickupDate ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
                         {form.pickupDate ? formatDateLong(form.pickupDate) : 'Date *'}
@@ -391,6 +425,7 @@ export default function OrderSummaryModal({
                       <CalendarIcon size={13} className="text-[#8A7264] shrink-0 ml-1" />
                     </button>
                   )}
+                  <FieldError name="pickupDate" />
                   {orderType !== 'Buy Now' && showCalendar && calendarPos && createPortal(
                     <div ref={calendarPortalRef}>
                       <MonthCalendar
@@ -411,7 +446,8 @@ export default function OrderSummaryModal({
                     type="button"
                     ref={timeDropdownTriggerRef}
                     onClick={() => (showTimeDropdown ? setShowTimeDropdown(false) : openTimeDropdown())}
-                    className={`w-full min-w-0 border border-[#EAE4E0] px-3 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                    data-invalid={errors.pickupTime ? 'true' : undefined}
+                    className={`${fieldCls('pickupTime')} flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
                       <Clock size={12} className="text-[#8A7264] shrink-0" />
@@ -422,6 +458,8 @@ export default function OrderSummaryModal({
                       className={`text-[#8A7264] shrink-0 ml-1 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
                     />
                   </button>
+
+                  <FieldError name="pickupTime" />
 
                   {showTimeDropdown && timeDropdownPos && createPortal(
                     <div ref={timeDropdownPortalRef} style={timeDropdownPos} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden w-[220px]">
@@ -476,7 +514,7 @@ export default function OrderSummaryModal({
                   placeholder="Anything else we should know? (optional)"
                   value={form.instructions || ''}
                   onChange={e => setForm({ ...form, instructions: e.target.value })}
-                  className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"
+                  className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"
                 />
               </div>
             </div>
@@ -631,10 +669,18 @@ export default function OrderSummaryModal({
                 // FIX: i-validate muna ang required Customer Details
                 // fields (Name, Contact, Pick-up Date/Time) BAGO ipakita
                 // ang "Are you sure?" confirm dialog — kung may kulang,
-                // ang lalabas ay ang "Please complete all required
-                // fields (*)" toast (via onValidate, posCart.jsx), at
-                // hindi na tuloy ang confirm dialog.
-                if (onValidate && !onValidate()) return;
+                // pulang border + error message sa mismong field ang
+                // lalabas (via `errors` prop), at hindi na tuloy ang
+                // confirm dialog.
+                if (onValidate && !onValidate()) {
+                  // Mag-scroll sa unang field na may error (para sa mobile /
+                  // maliit na screen kung saan may scroll ang form).
+                  setTimeout(() => {
+                    document.querySelector('[data-invalid="true"]')
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }, 50);
+                  return;
+                }
                 setShowConfirm(true);
               }}
               disabled={isProcessing}

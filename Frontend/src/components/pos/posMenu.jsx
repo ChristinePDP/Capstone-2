@@ -156,6 +156,31 @@ function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
 
+// Ang limit ng Bundle/Package ay galing LAMANG sa mga component products
+// (walang sariling limit): floor(available ÷ kailangan kada 1 bundle/package),
+// pinakamaliit sa lahat ng component. Kinukuwenta para sa Buy Now AT Pre-Order
+// dahil magkaiba ang stock basis nila (physical stock vs. daily_limit slots).
+function computeComponentStocks(components = []) {
+  const byId = new Map();
+  for (const { product, qty } of components) {
+    if (!product) continue;
+    const need = Number(qty) > 0 ? Number(qty) : 1;
+    const entry = byId.get(String(product.id));
+    if (entry) entry.need += need;
+    else byId.set(String(product.id), { product, need });
+  }
+  const list = [...byId.values()];
+  if (list.length === 0) return { buyNow: 0, preOrder: 0 };
+
+  const minFloor = (pick) => Math.max(0, Math.min(...list.map(({ product: p, need }) =>
+    Math.floor(Number(pick(p) ?? p.available_stock ?? 0) / need))));
+
+  return {
+    buyNow: minFloor(p => p.buy_now_available_stock),
+    preOrder: minFloor(p => p.pre_order_available_stock),
+  };
+}
+
 function isQuantityTracked(item, orderType = 'Buy Now') {
   if (!item) return false;
   if (item.type === 'bundle' || item.type === 'package') return true; 
@@ -165,8 +190,11 @@ function isQuantityTracked(item, orderType = 'Buy Now') {
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
   if (item.type === 'bundle' || item.type === 'package') {
-    if (orderType === 'Buy Now') return 0; // Kung Buy Now mode sa POS, walang stock ang Pre-order bundle/package
-    return Number(item.daily_limit ?? item.available_stock ?? 0);
+    // Pre-order-only na bundle/package: walang Buy Now stock.
+    if (orderType === 'Buy Now' && item.order_type === 'Pre-order') return 0;
+    return orderType === 'Pre-Order'
+      ? Number(item.pre_order_available_stock ?? 0)
+      : Number(item.buy_now_available_stock ?? 0);
   }
   if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
@@ -1005,6 +1033,13 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
               })
               .filter(Boolean);
 
+           const packageStocks = computeComponentStocks(
+             (b.package_items || []).map(pi => ({
+               product: products.find(p => String(p.id) === String(pi.product_id)),
+               qty: pi.quantity
+             }))
+           );
+
            return {
               ...b,
               inclusion: getPackageInclusion(b, products),
@@ -1020,7 +1055,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
               original_price: Number(b.original_total || 0),
               order_type: b.order_type || 'Pre-order',
               pricing_mode: 'fixed',
-              available_stock: Number(b.daily_limit || 0),
+              available_stock: packageStocks.buyNow,
+              buy_now_available_stock: packageStocks.buyNow,
+              pre_order_available_stock: packageStocks.preOrder,
               is_tracked: true,
               order_slip_fields: [],
               price_groups: [],
@@ -1030,6 +1067,13 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
         const bundleProducts = (b.product_ids || []).map(id => products.find(p => String(p.id) === String(id))).filter(Boolean);
         const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
+
+        const bundleStocks = computeComponentStocks(
+          (b.product_ids || []).map(id => ({
+            product: products.find(p => String(p.id) === String(id)),
+            qty: 1
+          }))
+        );
 
         return {
           id: `bundle-${b.id}`,
@@ -1045,7 +1089,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           products: bundleProducts,
           order_type: bundleOrderType,
           pricing_mode: 'fixed',
-          available_stock: Number(b.daily_limit || 0),
+          available_stock: bundleStocks.buyNow,
+          buy_now_available_stock: bundleStocks.buyNow,
+          pre_order_available_stock: bundleStocks.preOrder,
           is_tracked: true,
           type: 'bundle',
           bundleId: b.id,
@@ -1140,7 +1186,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     {isStockTracked && (
                       <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
                         <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : isSoldOut ? 'Sold Out' : `${currentStock} Available`}
+                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : isSoldOut ? (orderType === 'Pre-Order' ? 'Unavailable' : 'Sold Out') : `${currentStock} Available`}
                         </span>
                       </div>
                     )}
@@ -1204,7 +1250,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                       {isMismatchedType 
                         ? (p.order_type === 'Pre-order' ? 'Pre-order Only' : 'Buy Now Only')
                         : isSoldOut 
-                          ? 'Out of Stock' 
+                          ? (orderType === 'Pre-Order' ? 'Limit Reached' : 'Out of Stock') 
                           : 'Add to Cart'}
                     </button>
                   </div>

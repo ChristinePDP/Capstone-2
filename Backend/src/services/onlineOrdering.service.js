@@ -447,6 +447,11 @@ const resolvePackageLineItem = async (item) => {
       // FIX: Gawing null ito para hindi mag-error ang Foreign Key na nakatali sa promo_bundles
       bundle_id: null,
 
+      // BAGO: tahasang ID ng package (promo_bundles.id) sa bawat component row —
+      // hindi na kailangang hanapin via bundle_name. Walang FK sa DB (para
+      // gumana rin sa lumang package na product record).
+      package_id: packageLookupId,
+
       bundle_group_id: packageGroupId,
       bundle_name: pkg.name,
       original_unit_price: ownUnitPrice,

@@ -1,11 +1,72 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
+
+// ── Inline-validated fields (EventManager layout) ─────────────────────────
+// Pulang border + pulang label, at ang error message ay nasa mismong field
+// (overlay sa ilalim ng input, hindi nagdadagdag ng taas kaya hindi gumagalaw
+// ang form). Kapag may `hint`, itinatago ito habang may error para hindi magpatong.
+const ERR_CLS = 'absolute left-1 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none';
+
+function FieldShell({ label, required, error, hint, children }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && (
+        <label className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 block ${error ? 'text-red-500' : 'text-brand-500'}`}>
+          {label} {required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        {children}
+        {!hint && error && <span role="alert" className={`${ERR_CLS} top-full mt-0.5`}>{error}</span>}
+      </div>
+      {hint && (
+        <div className="relative mt-1.5">
+          <p className={`text-[10px] text-[#8A7264] leading-snug ${error ? 'invisible' : ''}`}>{hint}</p>
+          {error && <span role="alert" className={`${ERR_CLS} top-0`}>{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormInput({ label, required, error, hint, suffix, className = '', ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <input
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl py-2.5 text-xs outline-none bg-white transition-colors ${suffix ? 'pl-3.5 pr-12' : 'px-3.5'} ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      />
+      {suffix && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-brand-400 pointer-events-none">
+          {suffix}
+        </span>
+      )}
+    </FieldShell>
+  );
+}
+
+function FormSelect({ label, required, error, hint, className = '', children, ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <select
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl px-3 py-2.5 text-xs outline-none bg-white transition-colors cursor-pointer ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      >
+        {children}
+      </select>
+    </FieldShell>
+  );
+}
 
 const REASONS = {
   ingredient: ['Spoiled', 'Expiring Soon', 'Spilled/Wasted', 'Pest Damage', 'Other'],
@@ -75,6 +136,8 @@ export default function WasteTab() {
   const [reason, setReason] = useState('Spoiled');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState({}); // inline field errors ng modal
+  const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
 
   const filteredLogs = useMemo(() => {
     return wasteLogs.filter(log => {
@@ -118,66 +181,64 @@ export default function WasteTab() {
     setProductName(''); setProductQty(''); setProductUnit('pcs');
     setMatName(''); setMatQty(''); setMatUnit('pcs');
     setIsSaving(false);
+    setFormErrors({});
+    setServerError(null);
     setModalOpen(true);
   };
 
-  const handleLog = async () => {
-    if (isSaving) return;
-
+  // ── Inline validation (EventManager style) ────────────────────────────────
+  // Binubuo ang payload at ang mga error ng form sa iisang lugar para pareho
+  // ang rules sa pag-save at sa live na pag-clear ng error.
+  const buildLog = () => {
+    const errs = {};
     let finalItem = '';
     let rawQty = 0;
     let computedCost = 0;
     let finalUnit = '';
     let selectedItemStock = 0;
+    let qtyText = '';
 
     if (logType === 'ingredient') {
-      if (!ingName || !ingQty) {
-        showToast('Please fill in the ingredient name and quantity.', 'error');
-        return;
-      }
       const match = ingredients.find(i => i.name === ingName);
+      if (!ingName) errs.item = 'Please select an ingredient.';
       selectedItemStock = match ? match.stock : 0;
       finalItem = ingName;
+      qtyText = ingQty;
       rawQty = parseFloat(ingQty);
       finalUnit = match?.unit || ingUnit;
       computedCost = (match?.costPerUnit || 0) * rawQty;
     } else if (logType === 'product') {
-      if (!productName || !productQty) {
-        showToast('Please select the product and quantity.', 'error');
-        return;
-      }
       const match = products.find(p => p.name === productName);
+      if (!productName) errs.item = 'Please select a product.';
       selectedItemStock = match ? match.stock : 0;
       finalItem = productName;
+      qtyText = productQty;
       rawQty = parseInt(productQty, 10);
       finalUnit = productUnit;
-      const matchCost = match?.estimatedCost || 45;
-      computedCost = matchCost * rawQty;
+      computedCost = (match?.estimatedCost || 45) * rawQty;
     } else if (logType === 'material') {
-      if (!matName || !matQty) {
-        showToast('Please select the material and quantity.', 'error');
-        return;
-      }
       const match = materials.find(m => m.name === matName);
+      if (!matName) errs.item = 'Please select a material.';
       selectedItemStock = match ? match.stock : 0;
       finalItem = matName;
+      qtyText = matQty;
       rawQty = parseFloat(matQty);
       finalUnit = match?.unit || matUnit;
       computedCost = (match?.costPerUnit || 0) * rawQty;
     }
 
-    if (rawQty > selectedItemStock) {
-      showToast(`Not enough stock! Only ${selectedItemStock} left for this item.`, 'error');
-      return;
+    if (!String(qtyText).trim()) {
+      errs.qty = 'Quantity is required.';
+    } else if (!Number.isFinite(rawQty) || rawQty <= 0) {
+      errs.qty = 'Must be greater than zero.';
+    } else if (finalItem && rawQty > selectedItemStock) {
+      errs.qty = `Not enough stock — only ${selectedItemStock} left.`;
+    } else {
+      const overflow = getQtyError(rawQty, { max: MAX_QTY, label: 'Quantity' });
+      if (overflow) errs.qty = overflow;
     }
 
-    const qtyOverflowError = getQtyError(rawQty, { max: MAX_QTY, label: 'Quantity' });
-    if (qtyOverflowError) {
-      showToast(qtyOverflowError, 'error');
-      return;
-    }
-
-    const backendPayload = {
+    const payload = {
       waste_type: logType,
       item_name: finalItem,
       quantity: rawQty,
@@ -187,6 +248,37 @@ export default function WasteTab() {
       notes: notes.trim()
     };
 
+    return { errs, payload };
+  };
+
+  // Mawawala agad ang error ng field na naayos na habang nagta-type.
+  useEffect(() => {
+    setFormErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = buildLog().errs;
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === keys.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [logType, ingName, ingQty, matName, matQty, productName, productQty]);
+
+  const handleLog = async () => {
+    if (isSaving) return;
+    setServerError(null);
+
+    const { errs, payload: backendPayload } = buildLog();
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      setTimeout(() => {
+        document.querySelector('[data-invalid="true"]')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+      return;
+    }
+    setFormErrors({});
+
     setIsSaving(true);
     try {
       if (logWaste) {
@@ -195,7 +287,8 @@ export default function WasteTab() {
       }
       setModalOpen(false);
     } catch (err) {
-      showToast(err.message || 'Something went wrong while saving.', 'error');
+      // Ipinapakita sa loob ng modal (hindi toast sa labas)
+      setServerError(err.message || 'Something went wrong while saving.');
     } finally {
       setIsSaving(false);
     }
@@ -527,69 +620,123 @@ export default function WasteTab() {
           </div>
         }
       >
-        {logType === 'ingredient' && (
-          <div className="space-y-3">
-            <Select label="Select Ingredient" required value={ingName} onChange={e => {
-              const matched = ingredients.find(i => i.name === e.target.value);
-              setIngName(e.target.value);
-              if (matched) setIngUnit(matched.unit);
-            }}>
-              <option value="">— Select an ingredient —</option>
-              {ingredients.map(i => (
-                <option key={i.id} value={i.name}>{i.name} (In stock: {i.stock} {i.unit})</option>
-              ))}
-            </Select>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input label="Quantity Lost" required type="text" inputMode="decimal" value={ingQty} onChange={e => setIngQty(sanitizeNumericText(e.target.value))} min="0" />
-              <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
-                {REASONS.ingredient.map(r => <option key={r}>{r}</option>)}
-              </Select>
+        <div className="space-y-6">
+          {/* Server/save error — nasa loob ng modal mismo */}
+          {serverError && (
+            <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+              {serverError}
             </div>
-            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
-          </div>
-        )}
+          )}
 
-        {logType === 'material' && (
-          <div className="space-y-3">
-            <Select label="Select Material" required value={matName} onChange={e => {
-              const matched = materials.find(m => m.name === e.target.value);
-              setMatName(e.target.value);
-              if (matched) setMatUnit(matched.unit);
-            }}>
-              <option value="">— Select a material —</option>
-              {materials.map(m => (
-                <option key={m.id} value={m.name}>{m.name} (In stock: {m.stock} {m.unit})</option>
-              ))}
-            </Select>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input label="Quantity Lost" required type="text" inputMode="decimal" value={matQty} onChange={e => setMatQty(sanitizeNumericText(e.target.value))} min="0" />
-              <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
-                {REASONS.material.map(r => <option key={r}>{r}</option>)}
-              </Select>
+          {logType === 'ingredient' && (
+            <div className="space-y-6">
+              <FormSelect
+                label="Select Ingredient"
+                required
+                error={formErrors.item}
+                value={ingName}
+                onChange={e => {
+                  const matched = ingredients.find(i => i.name === e.target.value);
+                  setIngName(e.target.value);
+                  if (matched) setIngUnit(matched.unit);
+                }}
+              >
+                <option value="">— Select an ingredient —</option>
+                {ingredients.map(i => (
+                  <option key={i.id} value={i.name}>{i.name} (In stock: {i.stock} {i.unit})</option>
+                ))}
+              </FormSelect>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
+                <FormInput
+                  label="Quantity Lost"
+                  required
+                  error={formErrors.qty}
+                  type="text"
+                  inputMode="decimal"
+                  value={ingQty}
+                  onChange={e => setIngQty(sanitizeNumericText(e.target.value))}
+                  placeholder="0"
+                />
+                <FormSelect label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
+                  {REASONS.ingredient.map(r => <option key={r}>{r}</option>)}
+                </FormSelect>
+              </div>
+              <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
             </div>
-            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
-          </div>
-        )}
+          )}
 
-        {logType === 'product' && (
-          <div className="space-y-3">
-            <Select label="Select Product" required value={productName} onChange={e => {
-              setProductName(e.target.value); setProductQty(''); setProductUnit('pcs');
-            }}>
-              <option value="">— Select a product —</option>
-              {products.filter(p => p.stock > 0).map(p => (
-                <option key={p.id} value={p.name}>{p.name} (Current Stock: {p.stock} pcs)</option>
-              ))}
-            </Select>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input label="Quantity" required type="text" inputMode="numeric" value={productQty} onChange={e => setProductQty(sanitizeNumericText(e.target.value))} placeholder="0" />
-              <Select label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
-                {REASONS.product.map(r => <option key={r}>{r}</option>)}
-              </Select>
+          {logType === 'material' && (
+            <div className="space-y-6">
+              <FormSelect
+                label="Select Material"
+                required
+                error={formErrors.item}
+                value={matName}
+                onChange={e => {
+                  const matched = materials.find(m => m.name === e.target.value);
+                  setMatName(e.target.value);
+                  if (matched) setMatUnit(matched.unit);
+                }}
+              >
+                <option value="">— Select a material —</option>
+                {materials.map(m => (
+                  <option key={m.id} value={m.name}>{m.name} (In stock: {m.stock} {m.unit})</option>
+                ))}
+              </FormSelect>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
+                <FormInput
+                  label="Quantity Lost"
+                  required
+                  error={formErrors.qty}
+                  type="text"
+                  inputMode="decimal"
+                  value={matQty}
+                  onChange={e => setMatQty(sanitizeNumericText(e.target.value))}
+                  placeholder="0"
+                />
+                <FormSelect label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
+                  {REASONS.material.map(r => <option key={r}>{r}</option>)}
+                </FormSelect>
+              </div>
+              <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
             </div>
-            <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
-          </div>
-        )}
+          )}
+
+          {logType === 'product' && (
+            <div className="space-y-6">
+              <FormSelect
+                label="Select Product"
+                required
+                error={formErrors.item}
+                value={productName}
+                onChange={e => {
+                  setProductName(e.target.value); setProductQty(''); setProductUnit('pcs');
+                }}
+              >
+                <option value="">— Select a product —</option>
+                {products.filter(p => p.stock > 0).map(p => (
+                  <option key={p.id} value={p.name}>{p.name} (Current Stock: {p.stock} pcs)</option>
+                ))}
+              </FormSelect>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
+                <FormInput
+                  label="Quantity"
+                  required
+                  error={formErrors.qty}
+                  type="text"
+                  inputMode="numeric"
+                  value={productQty}
+                  onChange={e => setProductQty(sanitizeNumericText(e.target.value))}
+                  placeholder="0"
+                />
+                <FormSelect label="Reason" required value={reason} onChange={e => setReason(e.target.value)}>
+                  {REASONS.product.map(r => <option key={r}>{r}</option>)}
+                </FormSelect>
+              </div>
+              <Textarea label="Notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes..." rows={2} />
+            </div>
+          )}
+        </div>
       </Modal>
 
       <ConfirmModal

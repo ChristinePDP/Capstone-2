@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES } from '../../utils/unitUtils';
@@ -10,6 +10,73 @@ import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
+
+// ── Inline-validated fields (EventManager layout) ─────────────────────────
+// Pulang border + pulang label, at ang error message ay nasa mismong field
+// (overlay sa ilalim ng input, hindi nagdadagdag ng taas kaya hindi gumagalaw
+// ang form). Kapag may `hint`, itinatago ito habang may error para hindi magpatong.
+const ERR_CLS = 'absolute left-1 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none';
+
+function FieldShell({ label, required, error, hint, children }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && (
+        <label className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 block ${error ? 'text-red-500' : 'text-brand-500'}`}>
+          {label} {required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        {children}
+        {!hint && error && <span role="alert" className={`${ERR_CLS} top-full mt-0.5`}>{error}</span>}
+      </div>
+      {hint && (
+        <div className="relative mt-1.5">
+          <p className={`text-[10px] text-[#8A7264] leading-snug ${error ? 'invisible' : ''}`}>{hint}</p>
+          {error && <span role="alert" className={`${ERR_CLS} top-0`}>{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// `suffix` = unit text sa loob ng input; `trailing` = icon (hal. chevron) sa loob ng input.
+function FormInput({ label, required, error, hint, suffix, trailing, className = '', ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <input
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl py-2.5 text-xs outline-none bg-white transition-colors ${suffix || trailing ? 'pl-3.5 pr-12' : 'px-3.5'} ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      />
+      {suffix && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-brand-400 pointer-events-none">
+          {suffix}
+        </span>
+      )}
+      {trailing && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-brand-400">
+          {trailing}
+        </span>
+      )}
+    </FieldShell>
+  );
+}
+
+function FormSelect({ label, required, error, hint, className = '', children, ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <select
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl px-3 py-2.5 text-xs outline-none bg-white transition-colors cursor-pointer ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      >
+        {children}
+      </select>
+    </FieldShell>
+  );
+}
 
 const MATERIAL_VIEWS = [
   { key: 'celebration', label: 'Celebration Material', category: 'Celebration Material' },
@@ -330,7 +397,7 @@ export default function CelebrationTab() {
 // (getBoundingClientRect), kaya laging naka-anchor ito nang tama kahit
 // saan pa sa loob ng modal, at hindi na naaapektuhan ng overflow/z-index
 // ng anumang ancestor.
-function ProductLinkedNameField({ label = 'Material Name', value, onChange, products = [], placeholder, required = true }) {
+function ProductLinkedNameField({ label = 'Material Name', value, onChange, products = [], placeholder, required = true, error }) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const [coords, setCoords] = useState(null);
@@ -399,22 +466,18 @@ function ProductLinkedNameField({ label = 'Material Name', value, onChange, prod
 
   return (
     <div className="relative" ref={fieldRef}>
-      <Input
+      <FormInput
         label={label}
         required={required}
+        error={error}
         value={value}
         autoComplete="off"
         onChange={e => { onChange(e.target.value, null); setIsOpen(true); setHighlight(-1); }}
         onFocus={() => setIsOpen(true)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
+        trailing={products.length > 0 ? <ChevronDown size={14} /> : null}
       />
-      {products.length > 0 && (
-        <ChevronDown
-          size={14}
-          className="pointer-events-none absolute right-3 top-[38px] text-brand-400"
-        />
-      )}
 
       {isOpen && filtered.length > 0 && coords && createPortal(
         <div
@@ -444,14 +507,12 @@ function ProductLinkedNameField({ label = 'Material Name', value, onChange, prod
 }
 
 function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
-  const { show: showToast } = useToast();
-
   const [name, setName] = useState(material?.name ?? '');
   const [unit, setUnit] = useState(material?.unit ?? 'pcs');
   const [stock, setStock] = useState('');
   const [min, setMin] = useState(material?.min ?? '');
-  const [cost, setCost] = useState(''); 
-  const [expiry, setExpiry] = useState(''); // New: expiration date input
+  const [cost, setCost] = useState('');
+  const [expiry, setExpiry] = useState('');
   const [productId, setProductId] = useState(material?.productId || material?.product_id || '');
 
   // The material type is fixed: for a new material it comes from the tab the
@@ -461,8 +522,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   // Name-suggestion source depende sa uri: Celebration Materials ay
   // naka-link sa Celebration Material products, samantalang Product
-  // Materials ay para sa packaging ng regular products (hindi dapat
-  // dependent sa listahan ng Celebration Material products).
+  // Materials ay para sa packaging ng regular products.
   const products = materialType === 'product' ? regularProducts : celebrationProducts;
 
   const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
@@ -470,6 +530,10 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
+
+  // Inline validation: ang error ng bawat field ay lumalabas mismo sa field (EventManager style).
+  const [errors, setErrors] = useState({});
+  const [serverError, setServerError] = useState(null);
 
   const isEdit = !!material?.id;
 
@@ -488,20 +552,109 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     || productId !== (material?.productId || material?.product_id || '')
   );
 
+  // Errors ng "Material Details" panel (edit mode)
+  const computeDetailsErrors = () => {
+    const next = {};
+    if (!name.trim()) next.name = 'Name is required.';
+    if (minError) next.min = minError;
+    if (detailsCostError) next.detailsCost = detailsCostError;
+    return next;
+  };
+
+  // Lahat ng error ng buong form, depende kung Add o Edit.
+  const computeErrors = () => {
+    const next = {};
+
+    if (!isEdit) {
+      if (!name.trim()) next.name = 'Material name is required.';
+
+      if (!stock) next.stock = 'Initial stock is required.';
+      else if (parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
+      else if (qtyError) next.stock = qtyError;
+
+      if (!min) next.min = 'Minimum stock is required.';
+      else if (minError) next.min = minError;
+
+      if (!cost) next.cost = 'Total amount is required.';
+      else if (costError) next.cost = costError;
+
+      return next;
+    }
+
+    if (isDetailsModified || editingDetails) Object.assign(next, computeDetailsErrors());
+
+    if (stock) {
+      if (addedQty <= 0) next.stock = 'Quantity must be greater than 0.';
+      else if (qtyError) next.stock = qtyError;
+
+      if (!cost) next.cost = 'Total cost is required when adding stock.';
+      else if (costError) next.cost = costError;
+    }
+
+    if (!isDetailsModified && !stock) {
+      next.general = 'Nothing was changed or added. Edit the details or enter a quantity to add.';
+    }
+
+    return next;
+  };
+
+  const scrollToFirstInvalid = () => {
+    setTimeout(() => {
+      document.querySelector('[data-invalid="true"]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
+  // Fresh na form sa tuwing bubukas ang modal.
+  useEffect(() => {
+    if (isOpen) {
+      setErrors({});
+      setServerError(null);
+    }
+  }, [isOpen]);
+
+  // Mawawala agad ang error ng field na naayos na habang nagta-type.
+  useEffect(() => {
+    setErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = computeErrors();
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === keys.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, unit, stock, min, cost, detailsCost, productId, editingDetails]);
+
+  // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
+  const fieldErr = {
+    name:        errors.name,
+    stock:       errors.stock || qtyError,
+    min:         errors.min || minError,
+    cost:        errors.cost || costError,
+    detailsCost: errors.detailsCost || detailsCostError,
+  };
+
+  const clearDetailsErrors = (prev) => {
+    const rest = { ...prev };
+    delete rest.name; delete rest.min; delete rest.detailsCost;
+    return rest;
+  };
+
   const handleDetailsHeaderClick = () => {
     if (!editingDetails) {
       setEditingDetails(true);
-    } else {
-      if (isDetailsModified) {
-        if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
-        if (minError) { showToast(minError, 'error'); return; }
-        if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
-        
-        setEditingDetails(false);
-      } else {
-        setEditingDetails(false);
+      return;
+    }
+    if (isDetailsModified) {
+      const found = computeDetailsErrors();
+      if (Object.keys(found).length > 0) {
+        setErrors(prev => ({ ...clearDetailsErrors(prev), ...found }));
+        scrollToFirstInvalid();
+        return;
       }
     }
+    setEditingDetails(false);
   };
 
   const handleCancelDetails = () => {
@@ -510,57 +663,40 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     setMin(material?.min ?? '');
     setDetailsCost(String(material?.costPerUnit ?? ''));
     setProductId(material?.productId || material?.product_id || '');
+    setErrors(clearDetailsErrors);
     setEditingDetails(false);
   };
 
   const handleValidate = () => {
     if (isSaving) return;
+    setServerError(null);
+
+    const found = computeErrors();
+    if (Object.keys(found).length > 0) {
+      setErrors(found);
+      scrollToFirstInvalid();
+      return;
+    }
+    setErrors({});
 
     if (!isEdit) {
-      if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
-      if (!stock) { showToast('Initial stock is required.', 'error'); return; }
-      if (parseFloat(finalizedStock) < 0) { showToast('Stock quantity cannot be negative.', 'error'); return; }
-      if (!min) { showToast('Minimum safety stock is required.', 'error'); return; }
-      if (minError) { showToast(minError, 'error'); return; }
-      if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total cost is required.', 'error'); return; }
-      if (costError) { showToast(costError, 'error'); return; }
-
       setConfirmPayload({
         isNew: true,
-        newData: { 
-          name: name.trim(), 
+        newData: {
+          name: name.trim(),
           product_id: productId || null,
-          unit, 
-          stock_quantity: addedQty, 
-          minimum_stock: parseFloat(min), 
-          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0, 
+          unit,
+          stock_quantity: addedQty,
+          minimum_stock: parseFloat(min),
+          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0,
           material_type: defaultView, // 'celebration' | 'product' - taken from the active tab
-          expiration_date: expiry || null // New field
+          expiration_date: expiry || null
         },
         addedQty,
         itemName: name.trim(),
         itemUnit: unit,
         totalCost: cost ? parseFloat(cost) : 0,
       });
-      return;
-    }
-
-    if (isDetailsModified || editingDetails) {
-      if (!name.trim()) { showToast('Material name is required.', 'error'); return; }
-      if (minError) { showToast(minError, 'error'); return; }
-      if (detailsCostError) { showToast(detailsCostError, 'error'); return; }
-    }
-
-    if (stock) {
-      if (addedQty <= 0) { showToast('Added quantity must be greater than 0.', 'error'); return; }
-      if (qtyError) { showToast(qtyError, 'error'); return; }
-      if (!cost) { showToast('Total cost is required when adding stock.', 'error'); return; }
-      if (costError) { showToast(costError, 'error'); return; }
-    }
-
-    if (!isDetailsModified && !stock) {
-      showToast('Nothing was changed or added. Edit the details or enter a quantity to add.', 'error');
       return;
     }
 
@@ -573,12 +709,11 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
           cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0,
         }
       : null;
-      
-    // New field on the restock payload
-    const restockPayload = stock ? { 
-      added_qty: addedQty, 
+
+    const restockPayload = stock ? {
+      added_qty: addedQty,
       total_cost: cost ? parseFloat(cost) : 0,
-      expiration_date: expiry || null 
+      expiration_date: expiry || null
     } : null;
 
     setConfirmPayload({
@@ -599,10 +734,11 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
       setConfirmPayload(null);
       setStock('');
       setCost('');
-      setExpiry(''); // 👈 Reset form
+      setExpiry('');
       onClose();
     } catch (err) {
-      showToast(err.message || 'Failed to save', 'error');
+      // Ipinapakita sa loob ng modal (hindi toast sa labas)
+      setServerError(err.message || 'Failed to save');
       setConfirmPayload(null);
     } finally {
       setIsSaving(false);
@@ -623,10 +759,48 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
       ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
       : `Save the new details for "${confirmPayload?.itemName}"?`;
 
+  const bannerMessage = serverError || errors.general;
+  const viewLabel = MATERIAL_VIEWS.find(v => v.key === defaultView)?.label;
+
+  // Name field: celebration = may product suggestions, product = plain input.
+  const renderNameField = (label, placeholder) => (
+    materialType === 'celebration' ? (
+      <ProductLinkedNameField
+        label={label}
+        value={name}
+        error={fieldErr.name}
+        onChange={(nextName, linkedId) => {
+          setName(nextName);
+          setProductId(linkedId ?? '');
+        }}
+        products={products}
+        placeholder={placeholder}
+      />
+    ) : (
+      <FormInput
+        label={label}
+        required
+        error={fieldErr.name}
+        value={name}
+        onChange={e => {
+          setName(e.target.value);
+          setProductId('');
+        }}
+        placeholder={placeholder}
+      />
+    )
+  );
+
+  const unitOptions = STOCK_UNIT_CATEGORIES.map(cat => (
+    <optgroup key={cat.label} label={cat.label}>
+      {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
+    </optgroup>
+  ));
+
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : `Add New ${MATERIAL_VIEWS.find(v => v.key === defaultView)?.label ?? 'Material'}`}
-        subtitle={isEdit ? `Unit: ${material?.unit}` : `Record a new batch of ${MATERIAL_VIEWS.find(v => v.key === defaultView)?.label?.toLowerCase() ?? 'material'}.`}
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : `Add New ${viewLabel ?? 'Material'}`}
+        subtitle={isEdit ? `Unit: ${material?.unit}` : `Record a new batch of ${viewLabel?.toLowerCase() ?? 'material'}.`}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -638,6 +812,13 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
         }
       >
         <div className="space-y-5">
+          {/* Server/save error o "nothing changed" — nasa loob ng modal mismo */}
+          {bannerMessage && (
+            <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+              {bannerMessage}
+            </div>
+          )}
+
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
@@ -660,34 +841,14 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   <Tag size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">1. Basic Information</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    {materialType === 'celebration' ? (
-                      <ProductLinkedNameField
-                        value={name}
-                        onChange={(nextName, linkedId) => {
-                          setName(nextName);
-                          setProductId(linkedId ?? '');
-                        }}
-                        products={products}
-                        placeholder="e.g. Tarpaulin (2x3 ft)"
-                      />
-                    ) : (
-                      <Input label="Material Name" required value={name} onChange={e => {
-                        setName(e.target.value);
-                        setProductId('');
-                      }} placeholder="e.g. Small Box (6x6 in)" />
-                    )}
-                  </div>
-                  <div>
-                    <Select label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
-                      {STOCK_UNIT_CATEGORIES.map(cat => (
-                        <optgroup key={cat.label} label={cat.label}>
-                          {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-                        </optgroup>
-                      ))}
-                    </Select>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  {renderNameField(
+                    'Material Name',
+                    materialType === 'celebration' ? 'e.g. Tarpaulin (2x3 ft)' : 'e.g. Small Box (6x6 in)'
+                  )}
+                  <FormSelect label="Unit of Measurement" required value={unit} onChange={e => setUnit(e.target.value)}>
+                    {unitOptions}
+                  </FormSelect>
                 </div>
               </div>
 
@@ -698,15 +859,30 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   <Package size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">2. Stock Levels</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Input label="Initial Stock Quantity" required type="text" inputMode="decimal" suffix={unit} value={stock} onChange={e => setStock(sanitizeQtyText(e.target.value))} onBlur={() => setStock(current => parseFractionInput(current))} placeholder="e.g. 0.5 or 1/2" />
-                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
-                  </div>
-                  <div>
-                    <Input label="Minimum Safety Stock" required type="text" inputMode="decimal" suffix={unit} value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} placeholder="e.g. 10" />
-                    {minError && <p className="text-[11px] text-red-600 mt-1 font-medium">{minError}</p>}
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  <FormInput
+                    label="Initial Stock Quantity"
+                    required
+                    error={fieldErr.stock}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={unit}
+                    value={stock}
+                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onBlur={() => setStock(current => parseFractionInput(current))}
+                    placeholder="e.g. 0.5 or 1/2"
+                  />
+                  <FormInput
+                    label="Minimum Safety Stock"
+                    required
+                    error={fieldErr.min}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={unit}
+                    value={min}
+                    onChange={e => setMin(sanitizeNumericText(e.target.value))}
+                    placeholder="e.g. 10"
+                  />
                 </div>
               </div>
 
@@ -717,23 +893,24 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <Input label="Total Amount / Receipt" required type="text" inputMode="decimal" value={formatPesoLive(cost)} onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} placeholder="₱0.00" />
-                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-                    {!costError && cost && addedQty > 0 && (
-                      <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {unit} ({addedQty} {unit})</p>
-                    )}
-                  </div>
-                  <div>
-                    {/* Expiration date input for a new material */}
-                    <Input 
-                      label="Expiration Date (Optional)" 
-                      type="date" 
-                      value={expiry} 
-                      onChange={e => setExpiry(e.target.value)} 
-                    />
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
+                  <FormInput
+                    label="Total Amount / Receipt"
+                    required
+                    error={fieldErr.cost}
+                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ₱${(parseFloat(cost) / addedQty).toFixed(2)} per ${unit} (${addedQty} ${unit})` : undefined}
+                    type="text"
+                    inputMode="decimal"
+                    value={formatPesoLive(cost)}
+                    onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                    placeholder="₱0.00"
+                  />
+                  <FormInput
+                    label="Expiration Date (Optional)"
+                    type="date"
+                    value={expiry}
+                    onChange={e => setExpiry(e.target.value)}
+                  />
                 </div>
               </div>
             </div>
@@ -741,11 +918,11 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
           {isEdit && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-              
+
               <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-brand-100">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-500">Material Details</span>
-                  
+
                   {editingDetails ? (
                     <div className="flex items-center gap-1.5">
                       {isDetailsModified && (
@@ -761,8 +938,8 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                         type="button"
                         onClick={handleDetailsHeaderClick}
                         className={`text-xs font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg border shadow-sm transition-all ${
-                          isDetailsModified 
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600' 
+                          isDetailsModified
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
                             : 'bg-white text-brand-600 hover:text-brand-800 border-brand-200'
                         }`}
                       >
@@ -786,15 +963,16 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-2 gap-x-2.5 gap-y-6">
+                  <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
+                    <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
+                    <span className="text-sm font-bold text-brand-800 block">
+                      {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
+                    </span>
+                  </div>
+
                   {!editingDetails ? (
                     <>
-                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
-                        <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
-                        <span className="text-sm font-bold text-brand-800 block">
-                          {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
-                        </span>
-                      </div>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
                         <span className="block text-[10px] font-bold uppercase text-brand-400">Name</span>
                         <span className="text-sm font-bold text-brand-800 truncate block">{name}</span>
@@ -814,47 +992,26 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                     </>
                   ) : (
                     <>
-                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
-                        <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
-                        <span className="text-sm font-bold text-brand-800 block">
-                          {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
-                        </span>
-                      </div>
-                      <div>
-                        {materialType === 'celebration' ? (
-                          <ProductLinkedNameField
-                            label="Name"
-                            value={name}
-                            onChange={(nextName, linkedId) => {
-                              setName(nextName);
-                              setProductId(linkedId ?? '');
-                            }}
-                            products={products}
-                          />
-                        ) : (
-                          <Input label="Name" required value={name} onChange={e => {
-                            setName(e.target.value);
-                            setProductId('');
-                          }} />
-                        )}
-                      </div>
-                      <div>
-                        <Select label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
-                          {STOCK_UNIT_CATEGORIES.map(cat => (
-                            <optgroup key={cat.label} label={cat.label}>
-                              {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
-                            </optgroup>
-                          ))}
-                        </Select>
-                      </div>
-                      <div>
-                        <Input label="Min. Stock" type="text" inputMode="decimal" value={min} onChange={e => setMin(sanitizeNumericText(e.target.value))} />
-                        {minError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{minError}</p>}
-                      </div>
-                      <div>
-                        <Input label="Cost/Unit (₱)" type="text" inputMode="decimal" value={formatPesoLive(detailsCost)} onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} />
-                        {detailsCostError && <p className="text-[10px] text-red-600 font-medium mt-0.5">{detailsCostError}</p>}
-                      </div>
+                      {renderNameField('Name')}
+                      <FormSelect label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
+                        {unitOptions}
+                      </FormSelect>
+                      <FormInput
+                        label="Min. Stock"
+                        error={fieldErr.min}
+                        type="text"
+                        inputMode="decimal"
+                        value={min}
+                        onChange={e => setMin(sanitizeNumericText(e.target.value))}
+                      />
+                      <FormInput
+                        label="Cost/Unit (₱)"
+                        error={fieldErr.detailsCost}
+                        type="text"
+                        inputMode="decimal"
+                        value={formatPesoLive(detailsCost)}
+                        onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                      />
                     </>
                   )}
                 </div>
@@ -866,45 +1023,34 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">Add Stock / Quantity</span>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <Input
-                      label="Quantity to Add"
-                      type="text" 
-                      inputMode="decimal"
-                      suffix={material?.unit}
-                      value={stock} 
-                      onChange={e => setStock(sanitizeQtyText(e.target.value))}
-                      onBlur={() => setStock(current => parseFractionInput(current))}
-                      placeholder="e.g. 0.5 or 1/2"
-                    />
-                    {qtyError && <p className="text-[11px] text-red-600 mt-1 font-medium">{qtyError}</p>}
-                  </div>
-
-                  <div>
-                    <Input 
-                      label="Total Amount / Receipt" 
-                      type="text" 
-                      inputMode="decimal" 
-                      value={formatPesoLive(cost)} 
-                      onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))} 
-                      placeholder="₱0.00" 
-                    />
-                    {costError && <p className="text-[11px] text-red-600 mt-1 font-medium">{costError}</p>}
-                    {!costError && cost && addedQty > 0 && (
-                      <p className="text-[11px] text-brand-400 mt-1 font-medium">≈ ₱{(parseFloat(cost) / addedQty).toFixed(2)} per {material?.unit} ({addedQty} {material?.unit})</p>
-                    )}
-                  </div>
-
-                  <div>
-                    {/* Expiration date input for a restock */}
-                    <Input 
-                      label="Expiration Date (Optional)" 
-                      type="date" 
-                      value={expiry} 
-                      onChange={e => setExpiry(e.target.value)} 
-                    />
-                  </div>
+                <div className="space-y-6">
+                  <FormInput
+                    label="Quantity to Add"
+                    error={fieldErr.stock}
+                    type="text"
+                    inputMode="decimal"
+                    suffix={material?.unit}
+                    value={stock}
+                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onBlur={() => setStock(current => parseFractionInput(current))}
+                    placeholder="e.g. 0.5 or 1/2"
+                  />
+                  <FormInput
+                    label="Total Amount / Receipt"
+                    error={fieldErr.cost}
+                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ₱${(parseFloat(cost) / addedQty).toFixed(2)} per ${material?.unit} (${addedQty} ${material?.unit})` : undefined}
+                    type="text"
+                    inputMode="decimal"
+                    value={formatPesoLive(cost)}
+                    onChange={e => setCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                    placeholder="₱0.00"
+                  />
+                  <FormInput
+                    label="Expiration Date (Optional)"
+                    type="date"
+                    value={expiry}
+                    onChange={e => setExpiry(e.target.value)}
+                  />
                 </div>
               </div>
 
@@ -921,7 +1067,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
         onConfirm={executeSave}
         title={confirmTitle}
         message={confirmMessage}
-        confirmLabel={isSaving ? 'Saving...' : 'Yes, I\'m Sure'}
+        confirmLabel={isSaving ? 'Saving...' : "Yes, I'm Sure"}
         variant="primary"
       />
     </>

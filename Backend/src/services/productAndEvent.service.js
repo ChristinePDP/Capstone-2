@@ -342,8 +342,9 @@ const enrichPackageBundle = async (bundle) => {
     discount_percent: componentsTotal > packagePrice && componentsTotal > 0
       ? Math.round((1 - packagePrice / componentsTotal) * 100)
       : 0,
-    // Walang event/date-range na availability ang Package (daily_limit na
-    // lang ang cap nito) — laging "within range" hangga't active.
+    // Walang event/date-range na availability ang Package — laging
+    // "within range" hangga't active. Ang stock/limit nito ay galing sa mga
+    // component products.
     is_within_date_range: true
   };
 };
@@ -426,9 +427,7 @@ const buildPackageInsertRow = (bundleData) => ({
   start_day: null,
   end_month: null,
   end_day: null,
-  package_items: Array.isArray(bundleData.package_items) ? bundleData.package_items : [],
-  daily_limit: bundleData.daily_limit || 0,
-  date_exceptions: Array.isArray(bundleData.dateExceptions) ? bundleData.dateExceptions : []
+  package_items: Array.isArray(bundleData.package_items) ? bundleData.package_items : []
 });
 
 const buildBundleInsertRow = (bundleData) => ({
@@ -445,10 +444,7 @@ const buildBundleInsertRow = (bundleData) => ({
   end_month: bundleData.end_month || null,
   end_day: bundleData.end_day || null,
   order_type: normalizeOrderType(bundleData.order_type),
-  package_items: [],
-  // Bundle na rin ay may Pre-Order Limits (daily_limit + date exceptions).
-  daily_limit: bundleData.daily_limit || 0,
-  date_exceptions: Array.isArray(bundleData.dateExceptions) ? bundleData.dateExceptions : []
+  package_items: []
 });
 
 export const createBundle = async (bundleData) => {
@@ -487,8 +483,6 @@ export const updateBundle = async (id, bundleData) => {
         is_active: bundleData.is_active,
         package_items: bundleData.package_items,
         order_type: bundleData.order_type !== undefined ? normalizeOrderType(bundleData.order_type) : undefined,
-        daily_limit: bundleData.daily_limit,
-        date_exceptions: bundleData.dateExceptions,
         // Package rows never carry these — explicitly clear them in case an
         // older row is being re-saved.
         product_ids: [],
@@ -513,8 +507,6 @@ export const updateBundle = async (id, bundleData) => {
         end_month: bundleData.end_month,
         end_day: bundleData.end_day,
         order_type: bundleData.order_type !== undefined ? normalizeOrderType(bundleData.order_type) : undefined,
-        daily_limit: bundleData.daily_limit,
-        date_exceptions: bundleData.dateExceptions,
         // Package-only field — nililinis kapag Package → Bundle ang pinalitan.
         package_items: []
       };

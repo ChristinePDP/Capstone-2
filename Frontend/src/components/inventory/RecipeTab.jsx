@@ -1,12 +1,73 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Input, Select, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PAGE_SIZE = 8;
+
+// ── Inline-validated fields (EventManager layout) ─────────────────────────
+// Pulang border + pulang label, at ang error message ay nasa mismong field
+// (overlay sa ilalim ng input, hindi nagdadagdag ng taas kaya hindi gumagalaw
+// ang form). Kapag may `hint`, itinatago ito habang may error para hindi magpatong.
+const ERR_CLS = 'absolute left-1 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none';
+
+function FieldShell({ label, required, error, hint, children }) {
+  return (
+    <div className="w-full min-w-0">
+      {label && (
+        <label className={`text-[11px] font-bold uppercase tracking-wider mb-1.5 block ${error ? 'text-red-500' : 'text-brand-500'}`}>
+          {label} {required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        {children}
+        {!hint && error && <span role="alert" className={`${ERR_CLS} top-full mt-0.5`}>{error}</span>}
+      </div>
+      {hint && (
+        <div className="relative mt-1.5">
+          <p className={`text-[10px] text-[#8A7264] leading-snug ${error ? 'invisible' : ''}`}>{hint}</p>
+          {error && <span role="alert" className={`${ERR_CLS} top-0`}>{error}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormInput({ label, required, error, hint, suffix, className = '', ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <input
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl py-2.5 text-xs outline-none bg-white transition-colors ${suffix ? 'pl-3.5 pr-12' : 'px-3.5'} ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      />
+      {suffix && (
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-brand-400 pointer-events-none">
+          {suffix}
+        </span>
+      )}
+    </FieldShell>
+  );
+}
+
+function FormSelect({ label, required, error, hint, className = '', children, ...props }) {
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <select
+        aria-invalid={!!error}
+        data-invalid={error ? 'true' : undefined}
+        className={`w-full border rounded-xl px-3 py-2.5 text-xs outline-none bg-white transition-colors cursor-pointer ${error ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'} ${className}`}
+        {...props}
+      >
+        {children}
+      </select>
+    </FieldShell>
+  );
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
@@ -114,6 +175,8 @@ export default function RecipeTab() {
   const [productId, setProductId] = useState('');
   const [yld, setYld] = useState('');
   const [yldUnit, setYldUnit] = useState('pcs');
+  const [formErrors, setFormErrors] = useState({}); // inline field errors ng formula modal
+  const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
 
   const [quotas, setQuotas] = useState({});
   const [localStocks, setLocalStocks] = useState({});
@@ -330,6 +393,8 @@ export default function RecipeTab() {
     setYldUnit('pcs');
     setRows([{ itemId: '', qty: '', unit: '' }]);
     setAddonRows([]);
+    setFormErrors({});
+    setServerError(null);
     setModalOpen(true);
   };
 
@@ -360,113 +425,134 @@ export default function RecipeTab() {
 
     setRows(savedIngredientRows.length ? savedIngredientRows : [{ itemId: '', qty: '', unit: '' }]);
     setAddonRows(savedAddonRows);
+    setFormErrors({});
+    setServerError(null);
     setModalOpen(true);
+  };
+
+  // ── Inline validation (EventManager style) ────────────────────────────────
+  // Keys: 'product' | 'yield' | 'yieldUnit' | '<section>:<rowIndex>:<item|qty|unit>'
+  // section: 'r' = Recipe rows, 'a' = Product Materials rows.
+  const computeFormErrors = () => {
+    const next = {};
+
+    const matchedProduct = products.find(p => p.id === productId);
+    if (!productId) next.product = 'Please select a product.';
+    else if (!matchedProduct?.id) next.product = 'Product not found in the list.';
+
+    const numericYield = Number(yld);
+    if (!String(yld ?? '').trim()) next.yield = 'Yield is required.';
+    else if (!Number.isFinite(numericYield) || numericYield <= 0) next.yield = 'Must be greater than zero.';
+    else {
+      const overflow = getQtyError(String(yld), { max: MAX_QTY, label: 'Yield' });
+      if (overflow) next.yield = overflow;
+    }
+
+    if (!yldUnit || !yldUnit.trim()) next.yieldUnit = 'Yield unit is required.';
+
+    const isUsed = row => row.itemId || row.qty || row.unit;
+    if (!rows.some(isUsed)) next['r:0:item'] = 'Add at least one ingredient.';
+
+    const checkRows = (list, section, { requiredSourceType, noun }) => {
+      list.forEach((row, i) => {
+        if (!isUsed(row)) return;
+        const key = field => `${section}:${i}:${field}`;
+        const item = inventoryById[row.itemId];
+
+        if (!row.itemId) next[key('item')] = `Select ${noun === 'ingredient' ? 'an' : 'a'} ${noun}.`;
+        else if (!item) next[key('item')] = `Invalid ${noun} selection.`;
+        else if (item.sourceType !== requiredSourceType) {
+          next[key('item')] = requiredSourceType === 'raw'
+            ? `"${item.name}" is a material — move it to Product Materials.`
+            : `"${item.name}" is an ingredient — move it to the Recipe section.`;
+        }
+
+        const qtyText = String(row.qty ?? '').trim();
+        const qtyValue = Number(row.qty);
+        if (!qtyText) next[key('qty')] = 'Enter a quantity.';
+        else if (!Number.isFinite(qtyValue) || qtyValue <= 0) next[key('qty')] = 'Quantity must be greater than 0.';
+        else {
+          const qtyErr = getQtyError(qtyText, { max: MAX_QTY, label: `Quantity for ${item?.name || noun}` });
+          if (qtyErr) next[key('qty')] = qtyErr;
+        }
+
+        if (item && !next[key('qty')]) {
+          const selectedUnit = normalizeUnit(row.unit || item.unit);
+          const baseUnit = normalizeUnit(item.unit);
+          if (!Number.isFinite(convertToBase(qtyValue, selectedUnit, baseUnit))) {
+            next[key('unit')] = `Unit doesn't match ${item.name} — check the units.`;
+          }
+        }
+      });
+    };
+
+    checkRows(rows, 'r', { requiredSourceType: 'raw', noun: 'ingredient' });
+    checkRows(addonRows, 'a', { requiredSourceType: 'material', noun: 'material' });
+
+    return next;
+  };
+
+  const scrollToFirstInvalid = () => {
+    setTimeout(() => {
+      document.querySelector('[data-invalid="true"]')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+
+  // Mawawala agad ang error ng field/row na naayos na habang nag-e-edit.
+  useEffect(() => {
+    setFormErrors(prev => {
+      const keys = Object.keys(prev);
+      if (keys.length === 0) return prev;
+      const latest = computeFormErrors();
+      const next = {};
+      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
+      return Object.keys(next).length === keys.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, yld, yldUnit, rows, addonRows]);
+
+  // Kapag may inalis na row, nagbabago ang index kaya nililinis ang error ng section na iyon.
+  const clearSectionErrors = (section) => {
+    setFormErrors(prev => {
+      const next = {};
+      Object.keys(prev).forEach(k => { if (!k.startsWith(`${section}:`)) next[k] = prev[k]; });
+      return next;
+    });
   };
 
   const handleSave = async () => {
     if (isSaving) return;
+    setServerError(null);
+
+    const found = computeFormErrors();
+    if (Object.keys(found).length > 0) {
+      setFormErrors(found);
+      scrollToFirstInvalid();
+      return;
+    }
+    setFormErrors({});
+
     try {
-      if (!productId) {
-        showToast('Please select a product first.', 'warning');
-        return;
-      }
-
       const matchedProduct = products.find(p => p.id === productId);
-      if (!matchedProduct?.id) {
-        showToast('Product not found in the products list.', 'warning');
-        return;
-      }
-
       const numericYield = Number(yld);
-      if (!Number.isFinite(numericYield) || numericYield <= 0) {
-        showToast('Invalid yield — must be greater than zero.', 'warning');
-        return;
-      }
-      const yieldOverflow = getQtyError(yld, { max: MAX_QTY, label: 'Yield' });
-      if (yieldOverflow) { showToast(yieldOverflow, 'warning'); return; }
-
-      if (!yldUnit || !yldUnit.trim()) {
-        showToast('Please specify a yield unit.', 'warning');
-        return;
-      }
 
       const validRows = rows.filter(row => row.itemId || row.qty || row.unit);
-      if (!validRows.length) {
-        showToast('Add at least one ingredient row.', 'warning');
-        return;
-      }
       const validAddonRows = addonRows.filter(row => row.itemId || row.qty || row.unit);
 
-      // Shared validator for both the Recipe rows and the Product Materials rows.
-      // `requiredSourceType` enforces the section boundary: an ingredient
-      // row can only resolve to a raw ingredient, a product-material row can only
-      // resolve to a material. Returns null (after showing a toast) on the
-      // first invalid row, or the normalized recipe_ingredients entries.
-      const normalizeRowsOrToast = (rowsToCheck, { requiredSourceType, sectionLabel }) => {
-        const normalized = [];
-
-        for (const row of rowsToCheck) {
-          if (!row.itemId) {
-            showToast(`Select a${sectionLabel === 'ingredient' ? 'n' : ''} ${sectionLabel} for each row.`, 'warning');
-            return null;
-          }
-
-          const inventoryItem = inventoryById[row.itemId];
-          if (!inventoryItem) {
-            showToast(`One of the rows has an invalid ${sectionLabel} selection.`, 'warning');
-            return null;
-          }
-
-          // Defensive guard: keeps the two sections from bleeding into each
-          // other. Mainly catches a row carried over from editing an older
-          // recipe saved before this split existed — the pickers themselves
-          // no longer offer the wrong kind as an option.
-          if (inventoryItem.sourceType !== requiredSourceType) {
-            showToast(
-              requiredSourceType === 'raw'
-                ? `"${inventoryItem.name}" is a material, not an ingredient — move it to the Product Materials section instead.`
-                : `"${inventoryItem.name}" is an ingredient, not a material — it belongs in the Recipe section instead.`,
-              'warning'
-            );
-            return null;
-          }
-
-          const qtyValue = Number(row.qty);
-          if (!Number.isFinite(qtyValue) || qtyValue <= 0) {
-            showToast(`Invalid quantity for ${inventoryItem.name}.`, 'warning');
-            return null;
-          }
-
-          const rowQtyErr = getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${inventoryItem.name}` });
-          if (rowQtyErr) {
-            showToast(rowQtyErr, 'warning');
-            return null;
-          }
-
-          const selectedUnit = normalizeUnit(row.unit || inventoryItem.unit);
-          const baseUnit = normalizeUnit(inventoryItem.unit);
-          const normalizedQty = convertToBase(qtyValue, selectedUnit, baseUnit);
-          if (!Number.isFinite(normalizedQty)) {
-            showToast(`Unit conversion not supported for ${inventoryItem.name} — check if the units match.`, 'warning');
-            return null;
-          }
-
-          normalized.push({
-            item_type: inventoryItem.sourceType,
-            item_name: inventoryItem.name,
-            quantity: roundQty(normalizedQty),
-            unit: baseUnit,
-          });
-        }
-
-        return normalized;
-      };
-
-      const normalizedIngredients = normalizeRowsOrToast(validRows, { requiredSourceType: 'raw', sectionLabel: 'ingredient' });
-      if (!normalizedIngredients) return;
-
-      const normalizedAddons = normalizeRowsOrToast(validAddonRows, { requiredSourceType: 'material', sectionLabel: 'material' });
-      if (!normalizedAddons) return;
+      // Na-validate na lahat sa computeFormErrors(), kaya normalize na lang dito.
+      const normalizeRows = (rowsToCheck) => rowsToCheck.map(row => {
+        const inventoryItem = inventoryById[row.itemId];
+        const selectedUnit = normalizeUnit(row.unit || inventoryItem.unit);
+        const baseUnit = normalizeUnit(inventoryItem.unit);
+        const normalizedQty = convertToBase(Number(row.qty), selectedUnit, baseUnit);
+        return {
+          item_type: inventoryItem.sourceType,
+          item_name: inventoryItem.name,
+          quantity: roundQty(normalizedQty),
+          unit: baseUnit,
+        };
+      });
 
       const data = {
         product_id: matchedProduct.id,
@@ -475,10 +561,8 @@ export default function RecipeTab() {
         // The backend's recipe_ingredients table doesn't know about the
         // "Recipe" vs "Product Materials" split — that's purely a UI grouping.
         // Both are sent in one array here, distinguished by `item_type`
-        // ('raw' vs 'material'), which is exactly what ProductionService
-        // already uses to deduct raw-ingredient stock and material stock
-        // separately when a batch is confirmed.
-        ingredients: [...normalizedIngredients, ...normalizedAddons],
+        // ('raw' vs 'material').
+        ingredients: [...normalizeRows(validRows), ...normalizeRows(validAddonRows)],
       };
 
       setIsSaving(true);
@@ -493,11 +577,90 @@ export default function RecipeTab() {
       setModalOpen(false);
     } catch (err) {
       console.error('Recipe save failed:', err);
-      showToast(err?.message || 'Something went wrong while saving the formula.', 'error');
+      // Ipinapakita sa loob ng modal (hindi toast sa labas)
+      setServerError(err?.message || 'Something went wrong while saving the formula.');
     } finally {
       setIsSaving(false);
     }
   };
+
+  // Isang row ng ingredient/material picker (item + qty + unit). Ang error ay
+  // pulang border sa mismong control + mensahe sa ilalim ng row.
+  const renderItemRows = (section, list, setList, { options, noun, resetLast }) => list.map((row, i) => {
+    const rowItem = inventoryById[row.itemId];
+    const liveQtyErr = row.qty ? getQtyError(String(row.qty), { max: MAX_QTY, label: `Quantity for ${rowItem?.name || noun}` }) : null;
+    const err = {
+      item: formErrors[`${section}:${i}:item`],
+      qty:  formErrors[`${section}:${i}:qty`] || liveQtyErr,
+      unit: formErrors[`${section}:${i}:unit`],
+    };
+    const rowMessage = err.item || err.qty || err.unit;
+    const ctl = (bad) => `w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white transition-colors ${bad ? 'border-red-500 focus:border-red-500' : 'border-brand-200 focus:border-brand-400'}`;
+    const flag = (bad) => ({ 'aria-invalid': !!bad, 'data-invalid': bad ? 'true' : undefined });
+
+    return (
+      <div key={i} className={`p-2.5 rounded-lg border space-y-2 transition-colors ${rowMessage ? 'border-red-200 bg-red-50/30' : 'border-brand-100 bg-brand-50/20'}`}>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="w-full sm:flex-1 sm:min-w-0">
+            <select
+              value={row.itemId}
+              onChange={e => {
+                const selected = inventoryById[e.target.value];
+                setList(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
+              }}
+              className={ctl(err.item)}
+              {...flag(err.item)}
+            >
+              <option value="">Select {noun}</option>
+              {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </div>
+
+          <div className="flex gap-2 items-center">
+            <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
+              <input
+                value={row.qty}
+                type="text"
+                inputMode="decimal"
+                onChange={e => setList(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
+                placeholder="Qty"
+                className={`${ctl(err.qty)} font-semibold`}
+                {...flag(err.qty)}
+              />
+            </div>
+
+            <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
+              <select
+                value={row.unit}
+                onChange={e => setList(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
+                className={ctl(err.unit)}
+                {...flag(err.unit)}
+              >
+                <option value="">Unit</option>
+                {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setList(prev => (resetLast && prev.length <= 1) ? [{ itemId: '', qty: '', unit: '' }] : prev.filter((_, j) => j !== i));
+                clearSectionErrors(section);
+              }}
+              className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
+              title="Remove row"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+
+        {rowMessage && (
+          <p role="alert" className="text-[11px] text-red-600 font-medium pl-1">{rowMessage}</p>
+        )}
+      </div>
+    );
+  });
 
   // Confirmation and actual execution of batch production
   const handleExecuteConfirm = async () => {
@@ -794,27 +957,49 @@ export default function RecipeTab() {
         }
       >
         <div className="space-y-5">
+          {/* Server/save error — nasa loob ng modal mismo */}
+          {serverError && (
+            <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+              {serverError}
+            </div>
+          )}
+
           {/* SECTION 1: BASIC FORMULA DETAILS */}
           <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
               <Tag size={13} className="text-brand-500" />
               <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">1. Formula Details</span>
             </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-1">
-                <Select label="Product Name" required value={productId} onChange={e => setProductId(e.target.value)}>
-                  <option value="">Select product</option>
-                  {productOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-                </Select>
-              </div>
-              <div>
-                <Input label="Actual Yield per Batch" required type="text" inputMode="decimal" value={yld} onChange={e => setYld(sanitizeNumericText(e.target.value))} placeholder="e.g. 12" />
-                {getQtyError(yld, { max: MAX_QTY, label: 'Yield' }) && <p className="text-[11px] text-red-600 mt-1 font-medium">{getQtyError(yld, { max: MAX_QTY, label: 'Yield' })}</p>}
-              </div>
-              <div>
-                <Input label="Yield Unit" required value={yldUnit} onChange={e => setYldUnit(e.target.value)} placeholder="pcs" />
-              </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-3 gap-y-6">
+              <FormSelect
+                label="Product Name"
+                required
+                error={formErrors.product}
+                value={productId}
+                onChange={e => setProductId(e.target.value)}
+              >
+                <option value="">Select product</option>
+                {productOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </FormSelect>
+              <FormInput
+                label="Actual Yield per Batch"
+                required
+                error={formErrors.yield || (yld ? getQtyError(String(yld), { max: MAX_QTY, label: 'Yield' }) : '')}
+                type="text"
+                inputMode="decimal"
+                value={yld}
+                onChange={e => setYld(sanitizeNumericText(e.target.value))}
+                placeholder="e.g. 12"
+              />
+              <FormInput
+                label="Yield Unit"
+                required
+                error={formErrors.yieldUnit}
+                value={yldUnit}
+                onChange={e => setYldUnit(e.target.value)}
+                placeholder="pcs"
+              />
             </div>
           </div>
 
@@ -829,69 +1014,7 @@ export default function RecipeTab() {
             </div>
 
             <div className="space-y-2.5">
-              {rows.map((row, i) => {
-                const rowItem = inventoryById[row.itemId];
-                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'ingredient'}` }) : null;
-
-                return (
-                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
-                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                      <div className="w-full sm:flex-1 sm:min-w-0">
-                        <Select
-                          value={row.itemId}
-                          onChange={e => {
-                            const selected = inventoryById[e.target.value];
-                            setRows(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
-                          }}
-                          className="w-full"
-                          required
-                        >
-                          <option value="">Select ingredient</option>
-                          {ingredientPickerOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-                        </Select>
-                      </div>
-
-                      <div className="flex gap-2 items-center">
-                        <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
-                          <input
-                            value={row.qty}
-                            type="text"
-                            inputMode="decimal"
-                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
-                            placeholder="Qty"
-                            className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
-                          />
-                        </div>
-
-                        <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
-                          <Select
-                            value={row.unit}
-                            onChange={e => setRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
-                            className="w-full"
-                            required
-                          >
-                            <option value="">Unit</option>
-                            {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
-                          </Select>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setRows(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : [{ itemId: '', qty: '', unit: '' }])}
-                          className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
-                          title="Remove row"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {rowQtyErr && (
-                      <p className="text-[11px] text-red-600 font-medium pl-1">{rowQtyErr}</p>
-                    )}
-                  </div>
-                );
-              })}
+              {renderItemRows('r', rows, setRows, { options: ingredientPickerOptions, noun: 'ingredient', resetLast: true })}
 
               <button
                 type="button"
@@ -915,67 +1038,7 @@ export default function RecipeTab() {
             </div>
 
             <div className="space-y-2.5">
-              {addonRows.map((row, i) => {
-                const rowItem = inventoryById[row.itemId];
-                const rowQtyErr = row.qty ? getQtyError(row.qty, { max: MAX_QTY, label: `Quantity for ${rowItem?.name || 'material'}` }) : null;
-
-                return (
-                  <div key={i} className="p-2.5 rounded-lg border border-brand-100 bg-brand-50/20 space-y-2">
-                    <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                      <div className="w-full sm:flex-1 sm:min-w-0">
-                        <Select
-                          value={row.itemId}
-                          onChange={e => {
-                            const selected = inventoryById[e.target.value];
-                            setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
-                          }}
-                          className="w-full"
-                        >
-                          <option value="">Select material</option>
-                          {addonPickerOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-                        </Select>
-                      </div>
-
-                      <div className="flex gap-2 items-center">
-                        <div className="flex-1 min-w-0 sm:w-24 sm:flex-none">
-                          <input
-                            value={row.qty}
-                            type="text"
-                            inputMode="decimal"
-                            onChange={e => setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, qty: sanitizeNumericText(e.target.value) } : r))}
-                            placeholder="Qty"
-                            className={`w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white font-semibold ${rowQtyErr ? 'border-red-400' : 'border-brand-200 focus:border-brand-400'}`}
-                          />
-                        </div>
-
-                        <div className="flex-1 min-w-0 sm:w-28 sm:flex-none">
-                          <Select
-                            value={row.unit}
-                            onChange={e => setAddonRows(prev => prev.map((r, j) => j === i ? { ...r, unit: e.target.value } : r))}
-                            className="w-full"
-                          >
-                            <option value="">Unit</option>
-                            {getCompatibleUnits(inventoryById[row.itemId]?.unit || row.unit).map(unit => <option key={unit} value={unit}>{unit}</option>)}
-                          </Select>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setAddonRows(prev => prev.filter((_, j) => j !== i))}
-                          className="p-2 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors shrink-0"
-                          title="Remove row"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {rowQtyErr && (
-                      <p className="text-[11px] text-red-600 font-medium pl-1">{rowQtyErr}</p>
-                    )}
-                  </div>
-                );
-              })}
+              {renderItemRows('a', addonRows, setAddonRows, { options: addonPickerOptions, noun: 'material', resetLast: false })}
 
               <button
                 type="button"
