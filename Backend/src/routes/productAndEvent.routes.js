@@ -57,6 +57,9 @@ const uploadSingleImage = (req, res, next) => {
 // PRODUCTS CRUD
 // ============================================================
 router.get('/', getProducts);
+// Admin catalog: unlike the public menu route, this includes products that
+// do not have a production formula yet so Product & Event can show the status.
+router.get('/catalog', authMiddlewareJwt, getProducts);
 
 // ============================================================
 // PROMO BUNDLES CRUD

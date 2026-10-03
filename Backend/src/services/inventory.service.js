@@ -312,6 +312,10 @@ const ProductionService = {
   confirmBatch: async (body) => {
     const { data: recipe, error: recipeErr } = await RecipeModel.findWithIngredients(body.recipe_id);
     if (recipeErr || !recipe) throw new AppError('Recipe not found', 404);
+    if (!Array.isArray(recipe.recipe_ingredients) || recipe.recipe_ingredients.length === 0
+      || recipe.recipe_ingredients.some(ingredient => Number(ingredient.quantity) <= 0)) {
+      throw new AppError('Production formula must contain valid ingredients', 400);
+    }
 
     // 1. I-compute ang mga ibabawas
     const deductions = recipe.recipe_ingredients.map(ri => ({

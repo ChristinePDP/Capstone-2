@@ -16,7 +16,10 @@ const ProductModel = {
     }
 
     if (filters.activeOnly !== false) {
-      query = query.eq('is_active', true);
+      // Treat NULL as active for legacy/new rows created before the
+      // is_active default was enforced. Only an explicit false hides a
+      // product from the catalog.
+      query = query.or('is_active.eq.true,is_active.is.null');
     }
 
     return query;

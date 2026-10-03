@@ -32,6 +32,32 @@ const RecipeModel = {
       .select('*, recipe_ingredients(*)')
       .eq('product_id', productId)
       .single(),
+
+  findFormulaStatusByProductIds: async (productIds = []) => {
+    const ids = [...new Set((productIds || []).filter(Boolean))];
+    if (ids.length === 0) return new Map();
+
+    const { data, error } = await supabase
+      .from('recipes')
+      .select('id, product_id, recipe_ingredients(quantity)')
+      .in('product_id', ids);
+
+    if (error) throw error;
+
+    return new Map((data || []).map(recipe => {
+      const ingredients = Array.isArray(recipe.recipe_ingredients)
+        ? recipe.recipe_ingredients
+        : [];
+      const hasValidIngredients = ingredients.length > 0
+        && ingredients.every(ingredient => Number(ingredient.quantity) > 0);
+
+      return [recipe.product_id, {
+        recipe_id: recipe.id,
+        recipe_ingredient_count: ingredients.length,
+        has_production_formula: hasValidIngredients,
+      }];
+    }));
+  },
 };
 
 export { RecipeModel };

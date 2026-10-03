@@ -435,6 +435,9 @@ export function AppProvider({ children }) {
     try {
       await apiClient.post('/recipes', data);
       await fetchAll();
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: { table: 'recipes', action: 'created' },
+      }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to add recipe (Check backend schema)'), { cause: err });
     }
@@ -444,6 +447,9 @@ export function AppProvider({ children }) {
     try {
       await apiClient.put(`/recipes/${id}`, data);
       await fetchAll();
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: { table: 'recipes', action: 'updated', id },
+      }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to update recipe'), { cause: err });
     }
@@ -452,6 +458,9 @@ export function AppProvider({ children }) {
     try {
       await apiClient.delete(`/recipes/${id}`);
       await fetchAll();
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: { table: 'recipes', action: 'deleted', id },
+      }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to delete recipe'), { cause: err });
     }

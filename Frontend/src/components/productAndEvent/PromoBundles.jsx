@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
-const PRODUCTS_API = API_BASE;
+const PRODUCTS_API = `${API_BASE}/catalog`;
 const EVENTS_API = `${API_BASE}/events`;
 export const BUNDLES_API = `${API_BASE}/bundles`;
 const UPLOAD_IMAGE_API = `${API_BASE}/upload-image`;
@@ -49,7 +49,7 @@ export async function fetchBundlesPageFromApi(force = false) {
     try {
       const [bundlesRes, productsRes, eventsRes] = await Promise.all([
         fetch(BUNDLES_API),
-        fetch(PRODUCTS_API),
+        fetch(PRODUCTS_API, { credentials: 'include' }),
         fetch(EVENTS_API),
       ]);
       const [bundlesData, productsData, eventsData] = await Promise.all([

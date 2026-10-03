@@ -7,6 +7,7 @@ import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 import { PendingOrdersModel } from '../model/pendingOrders.model.js';
 import { MaterialModel } from '../model/material.model.js';
+import { RecipeModel } from '../model/recipe.model.js';
 import { notifyNewOrder } from './notification.service.js';
 import { getBundleById } from './productAndEvent.service.js';
 
@@ -67,6 +68,13 @@ export const fetchMenuProducts = async (filters = {}) => {
       .filter(material => material.product_id)
       .map(material => [material.product_id, material])
   );
+  const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(
+    products.map(product => product.id)
+  );
+  products = products.filter(product =>
+    product.category === 'Celebration Material'
+      || formulaByProductId.get(product.id)?.has_production_formula === true
+  );
   
   const reservedMap = {};
   
@@ -119,6 +127,24 @@ export const fetchMenuProducts = async (filters = {}) => {
   });
 
   return productsWithStock;
+};
+
+export const validateProductionFormulaAvailability = async (items = []) => {
+  const productIds = [...new Set(items.map(item => item.product_id).filter(Boolean))];
+  if (productIds.length === 0) return;
+
+  const products = await ProductModel.findByIds(productIds);
+  const productsById = new Map(products.map(product => [product.id, product]));
+  const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(productIds);
+
+  for (const productId of productIds) {
+    const product = productsById.get(productId);
+    if (!product || product.category === 'Celebration Material') continue;
+
+    if (formulaByProductId.get(productId)?.has_production_formula !== true) {
+      throw new Error(`"${product.name || 'Product'}" cannot be ordered because it has no production formula yet.`);
+    }
+  }
 };
 
 export const getStorageBaseUrl = (bucketName) => {
@@ -582,6 +608,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   let resolvedItems;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
+    await validateProductionFormulaAvailability(resolvedItems);
     console.log(
       `[ORDER] ${payload.items.length} cart item(s) -> ${resolvedItems.length} order_items row(s):`,
       payload.items.map(i => `${i.name || i.packageId || i.bundleId} [type=${i.type || '-'}]`).join(', ')

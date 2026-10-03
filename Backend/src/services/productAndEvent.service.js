@@ -2,6 +2,7 @@ import { supabase } from '../config/supabase.js';
 import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
 import { BundleModel } from '../model/bundle.model.js';
+import { RecipeModel } from '../model/recipe.model.js';
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { AiCacheModel } from '../model/AiCache.model.js'; 
 
@@ -173,9 +174,37 @@ const getCurrentImageUrl = async (table, column, id) => {
 
 export const getAllProducts = async (filters = {}) => {
   try {
-    const { data, error } = await ProductModel.findAll(filters);
+    // Product & Event is the admin catalog. A product must remain visible
+    // there until it is explicitly deleted; ordering/POS apply their own
+    // active/formula rules in their respective services.
+    const { data, error } = await ProductModel.findAll({
+      ...filters,
+      activeOnly: false,
+    });
     if (error) throw error;
-    return data;
+    const products = data || [];
+    const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(
+      products.map(product => product.id)
+    );
+
+    return products.map(product => {
+      if (product.category === 'Celebration Material') {
+        return {
+          ...product,
+          has_production_formula: true,
+          formula_status: 'not_required',
+        };
+      }
+
+      const formula = formulaByProductId.get(product.id);
+      return {
+        ...product,
+        has_production_formula: formula?.has_production_formula === true,
+        formula_status: formula?.has_production_formula === true ? 'ready' : 'missing',
+        recipe_id: formula?.recipe_id || null,
+        recipe_ingredient_count: formula?.recipe_ingredient_count || 0,
+      };
+    });
   } catch (error) {
     throw new Error(`Service Error (getAllProducts): ${error.message}`);
   }
@@ -199,6 +228,7 @@ export const createDatabaseProduct = async (productData) => {
   const productToInsert = {
     name: productData.name,
     category: productData.category,
+    is_active: productData.is_active ?? true,
     order_type: productData.order_type || 'Both',
     price: productData.price,
     inclusion: productData.inclusion || '',
@@ -909,7 +939,13 @@ export const generateEventAds = async () => {
 
     if (prodError) throw prodError;
 
+    const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(
+      (productsData || []).map(product => product.id)
+    );
     const matchingProducts = (productsData || []).filter(
+      p => p.category === 'Celebration Material'
+        || formulaByProductId.get(p.id)?.has_production_formula === true
+    ).filter(
       p => Array.isArray(p.event_tags) && p.event_tags.some(tag => liveTags.includes(tag))
     );
 

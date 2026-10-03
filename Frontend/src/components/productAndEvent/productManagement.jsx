@@ -5,7 +5,7 @@ import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products/catalog`;
 
 let productsCache = null;
 let productsCachePromise = null;
@@ -206,6 +206,8 @@ function ProductCard({ product, onEdit, onDelete }) {
   const dailyLimit = product.dailyLimit ?? product.daily_limit ?? 0;
   const imageUrl = product.image || product.image_url;
   const isVariablePricing = product.pricing_mode === 'variable';
+  const missingFormula = product.category !== 'Celebration Material'
+    && product.has_production_formula === false;
 
   return (
     <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0">
@@ -225,6 +227,13 @@ function ProductCard({ product, onEdit, onDelete }) {
           <div className="absolute top-2 right-2">
             <span className="text-[9px] sm:text-[10px] font-bold bg-[#3B1F0A] text-white px-2 py-1 rounded-full shadow-sm">
               Limit: {dailyLimit}/day
+            </span>
+          </div>
+        )}
+        {missingFormula && (
+          <div className="absolute left-2 right-2 bottom-2">
+            <span className="block rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm">
+              No production formula yet - Cannot appear in POS/Online Ordering
             </span>
           </div>
         )}
@@ -333,8 +342,22 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   }, []);
 
   useEffect(() => {
-    const handleDataChanged = () => {
-      fetchProducts(true, true);
+    const handleDataChanged = async () => {
+      try {
+        const refreshedProducts = await fetchProductsFromApi(true);
+        setProducts(previousProducts => {
+          const refreshedById = new Map((refreshedProducts || []).map(product => [product.id, product]));
+          const mergedProducts = previousProducts.map(product => refreshedById.get(product.id) || product);
+          const existingIds = new Set(previousProducts.map(product => product.id));
+
+          return [
+            ...mergedProducts,
+            ...(refreshedProducts || []).filter(product => !existingIds.has(product.id)),
+          ].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        });
+      } catch (err) {
+        console.error('Refresh Products Error:', err);
+      }
       fetchBundles(true, true);
     };
     window.addEventListener('cake:data-changed', handleDataChanged);
@@ -396,8 +419,30 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
-  const handleSaveSuccess = async () => {
-    await fetchProducts(true);
+  const handleSaveSuccess = async (savedProduct) => {
+    const refreshedProducts = await fetchProductsFromApi(true);
+    const saved = savedProduct
+      ? {
+          ...savedProduct,
+          is_active: savedProduct.is_active ?? true,
+          has_production_formula: savedProduct.category === 'Celebration Material'
+            ? true
+            : savedProduct.has_production_formula === true,
+          formula_status: savedProduct.category === 'Celebration Material'
+            ? 'not_required'
+            : savedProduct.has_production_formula === true ? 'ready' : 'missing',
+        }
+      : null;
+
+    const mergedProducts = saved
+      ? [
+          ...(refreshedProducts || []).filter(product => product.id !== saved.id),
+          saved,
+        ].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      : refreshedProducts;
+
+    productsCache = mergedProducts || [];
+    setProducts(productsCache);
     showToast(editProduct?.id ? 'Product updated.' : 'Product added.');
   };
 
