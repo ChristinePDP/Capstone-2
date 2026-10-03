@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package } from 'lucide-react';
+import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
@@ -68,6 +69,172 @@ function FormSelect({ label, required, error, hint, className = '', children, ..
     </FieldShell>
   );
 }
+// ── Searchable dropdown ───────────────────────────────────────────────────
+// Pamalit sa native <select> para sa ingredient/material picker: may search box
+// para mabilis mahanap ang item kahit marami. Naka-portal sa document.body at
+// fixed ang position para hindi maputol ng scroll area ng modal; bumubukas
+// pataas kapag kulang ang espasyo sa ibaba.
+function SearchableSelect({ value, options, placeholder = 'Select', searchPlaceholder = 'Search...', emptyText = 'No results found', onChange, invalid }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState(null);
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const selected = options.find(o => String(o.id) === String(value));
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(o => String(o.label).toLowerCase().includes(q));
+  }, [options, query]);
+
+  const updatePos = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const PANEL_H = 260;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < PANEL_H && r.top > spaceBelow;
+    setPos({
+      left: r.left,
+      width: r.width,
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+    });
+  }, []);
+
+  const close = useCallback(() => { setOpen(false); setQuery(''); }, []);
+
+  const openPanel = () => {
+    const idx = options.findIndex(o => String(o.id) === String(value));
+    setActive(idx >= 0 ? idx : 0);
+    setQuery('');
+    updatePos();
+    setOpen(true);
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    updatePos();
+    const reposition = () => updatePos();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open, updatePos]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    inputRef.current?.focus();
+    const onDown = (e) => {
+      if (triggerRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      close();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [open, close]);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.children?.[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  const choose = (option) => {
+    onChange(option.id);
+    close();
+    triggerRef.current?.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(a => Math.min(filtered.length - 1, a + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(a => Math.max(0, a - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filtered[active]) choose(filtered[active]);
+    } else if (e.key === 'Escape') {
+      // Huwag isara ang buong modal — dropdown lang.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      triggerRef.current?.focus();
+    }
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => (open ? close() : openPanel())}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-invalid={!!invalid}
+        data-invalid={invalid ? 'true' : undefined}
+        className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-sm text-left border rounded-lg outline-none bg-white transition-colors ${invalid ? 'border-red-500 focus:border-red-500' : 'border-brand-200 focus:border-brand-400'}`}
+      >
+        <span className={`truncate ${selected ? '' : 'text-gray-500'}`}>{selected ? selected.label : placeholder}</span>
+        <ChevronDown size={14} className={`shrink-0 text-brand-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && pos && createPortal(
+        <div
+          ref={panelRef}
+          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+          className="z-[9999] bg-white border border-brand-200 rounded-xl shadow-lg overflow-hidden"
+        >
+          <div className="relative p-2 border-b border-brand-100">
+            <Search size={13} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-300 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setActive(0); }}
+              onKeyDown={handleKeyDown}
+              placeholder={searchPlaceholder}
+              className="w-full pl-7 pr-2.5 py-1.5 text-sm border border-brand-200 rounded-lg outline-none bg-white focus:border-brand-400"
+            />
+          </div>
+          <ul ref={listRef} role="listbox" className="max-h-48 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <li className="px-3 py-3 text-xs text-center text-brand-400">{emptyText}</li>
+            ) : filtered.map((option, idx) => {
+              const isSelected = String(option.id) === String(value);
+              return (
+                <li
+                  key={option.id}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setActive(idx)}
+                  onClick={() => choose(option)}
+                  className={`flex items-center justify-between gap-2 px-3 py-1.5 text-sm cursor-pointer ${idx === active ? 'bg-brand-50' : ''} ${isSelected ? 'font-bold text-brand-800' : 'text-brand-700'}`}
+                >
+                  <span className="truncate">{option.label}</span>
+                  {isSelected && <Check size={13} className="shrink-0 text-brand-500" />}
+                </li>
+              );
+            })}
+          </ul>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
@@ -618,18 +785,18 @@ export default function RecipeTab() {
       <div key={i} className={`p-2.5 rounded-lg border space-y-2 transition-colors ${rowMessage ? 'border-red-200 bg-red-50/30' : 'border-brand-100 bg-brand-50/20'}`}>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
           <div className="w-full sm:flex-1 sm:min-w-0">
-            <select
+            <SearchableSelect
               value={row.itemId}
-              onChange={e => {
-                const selected = inventoryById[e.target.value];
-                setList(prev => prev.map((r, j) => j === i ? { ...r, itemId: e.target.value, unit: selected?.unit || r.unit } : r));
+              options={options}
+              placeholder={`Select ${noun}`}
+              searchPlaceholder={`Search ${noun}...`}
+              emptyText={`No ${noun} found`}
+              invalid={!!err.item}
+              onChange={(id) => {
+                const selected = inventoryById[id];
+                setList(prev => prev.map((r, j) => j === i ? { ...r, itemId: id, unit: selected?.unit || r.unit } : r));
               }}
-              className={ctl(err.item)}
-              {...flag(err.item)}
-            >
-              <option value="">Select {noun}</option>
-              {options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
+            />
           </div>
 
           <div className="flex gap-2 items-center">

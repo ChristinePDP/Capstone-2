@@ -964,13 +964,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-2.5 gap-y-6">
-                  <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0 col-span-2">
-                    <span className="block text-[10px] font-bold uppercase text-brand-400">Material Type</span>
-                    <span className="text-sm font-bold text-brand-800 block">
-                      {MATERIAL_VIEWS.find(v => v.key === materialType)?.label}
-                    </span>
-                  </div>
-
                   {!editingDetails ? (
                     <>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
