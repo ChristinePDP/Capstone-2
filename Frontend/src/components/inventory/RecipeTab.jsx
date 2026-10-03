@@ -243,12 +243,27 @@ export default function RecipeTab() {
   // A recipe only makes sense for a product that needs to be produced from
   // raw ingredients — Celebration Material products (sold as-is) don't need
   // one, so they're left out of this list.
+  // Products na may formula na ay hindi na lalabas sa dropdown (isang formula
+  // lang kada product — unique ang recipes.product_id sa database). Kapag
+  // nag-e-edit, ang product ng formula na ine-edit ay nananatiling available
+  // para hindi mawala ang selected value.
+  const usedProductIds = useMemo(() => {
+    const ids = new Set();
+    recipes.forEach(recipe => {
+      if (editRecipe?.id && recipe.id === editRecipe.id) return;
+      const id = recipe.productId || recipe.product_id;
+      if (id) ids.add(String(id));
+    });
+    return ids;
+  }, [recipes, editRecipe]);
+
   const productOptions = useMemo(() => products
     .filter(product => product.category !== 'Celebration Material')
+    .filter(product => !usedProductIds.has(String(product.id)))
     .map(product => ({
       id: product.id,
       label: product.name,
-    })), [products]);
+    })), [products, usedProductIds]);
 
   const calculateMaxUnits = useCallback((recipe, inventory) => {
     if (!recipe.ingredients || recipe.ingredients.length === 0) return 0;
@@ -439,6 +454,7 @@ export default function RecipeTab() {
     const matchedProduct = products.find(p => p.id === productId);
     if (!productId) next.product = 'Please select a product.';
     else if (!matchedProduct?.id) next.product = 'Product not found in the list.';
+    else if (usedProductIds.has(String(productId))) next.product = 'This product already has a formula.';
 
     const numericYield = Number(yld);
     if (!String(yld ?? '').trim()) next.yield = 'Yield is required.';

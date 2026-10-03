@@ -217,8 +217,19 @@ const PRODUCT_FORECAST_RULES = {
     minDaysSinceFirstSale: 14,
     minActiveDays: 2,
     minUnitsRecent: 3,        // units sa huling levelWindowDays
-    minAbsChange: 2,          // units — pinakamaliit na diff na papasok sa list
-    minPctChange: 0,          // walang minimum %
+    minAbsChange: 2,          // units — pinakamaliit na diff na papasok sa GROWTH list
+    minPctChange: 0,          // walang minimum % (growth)
+    // FIX: dati, "at risk" ay literal na `diff < 0` LANG, kasabay pa ng
+    // parehong minAbsChange/minPctChange gate na ginagamit ng growth list.
+    // Problema: kapag palaging tumataas ang kabuuang volume (lumalaki ang
+    // negosyo / papasok pa lang ang mga bagong produkto), halos hindi na
+    // mangyari ang literal na pagbaba kahit stagnant/malumanay na lang
+    // ang isang produkto — kaya laging walang laman ang risk list kahit
+    // marami nang "sumasama" na produkto. riskPctCeiling ay nagbubukas ng
+    // risk sa kahit anong produktong ang forecasted na pagbabago (pct) ay
+    // mababa pa o katumbas lang ng ceiling na ito — kasama na rin ang mga
+    // halos walang laki (stagnant), hindi lang literal na dip.
+    riskPctCeiling: 5,
     seasonalityMinActiveDays: 20,
   },
   "30d": {
@@ -227,6 +238,7 @@ const PRODUCT_FORECAST_RULES = {
     minUnitsRecent: 3,
     minAbsChange: 2,
     minPctChange: 0,
+    riskPctCeiling: 5,
     seasonalityMinActiveDays: 40,
   },
 };
@@ -469,40 +481,67 @@ async function getRecentSalesTrend(days) {
     .map((date) => ({ date, totalSales: totalsByDate[date] }));
 }
 
+// FIX 1: group by product_id (fallback sa normalized name kung walang id)
+// imbes na raw product_name text — iniiwasan ang pagkakahati ng parehong
+// produkto sa dalawang hiwalay na row dahil sa typo/spelling/category
+// inconsistency (hal. "Cupcake" vs "Cupcakes").
+// FIX 2: "at risk" dati ay literal na diff < 0 lang — bihira/halos hindi
+// mangyari 'yon kung patuloy na lumalaki ang kabuuang volume. Loosened:
+// kasama na rin ang mga stagnant/underperforming na produkto (pct <=
+// HISTORICAL_RISK_PCT_CEILING), hindi lang literal na pagbaba. Kailangan
+// munang may baseline (priorQty > 0) bago ma-flag bilang risk — kung
+// walang laman ang prior period, bagong produkto lang 'yan, hindi pa
+// dapat ituring na "risk" (walang dati na pwedeng ikumpara).
+const HISTORICAL_RISK_PCT_CEILING = 5;
+
 async function getProductGrowthAndRisk(days) {
   const { startDate: recentStart, endDate: recentEnd } = getLookbackDateRange(days);
   const { startDate: priorStart } = getLookbackDateRange(days * 2);
   const priorEnd = recentStart;
 
-  const columns = "product_name, quantity, orders!inner(created_at, status)";
+  const columns = "product_id, product_name, quantity, orders!inner(created_at, status)";
 
   const [recentItems, priorItems] = await Promise.all([
     OrderItemsModel.getByOrderDateRange(recentStart, recentEnd, { columns }),
     OrderItemsModel.getByOrderDateRange(priorStart, priorEnd, { columns }),
   ]);
 
+  const groupKey = (item) =>
+    item.product_id || `name:${String(item.product_name || "").trim().toLowerCase()}`;
+
   const sumByProduct = (items) => {
     const totals = {};
     for (const item of items) {
-      totals[item.product_name] = (totals[item.product_name] || 0) + Number(item.quantity || 0);
+      const key = groupKey(item);
+      if (!totals[key]) totals[key] = { name: item.product_name, qty: 0 };
+      totals[key].qty += Number(item.quantity || 0);
     }
     return totals;
   };
 
   const recentTotals = sumByProduct(recentItems);
   const priorTotals = sumByProduct(priorItems);
-  const productNames = new Set([...Object.keys(recentTotals), ...Object.keys(priorTotals)]);
+  const productKeys = new Set([...Object.keys(recentTotals), ...Object.keys(priorTotals)]);
 
-  const changes = [...productNames].map((name) => {
-    const recentQty = recentTotals[name] || 0;
-    const priorQty = priorTotals[name] || 0;
+  const changes = [...productKeys].map((key) => {
+    const recentQty = recentTotals[key]?.qty || 0;
+    const priorQty = priorTotals[key]?.qty || 0;
+    const name = recentTotals[key]?.name || priorTotals[key]?.name;
     const diff = recentQty - priorQty;
     const pct = priorQty === 0 ? (recentQty > 0 ? 100 : 0) : Math.round((diff / priorQty) * 100);
     return { name, recentQty, priorQty, diff, pct };
   });
 
-  const topGrowthProducts = changes.filter((c) => c.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 5);
-  const topRiskProducts = changes.filter((c) => c.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 5);
+  const topGrowthProducts = changes
+    .filter((c) => c.diff > 0)
+    .sort((a, b) => b.diff - a.diff)
+    .slice(0, 5);
+
+  const topRiskProducts = changes
+    // kailangan may baseline muna (priorQty > 0) bago ma-flag bilang risk
+    .filter((c) => c.priorQty > 0 && (c.diff < 0 || c.pct <= HISTORICAL_RISK_PCT_CEILING))
+    .sort((a, b) => a.pct - b.pct)
+    .slice(0, 5);
 
   return { topGrowthProducts, topRiskProducts };
 }
@@ -1360,13 +1399,22 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
 
+  // FIX: "at risk" ay hindi na nangangailangan ng literal na pagbaba
+  // (diff < 0) kasabay pa ng mahigpit na meaningful-change gate — kasama
+  // na ngayon ang kahit anong eligible na produkto na ang forecasted %
+  // na pagbabago ay nasa (o mas mababa sa) riskPctCeiling, declining man
+  // o halos-walang-laki (stagnant) lang. Hindi dumadaan sa parehong
+  // isMeaningfulChange minAbsChange gate dahil karamihan sa mga
+  // "stagnant" na produkto ay maliit talaga ang diff — kung ipipilit ang
+  // parehong gate, mawawala rin sila sa risk list, bumabalik lang tayo
+  // sa dating problema.
   const risk = results
-    .filter((r) => r.diff < 0 && isMeaningfulChange(r, horizonKey))
-    .sort((a, b) => a.diff - b.diff)
+    .filter((r) => r.pct !== null && r.pct <= rules.riskPctCeiling)
+    .sort((a, b) => a.pct - b.pct)
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
 
-  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length}, risk=${risk.length} (after meaningful-change filter: >=${rules.minAbsChange} units & >=${rules.minPctChange}%)`);
+  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length} (diff>0 & meaningful: >=${rules.minAbsChange} units & >=${rules.minPctChange}%), risk=${risk.length} (pct<=${rules.riskPctCeiling}%)`);
 
   return {
     label: PF_TIMEFRAME_LABELS[horizonKey],

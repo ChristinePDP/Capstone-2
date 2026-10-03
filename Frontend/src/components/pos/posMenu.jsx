@@ -63,6 +63,23 @@ const CATEGORY_ICONS = {
 };
 const getCategoryIcon = (cat) => CATEGORY_ICONS[cat] || Tag;
 
+// Label na lalabas sa mismong menu kapag walang laman ang isang category
+// (hal. wala pang Package). Hindi "Unavailable" — iyon ay para sa bawat product.
+const EMPTY_CATEGORY_LABELS = {
+  'Promo Bundle': 'No promo bundles yet',
+  'Package': 'No packages yet',
+  'Cake': 'No cakes yet',
+  'Pastry': 'No pastries yet',
+  'Celebration Material': 'No celebration materials yet',
+};
+const getEmptyCategoryLabel = (cat) => EMPTY_CATEGORY_LABELS[cat] || `No ${String(cat).toLowerCase()} items yet`;
+
+function EmptyCategoryNotice({ category }) {
+  return (
+    <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">{getEmptyCategoryLabel(category)}</p>
+  );
+}
+
 function getBundleDescription(bundle) {
   const products = bundle.products || [];
   const bundleOptions = bundle.bundle_options || {};
@@ -962,6 +979,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit }) {
 export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [] }) {
   const [modal, setModal] = useState(null);
   const [bundles, setBundles] = useState([]);
+  const [bundlesLoaded, setBundlesLoaded] = useState(false); // para hindi mag-flash ang "No packages yet" habang naglo-load
   const [showBackToTop, setShowBackToTop] = useState(false);
   const productListRef = useRef(null);
   const [toast, setToast] = useState(null); 
@@ -1015,6 +1033,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     let isMounted = true;
     fetchPosBundles().then(data => {
       if (isMounted) setBundles(data);
+    }).catch(() => {}).finally(() => {
+      if (isMounted) setBundlesLoaded(true);
     });
     return () => { isMounted = false; };
   }, []);
@@ -1141,7 +1161,19 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
     return categoriesToRender.map(cat => {
       const catProducts = displayItems.filter(p => p.category === cat);
-      if (catProducts.length === 0) return null;
+      if (catProducts.length === 0) {
+        // May label pa rin ang category na walang laman (maliban kapag nagse-search).
+        if (isSearching || (cat === 'Package' && !bundlesLoaded)) return null;
+        return (
+          <div key={cat} className="mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
+              <span className="text-[11px] text-[#B7A99F]">0 items</span>
+            </div>
+            <EmptyCategoryNotice category={cat} />
+          </div>
+        );
+      }
 
       const sortedCatProducts = [...catProducts].sort((a, b) => {
         const isSoldOutA = isQuantityTracked(a, orderType) && getQuantityLimit(a, orderType) <= 0;

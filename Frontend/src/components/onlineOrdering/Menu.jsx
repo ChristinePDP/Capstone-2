@@ -25,6 +25,23 @@ const CATEGORY_ICONS = {
 };
 const getCategoryIcon = (cat) => CATEGORY_ICONS[cat] || Tag;
 
+// Label na lalabas sa mismong menu kapag walang laman ang isang category
+// (hal. wala pang Package). Hindi "Unavailable" — iyon ay para sa bawat product.
+const EMPTY_CATEGORY_LABELS = {
+  'Promo Bundle': 'No promo bundles yet',
+  'Package': 'No packages yet',
+  'Cake': 'No cakes yet',
+  'Pastry': 'No pastries yet',
+  'Celebration Material': 'No celebration materials yet',
+};
+const getEmptyCategoryLabel = (cat) => EMPTY_CATEGORY_LABELS[cat] || `No ${String(cat).toLowerCase()} items yet`;
+
+function EmptyCategoryNotice({ category }) {
+  return (
+    <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">{getEmptyCategoryLabel(category)}</p>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // Builds "Product A (Option, Option) + Product B" text for a bundle —
 // same logic as the admin Promo Bundles card.
@@ -1550,7 +1567,19 @@ export default function Menu({ cart, setCart }) {
           return aSoldOut ? 1 : -1;
         });
         
-      if (catProducts.length === 0) return null;
+      if (catProducts.length === 0) {
+        // May label pa rin ang category na walang laman (maliban kapag nagse-search).
+        if (isSearching) return null;
+        return (
+          <div key={cat} className="mb-8">
+            <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
+              <span className="text-[11px] text-[#B7A99F]">0 items</span>
+            </div>
+            <EmptyCategoryNotice category={cat} />
+          </div>
+        );
+      }
 
       return (
         <div key={cat} className="mb-8">

@@ -5,7 +5,9 @@ import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products/catalog`;
+const PRODUCTS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
+// Admin list lang ang /catalog (GET). Ang delete/edit ay nasa /products/:id — hindi /catalog/:id.
+const API_BASE = `${PRODUCTS_BASE}/catalog`;
 
 let productsCache = null;
 let productsCachePromise = null;
@@ -450,7 +452,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const confirmDelete = async () => {
     try {
-      const res = await apiClient.delete(`${API_BASE}/${deleteTarget.id}`);
+      const res = await apiClient.delete(`${PRODUCTS_BASE}/${deleteTarget.id}`);
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== deleteTarget.id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== deleteTarget.id);
@@ -465,7 +467,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const handleModalDelete = async (id) => {
     try {
-      const res = await apiClient.delete(`${API_BASE}/${id}`);
+      const res = await apiClient.delete(`${PRODUCTS_BASE}/${id}`);
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== id);
