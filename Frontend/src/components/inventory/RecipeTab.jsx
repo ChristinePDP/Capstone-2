@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, CheckCircle2, ShoppingCart, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
+import { Plus, Trash2, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
@@ -235,8 +235,6 @@ function SearchableSelect({ value, options, placeholder = 'Select', searchPlaceh
   );
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 const roundQty = (value) => +Number(value || 0).toFixed(4);
 
 // A Production Formula is for a product that actually needs raw ingredients
@@ -257,65 +255,6 @@ function getMaterialViewKey(material, productsById = {}) {
   return linkedProduct?.category === 'Celebration Material' ? 'celebration' : 'product';
 }
 
-const inventoryKey = (name, unit, type = '') => `${normalizeText(name)}|${normalizeUnit(unit)}|${normalizeText(type)}`;
-
-const getOrderItems = (order = {}) => Array.isArray(order.order_items)
-  ? order.order_items
-  : Array.isArray(order.items)
-    ? order.items
-    : [];
-
-const getItemQuantity = (item = {}) => Number(item.quantity ?? item.qty ?? item.count ?? 0);
-
-const findInventoryItem = (name, itemType, ingredients, materials) => {
-  const targetName = normalizeText(name);
-  const collections = itemType === 'material'
-    ? [materials, ingredients]
-    : itemType === 'raw'
-      ? [ingredients, materials]
-      : [ingredients, materials];
-
-  for (const collection of collections) {
-    const match = collection.find(item => normalizeText(item.name) === targetName);
-    if (match) return match;
-  }
-
-  return null;
-};
-
-const findRecipeByProductId = (recipes, productId, productName = '') => {
-  const normalizedProductId = normalizeText(productId);
-  const normalizedProductName = normalizeText(productName);
-
-  return recipes.find(recipe => {
-    const recipeProductId = normalizeText(recipe.productId || recipe.product_id || '');
-    const recipeProductName = normalizeText(recipe.product || recipe.product_name || '');
-    return (normalizedProductId && recipeProductId === normalizedProductId)
-      || (normalizedProductName && recipeProductName === normalizedProductName);
-  });
-};
-
-const buildShortfallEntry = (entry, stockItem) => {
-  const unit = normalizeUnit(entry.unit || stockItem?.unit || 'pcs');
-  const totalNeeded = Number(entry.totalNeeded ?? entry.total ?? 0);
-  const stockValue = Number(stockItem?.stock ?? stockItem?.stock_quantity ?? 0);
-  const stockUnit = normalizeUnit(stockItem?.unit || unit);
-  const normalizedStock = Number.isFinite(convertToBase(stockValue, stockUnit, unit))
-    ? convertToBase(stockValue, stockUnit, unit)
-    : stockValue;
-  const shortage = Math.max(0, roundQty(totalNeeded - normalizedStock));
-
-  if (shortage <= 0) return null;
-
-  return {
-    name: entry.name,
-    unit,
-    totalNeeded: roundQty(totalNeeded),
-    currentStock: roundQty(normalizedStock),
-    shortage: roundQty(shortage),
-  };
-};
-
 export default function RecipeTab() {
   const context = useApp() || {};
   const isLoading = !!context.loading;
@@ -323,16 +262,13 @@ export default function RecipeTab() {
   const ingredients = useMemo(() => context.ingredients || [], [context.ingredients]);
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const products = useMemo(() => context.products || [], [context.products]);
-  const orders = useMemo(() => context.orders || [], [context.orders]);
-  const { addRecipe, updateRecipe, deleteRecipe, confirmBatch } = context;
+  const { addRecipe, updateRecipe, deleteRecipe } = context;
 
   const { show: showToast } = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [shoppingOpen, setShoppingOpen] = useState(false); // Shopping List modal
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [confirmTarget, setConfirmTarget] = useState(null); // Modal state for production confirmation
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isDeletingRef = useRef(false);
@@ -345,9 +281,6 @@ export default function RecipeTab() {
   const [formErrors, setFormErrors] = useState({}); // inline field errors ng formula modal
   const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
 
-  const [quotas, setQuotas] = useState({});
-  const [localStocks, setLocalStocks] = useState({});
-  const [confirmingIds, setConfirmingIds] = useState({});
   const [containerRef, isCompact] = useIsCompact();
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -431,142 +364,6 @@ export default function RecipeTab() {
       id: product.id,
       label: product.name,
     })), [products, usedProductIds]);
-
-  const calculateMaxUnits = useCallback((recipe, inventory) => {
-    if (!recipe.ingredients || recipe.ingredients.length === 0) return 0;
-    let maxBatches = Infinity;
-
-    for (const req of recipe.ingredients) {
-      const stockItem = findInventoryItem(req.name, req.itemType, ingredients, materials)
-        || inventory.find(i => normalizeText(i.name) === normalizeText(req.name));
-      if (!stockItem || Number(stockItem.stock ?? stockItem.stock_quantity ?? 0) <= 0) return 0;
-
-      const stockInReqUnit = convertToBase(Number(stockItem.stock ?? stockItem.stock_quantity ?? 0), stockItem.unit, req.unit);
-      if (!Number.isFinite(stockInReqUnit)) return 0;
-
-      const possibleBatches = Math.floor(stockInReqUnit / Number(req.qty));
-      if (possibleBatches < maxBatches) maxBatches = possibleBatches;
-    }
-
-    return maxBatches === Infinity ? 0 : maxBatches * Number(recipe.yield);
-  }, [ingredients, materials]);
-
-  const preOrderDemand = useMemo(() => {
-    const map = {};
-    const confirmed = orders?.filter(o => o.status === 'Confirmed') || [];
-
-    confirmed.forEach(order => {
-      getOrderItems(order).forEach(item => {
-        const recipe = findRecipeByProductId(recipes, item.product_id || item.productId, item.product_name || item.productName);
-        if (!recipe) return;
-
-        recipe.ingredients.forEach(req => {
-          const unit = normalizeUnit(req.unit || 'pcs');
-          const key = inventoryKey(req.name, unit, req.itemType);
-          if (!map[key]) map[key] = { name: req.name, unit, total: 0, itemType: req.itemType || '' };
-          map[key].total += Number(req.qty) * getItemQuantity(item);
-        });
-      });
-    });
-
-    return map;
-  }, [orders, recipes]);
-
-  const preOrderShortfalls = useMemo(() => {
-    const result = [];
-
-    for (const entry of Object.values(preOrderDemand)) {
-      const stockItem = findInventoryItem(entry.name, entry.itemType, ingredients, materials);
-      const shortfall = buildShortfallEntry({ name: entry.name, unit: entry.unit, totalNeeded: entry.total }, stockItem);
-      if (shortfall) result.push(shortfall);
-    }
-
-    return result;
-  }, [preOrderDemand, ingredients, materials]);
-
-  const zeroCapacityShortfalls = useMemo(() => {
-    const totalNeededMap = {};
-
-    for (const r of recipes) {
-      const maxUnits = calculateMaxUnits(r, ingredients);
-      if (maxUnits > 0) continue;
-
-      for (const req of r.ingredients) {
-        const unit = normalizeUnit(req.unit || 'pcs');
-        const key = inventoryKey(req.name, unit, req.itemType);
-        if (!totalNeededMap[key]) {
-          totalNeededMap[key] = { name: req.name, unit, totalNeeded: 0, itemType: req.itemType || '' };
-        }
-        totalNeededMap[key].totalNeeded = roundQty(totalNeededMap[key].totalNeeded + Number(req.qty));
-      }
-    }
-
-    const result = [];
-    for (const entry of Object.values(totalNeededMap)) {
-      const stockItem = findInventoryItem(entry.name, entry.itemType, ingredients, materials);
-      const shortage = buildShortfallEntry(entry, stockItem);
-      if (shortage) result.push(shortage);
-    }
-
-    return result;
-  }, [recipes, ingredients, materials, calculateMaxUnits]);
-
-  const consolidatedShortfalls = useMemo(() => {
-    const totalNeededMap = {};
-
-    for (const r of recipes) {
-      const targetGoal = Number(quotas[r.id]);
-      if (!targetGoal || targetGoal <= 0 || targetGoal > MAX_QTY) continue;
-      const maxUnits = calculateMaxUnits(r, ingredients);
-      if (maxUnits >= targetGoal) continue;
-
-      const neededBatches = Math.ceil(targetGoal / Number(r.yield));
-      for (const req of r.ingredients) {
-        const unit = normalizeUnit(req.unit || 'pcs');
-        const key = inventoryKey(req.name, unit, req.itemType);
-        if (!totalNeededMap[key]) {
-          totalNeededMap[key] = { name: req.name, unit, totalNeeded: 0, itemType: req.itemType || '' };
-        }
-        totalNeededMap[key].totalNeeded = roundQty(totalNeededMap[key].totalNeeded + (Number(req.qty) * neededBatches));
-      }
-    }
-
-    const result = [];
-    for (const entry of Object.values(totalNeededMap)) {
-      const stockItem = findInventoryItem(entry.name, entry.itemType, ingredients, materials);
-      const shortage = buildShortfallEntry(entry, stockItem);
-      if (shortage) result.push(shortage);
-    }
-
-    return result;
-  }, [recipes, ingredients, materials, quotas, calculateMaxUnits]);
-
-  const allShortfalls = useMemo(() => {
-    const map = {};
-    const pushItem = (item) => {
-      const key = inventoryKey(item.name, item.unit);
-      if (!map[key]) {
-        map[key] = {
-          name: item.name,
-          unit: normalizeUnit(item.unit),
-          totalNeeded: roundQty(item.totalNeeded ?? item.shortage ?? 0),
-          currentStock: roundQty(item.currentStock ?? 0),
-          shortage: roundQty(item.shortage ?? 0),
-        };
-        return;
-      }
-
-      map[key].totalNeeded = roundQty(map[key].totalNeeded + Number(item.totalNeeded ?? item.shortage ?? 0));
-      map[key].currentStock = roundQty(Math.min(map[key].currentStock, Number(item.currentStock ?? map[key].currentStock)));
-      map[key].shortage = roundQty(map[key].shortage + Number(item.shortage ?? 0));
-    };
-
-    preOrderShortfalls.forEach(pushItem);
-    zeroCapacityShortfalls.forEach(pushItem);
-    consolidatedShortfalls.forEach(pushItem);
-
-    return Object.values(map).filter(item => item.shortage > 0);
-  }, [preOrderShortfalls, zeroCapacityShortfalls, consolidatedShortfalls]);
 
   const openAdd = () => {
     setEditRecipe(null);
@@ -845,60 +642,6 @@ export default function RecipeTab() {
     );
   });
 
-  // Confirmation and actual execution of batch production
-  const handleExecuteConfirm = async () => {
-    if (!confirmTarget) return;
-    const { recipe, goalNum } = confirmTarget;
-
-    if (!goalNum || goalNum <= 0) {
-      showToast('Target Goal must be a positive number.', 'error');
-      setConfirmTarget(null);
-      return;
-    }
-    if (confirmingIds[recipe.id]) return;
-    setConfirmingIds(prev => ({ ...prev, [recipe.id]: true }));
-
-    const product = products.find(p => p.id === recipe.productId) || products.find(p => normalizeText(p.name) === normalizeText(recipe.product));
-    const resolvedProductId = recipe.productId || product?.id;
-    const recipeId = recipe.id;
-
-    if (!UUID_RE.test(recipeId) || !UUID_RE.test(resolvedProductId || '')) {
-      showToast('Formula/product data not fully loaded yet — refresh the page and try again.', 'warning');
-      setConfirmTarget(null);
-      setConfirmingIds(prev => ({ ...prev, [recipe.id]: false }));
-      return;
-    }
-
-    const perBatchYield = Number(recipe.yield) || 1;
-    const batches = Math.ceil(Number(goalNum) / perBatchYield);
-    const totalProduced = batches * perBatchYield;
-    const payload = {
-      recipe_id: recipeId,
-      product_id: resolvedProductId,
-      product_name: recipe.product,
-      batches,
-      total_produced: totalProduced,
-      yield_unit: recipe.yieldUnit || 'pcs',
-      notes: '',
-    };
-
-    try {
-      if (confirmBatch) await confirmBatch(payload);
-      const contextStock = product ? Number(product.stock ?? product.stock_quantity ?? 0) : 0;
-      const actualCurrentStock = localStocks[recipe.id] !== undefined ? localStocks[recipe.id] : contextStock;
-      const newStock = actualCurrentStock + Number(totalProduced);
-      setLocalStocks(prev => ({ ...prev, [recipe.id]: newStock }));
-      setQuotas(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
-      showToast(`✓ Produced ${totalProduced} ${recipe.yieldUnit || 'pcs'} of ${recipe.product}.`, 'success');
-    } catch (err) {
-      console.error('confirmBatch failed:', err);
-      showToast("Batch wasn't logged — check the server console for validation errors.", 'warning');
-    } finally {
-      setConfirmingIds(prev => { const next = { ...prev }; delete next[recipe.id]; return next; });
-      setConfirmTarget(null);
-    }
-  };
-
   const handleDeleteRecipe = async () => {
     if (!deleteTarget?.id || isDeletingRef.current) return;
     isDeletingRef.current = true;
@@ -927,24 +670,9 @@ export default function RecipeTab() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
           <div>
             <h3 className="font-bold text-brand-800">Production Formulas</h3>
-            <p className="text-xs text-brand-400 mt-0.5">Enter a Target Goal to see if you have enough ingredients and materials.</p>
+            <p className="text-xs text-brand-400 mt-0.5">Manage the recipe and product materials needed to make each product.</p>
           </div>
           <div className="flex items-center gap-4 w-full sm:w-auto">
-            {allShortfalls.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShoppingOpen(true)}
-                title={`Shopping list — ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
-                aria-label={`Open shopping list, ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
-                className="relative inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors shrink-0"
-              >
-                <ShoppingCart size={16} />
-                <span className="text-xs font-bold hidden sm:inline">Shopping List</span>
-                <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold leading-none ring-2 ring-white">
-                  {allShortfalls.length}
-                </span>
-              </button>
-            )}
             <Button variant="dark" onClick={openAdd} className="flex-1 sm:flex-none justify-center"><Plus size={14} /> Add Formula</Button>
           </div>
         </div>
@@ -969,114 +697,36 @@ export default function RecipeTab() {
           {isCompact ? (
           /* Compact (cards) View */
           <div className="space-y-4">
-            {paged.map(r => {
-              const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
-              const quota = quotas[r.id] || '';
-              const quotaNum = Number(quota);
-              const hasInput = quotaNum > 0 && quotaNum <= MAX_QTY;
-              const canMake = hasInput && maxUnits >= quotaNum;
-              const quotaError = quota !== '' ? getQtyError(quota, { max: MAX_QTY, label: 'Target Goal' }) : null;
-              const matchedProduct = products.find(p => p.id === r.productId) || products.find(p => normalizeText(p.name) === normalizeText(r.product));
-              const currentStock = localStocks[r.id] !== undefined
-                ? localStocks[r.id]
-                : (matchedProduct ? Number(matchedProduct.stock ?? matchedProduct.stock_quantity ?? 0) : 0);
-
-              return (
-                <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h4 className="font-bold text-brand-900 text-base">{r.product}</h4>
-                      <p className="text-[11px] text-brand-400 mt-0.5">Yield: {r.yield} {r.yieldUnit}</p>
-                    </div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => openEdit(r)} className="p-1.5 text-brand-500 bg-brand-50 rounded-lg"><Edit2 size={13} /></button>
-                      <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-500 bg-red-50 rounded-lg"><Trash2 size={13} /></button>
-                    </div>
+            {paged.map(r => (
+              <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-bold text-brand-900 text-base">{r.product}</h4>
+                    <p className="text-[11px] text-brand-400 mt-0.5">Yield: {r.yield} {r.yieldUnit}</p>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-brand-50/50 p-2 rounded-lg">
-                    <div><span className="text-brand-400">Stock Capacity:</span> <div className={`font-bold ${maxUnits === 0 ? 'text-red-600' : 'text-emerald-600'}`}>{maxUnits} {r.yieldUnit}</div></div>
-                    <div><span className="text-brand-400">Finished Stock:</span> <div className="font-bold text-blue-700">{currentStock} {r.yieldUnit}</div></div>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-2 border-t border-brand-50">
-                    <div className="flex-1">
-                      <input
-                        type="text" inputMode="numeric"
-                        placeholder="Target Goal"
-                        value={quota}
-                        onChange={e => setQuotas(prev => ({ ...prev, [r.id]: sanitizeNumericText(e.target.value) }))}
-                        className={`w-full px-2 py-1.5 text-xs text-center border font-bold rounded-lg ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-red-50 text-red-700 border-red-300') : 'bg-white'}`}
-                      />
-                      {quotaError && <p className="text-[10px] text-red-600 font-medium mt-1">{quotaError}</p>}
-                    </div>
-                    {canMake && (
-                      <Button 
-                        size="sm" 
-                        variant="primary" 
-                        disabled={!!confirmingIds[r.id]} 
-                        className="bg-emerald-600 text-xs px-3 border-none py-2 h-auto" 
-                        onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
-                      >
-                        <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
-                      </Button>
-                    )}
+                  <div className="flex gap-1.5">
+                    <button onClick={() => openEdit(r)} className="p-1.5 text-brand-500 bg-brand-50 rounded-lg"><Edit2 size={13} /></button>
+                    <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-500 bg-red-50 rounded-lg"><Trash2 size={13} /></button>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
           ) : (
           /* Table View */
-          <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Stock Capacity' }, { label: 'Production Target' }, { label: 'Finished Production' }, { label: 'Actions', align: 'right' }]}>
-              {paged.map(r => {
-                const maxUnits = calculateMaxUnits(r, [...ingredients, ...materials]);
-                const quota = quotas[r.id] || '';
-                const quotaNum = Number(quota);
-                const hasInput = quotaNum > 0 && quotaNum <= MAX_QTY;
-                const canMake = hasInput && maxUnits >= quotaNum;
-                const quotaError = quota !== '' ? getQtyError(quota, { max: MAX_QTY, label: 'Target Goal' }) : null;
-                const matchedProduct = products.find(p => p.id === r.productId) || products.find(p => normalizeText(p.name) === normalizeText(r.product));
-                const currentStock = localStocks[r.id] !== undefined
-                  ? localStocks[r.id]
-                  : (matchedProduct ? Number(matchedProduct.stock ?? matchedProduct.stock_quantity ?? 0) : 0);
-
-                return (
-                  <Tr key={r.id}>
-                    <Td><p className="font-bold text-brand-900 text-sm">{r.product}</p></Td>
-                    <Td><p className="font-semibold text-brand-700">{r.yield} {r.yieldUnit}</p></Td>
-                    <Td><span className={`font-bold px-2 py-1 rounded-md border ${maxUnits === 0 ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{maxUnits} {r.yieldUnit}</span></Td>
-                    <Td>
-                      <input
-                        type="text" inputMode="numeric"
-                        value={quota}
-                        onChange={e => setQuotas(prev => ({ ...prev, [r.id]: sanitizeNumericText(e.target.value) }))}
-                        placeholder="0"
-                        className={`w-20 px-2 py-1 text-center font-bold border rounded-lg ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700') : 'bg-white'}`}
-                      />
-                      {quotaError && <p className="text-[10px] text-red-600 font-medium mt-1 max-w-[100px]">{quotaError}</p>}
-                    </Td>
-                    <Td><span className="font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-md border">{currentStock} {r.yieldUnit}</span></Td>
-                    <Td align="right">
-                      <div className="flex items-center justify-end gap-2">
-                        {canMake && (
-                          <Button 
-                            size="sm" 
-                            variant="primary" 
-                            disabled={!!confirmingIds[r.id]} 
-                            className="bg-emerald-600 border-none" 
-                            onClick={() => setConfirmTarget({ recipe: r, goalNum: quotaNum })}
-                          >
-                            <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
-                          </Button>
-                        )}
-                        <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
-                        <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
-                      </div>
-                    </Td>
-                  </Tr>
-                );
-              })}
+          <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Actions', align: 'right' }]}>
+              {paged.map(r => (
+                <Tr key={r.id}>
+                  <Td><p className="font-bold text-brand-900 text-sm">{r.product}</p></Td>
+                  <Td><p className="font-semibold text-brand-700">{r.yield} {r.yieldUnit}</p></Td>
+                  <Td align="right">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
+                      <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+                    </div>
+                  </Td>
+                </Tr>
+              ))}
           </Table>
           )}
 
@@ -1095,33 +745,6 @@ export default function RecipeTab() {
           </div>
         )}
       </Card>
-
-      {/* SHOPPING LIST MODAL — opened from the cart/alert button in the header */}
-      <Modal
-        isOpen={shoppingOpen}
-        onClose={() => setShoppingOpen(false)}
-        title="Shopping List"
-        subtitle="Items to restock to cover your pending orders and production targets."
-        size="lg"
-        footer={
-          <div className="flex justify-end">
-            <Button variant="secondary" onClick={() => setShoppingOpen(false)}>Close</Button>
-          </div>
-        }
-      >
-        {allShortfalls.length > 0 ? (
-          <ul className="divide-y divide-gray-100 border border-red-100 rounded-xl overflow-hidden max-h-[60vh] overflow-y-auto">
-            {allShortfalls.map((item, idx) => (
-              <li key={`${item.name}-${item.unit}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
-                <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
-                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{roundQty(item.shortage)} {item.unit}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-center text-sm text-brand-400 py-6">Nothing to restock right now.</p>
-        )}
-      </Modal>
 
       {/* PRODUCTION FORMULA MODAL */}
       <Modal
@@ -1240,40 +863,6 @@ export default function RecipeTab() {
           </div>
         </div>
       </Modal>
-
-      {/* PRODUCTION CONFIRMATION MODAL */}
-      <ConfirmModal
-        isOpen={!!confirmTarget}
-        onClose={() => !confirmingIds[confirmTarget?.recipe?.id] && setConfirmTarget(null)}
-        onConfirm={handleExecuteConfirm}
-        title="Confirm Batch Production"
-        message={
-          confirmTarget ? (
-            <div className="space-y-3 text-left text-sm text-gray-600">
-              <p>Are you sure you want to start production for <strong>{confirmTarget.recipe.product}</strong>?</p>
-              <div className="bg-brand-50 p-3 rounded-xl border border-brand-100 text-xs space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Target Goal:</span>
-                  <strong className="text-brand-900">{confirmTarget.goalNum} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Complete Batches:</span>
-                  <strong className="text-brand-900">{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1))} batch(es)</strong>
-                </div>
-                <div className="flex justify-between pt-1 border-t border-brand-200/60">
-                  <span className="text-gray-700 font-medium">Total to Produce:</span>
-                  <strong className="text-emerald-700">+{Math.ceil(Number(confirmTarget.goalNum) / (Number(confirmTarget.recipe.yield) || 1)) * (Number(confirmTarget.recipe.yield) || 1)} {confirmTarget.recipe.yieldUnit || 'pcs'}</strong>
-                </div>
-              </div>
-              <p className="text-[11px] text-amber-600 font-medium bg-amber-50 p-2 rounded-lg border border-amber-200">
-                ⚠️ The matching raw ingredients will be automatically deducted from inventory once this is confirmed.
-              </p>
-            </div>
-          ) : ''
-        }
-        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Confirming...' : 'Confirm Production'}
-        variant="primary"
-      />
 
       {/* DELETE FORMULA CONFIRMATION MODAL */}
       <ConfirmModal

@@ -484,6 +484,31 @@ export function AppProvider({ children }) {
     }
   };
 
+  // ── Pre-Order production ────
+  // Nagbabawas ng ingredients, nagla-log ng production, at nire-record ang
+  // extra/theme expenses ng order. Pagkatapos, minamarkahang 'Ready' ang
+  // order para mawala sa listahan ng Pre-Order production at hindi na
+  // maulit (double deduction).
+  const producePreOrder = async (payload) => {
+    try {
+      await apiClient.post('/production', { type: 'pre-order', ...payload });
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to produce pre-order'), { cause: err });
+    }
+
+    try {
+      await updateOrderStatus(payload.order_id, 'Ready');
+    } catch (err) {
+      await fetchAll();
+      throw new Error(
+        'Na-log na ang production at expenses, pero hindi na-update ang status ng order. '
+        + 'Palitan ito ng "Ready" sa Orders para hindi maulit ang production.',
+        { cause: err }
+      );
+    }
+    await fetchAll();
+  };
+
   // ── Inventory History (restock / production / waste trail) ────
   const fetchInventoryHistory = useCallback(async (itemName, itemType) => {
     try {
@@ -536,7 +561,7 @@ export function AppProvider({ children }) {
     addIngredient, updateIngredient, deleteIngredient, restockIngredient,
     addMaterial, updateMaterial, deleteMaterial, restockMaterial,
     addRecipe, updateRecipe, deleteRecipe,
-    confirmBatch,
+    confirmBatch, producePreOrder,
     logWaste, voidWasteLog, voidRestockLog,
     fetchInventoryHistory,
     formatPHP

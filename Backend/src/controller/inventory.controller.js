@@ -98,6 +98,12 @@ const ProductionController = {
   },
   confirmBatch: async (req, res, next) => {
     try {
+      // Pre-Order production (may extra expenses) — iisang POST /production
+      // ang ginagamit; ang `type: 'pre-order'` ang nagtatakda kung alin.
+      if (req.body?.type === 'pre-order') {
+        const { type: _type, ...payload } = req.body;
+        return created(res, await ProductionService.producePreOrder(payload), 'Pre-order production logged');
+      }
       const body = ConfirmBatchSchema.parse(req.body);
       created(res, await ProductionService.confirmBatch(body), 'Production batch logged');
     } catch (err) { next(err); }

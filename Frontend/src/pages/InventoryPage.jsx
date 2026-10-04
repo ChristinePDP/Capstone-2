@@ -2,6 +2,7 @@ import { useState } from 'react';
 import RawTab from '../components/inventory/RawTab';
 import CelebrationTab from '../components/inventory/CelebrationTab';
 import RecipeTab from '../components/inventory/RecipeTab';
+import ProductionTab from '../components/inventory/ProductionTab';
 import WasteTab from '../components/inventory/WasteTab';
 import ProductLogTab from '../components/inventory/ProductLogTab';
 
@@ -14,6 +15,7 @@ const STOCK_SUBTABS = [
   { key: 'raw',     label: ' Ingredients' },
   { key: 'celeb',  label: 'Celebration / Product Materials' },
   { key: 'recipe', label: 'Production Formula' },
+  { key: 'preorder', label: 'Production' },
   { key: 'product', label: 'Production Log' },
 ];
 
@@ -83,6 +85,7 @@ export default function InventoryPage() {
             {subTab === 'raw'     && <RawTab />}
             {subTab === 'celeb'   && <CelebrationTab />}
             {subTab === 'recipe'  && <RecipeTab />}
+            {subTab === 'preorder' && <ProductionTab />}
             {subTab === 'product' && <ProductLogTab />}
           </div>
         </div>

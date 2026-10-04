@@ -301,6 +301,26 @@ const InventoryLogService = {
   },
 };
 
+// Linisin at i-validate ang extra expenses ng Pre-Order sa server —
+// huwag magtiwala lang sa frontend.
+const cleanPreOrderExpenses = (expenses) => {
+  if (!Array.isArray(expenses)) return [];
+  const cleaned = expenses.map(e => ({
+    label: String(e?.label || '').trim(),
+    amount: Number(e?.amount),
+  }));
+  for (const e of cleaned) {
+    if (!e.label) throw new AppError('May expense na walang pangalan.', 400);
+    if (!Number.isFinite(e.amount) || e.amount <= 0) {
+      throw new AppError(`Invalid ang halaga ng expense na "${e.label}".`, 400);
+    }
+    if (e.amount > 1000000) {
+      throw new AppError(`Masyadong malaki ang halaga ng "${e.label}".`, 400);
+    }
+  }
+  return cleaned;
+};
+
 // PRODUCTION
 const ProductionService = {
   getAll: async (limit) => {
@@ -309,7 +329,9 @@ const ProductionService = {
     return data;
   },
 
-  confirmBatch: async (body) => {
+  // addToProductStock = false para sa Pre-Order: ginagawa per order ang cake,
+  // hindi ito pumapasok sa products stock ng Buy Now.
+  confirmBatch: async (body, { addToProductStock = true } = {}) => {
     const { data: recipe, error: recipeErr } = await RecipeModel.findWithIngredients(body.recipe_id);
     if (recipeErr || !recipe) throw new AppError('Recipe not found', 404);
     if (!Array.isArray(recipe.recipe_ingredients) || recipe.recipe_ingredients.length === 0
@@ -370,11 +392,13 @@ const ProductionService = {
     console.log('DEBUG is mocked:', typeof supabase.from.mock !== 'undefined');
     
     // 5. 👉 IDAGDAG ANG STOCK SA PRODUCTS TABLE PARA SA POS ("Buy Now")
-    const { data: prodData } = await supabase
+    // (hindi para sa Pre-Order)
+    const { data: prodData } = addToProductStock ? await supabase
       .from('products')
       .select('stock_quantity')
       .eq('id', body.product_id)
-      .single();
+      .single()
+      : { data: null };
 
     if (prodData) {
       const newProductStock = (prodData.stock_quantity || 0) + Number(body.total_produced);
@@ -385,6 +409,95 @@ const ProductionService = {
     }
 
     return log;
+  },
+
+  // ── PRODUCE PRE-ORDER ───────────────────────────────────────────
+  // Payload galing sa Pre-Order "Produce" modal:
+  //   { order_id, order_number, items: [{ product_id, product_name,
+  //     recipe_id, quantity, batches }], expenses: [{ label, amount }] }
+  //
+  // 1. Per item: kapareho ng batch production (production_logs, bawas
+  //    ingredients, OUT logs) PERO hindi dinadagdagan ang products stock.
+  // 2. Ang extra/theme expenses ay nilolog bilang expenses (IN + cost).
+  producePreOrder: async (body = {}) => {
+    const items = Array.isArray(body.items) ? body.items : [];
+    if (!body.order_id || items.length === 0) {
+      throw new AppError('Walang laman ang order na ipo-produce.', 400);
+    }
+    if (items.some(it => !it.recipe_id)) {
+      throw new AppError('May item na walang Production Formula — gumawa muna ng formula.', 400);
+    }
+
+    // I-validate ang expenses BAGO gumalaw ang stock para hindi
+    // mabawasan ang ingredients tapos mag-e-error pala sa expenses.
+    const expenses = cleanPreOrderExpenses(body.expenses);
+
+    const logs = [];
+    for (const it of items) {
+      const batches = Number(it.batches);
+      if (!Number.isFinite(batches) || batches <= 0) {
+        throw new AppError(`Invalid ang batches ng "${it.product_name}".`, 400);
+      }
+      const log = await ProductionService.confirmBatch({
+        recipe_id: it.recipe_id,
+        product_id: it.product_id,
+        product_name: it.product_name,
+        batches,
+        total_produced: Number(it.quantity) || 0,
+        yield_unit: it.yield_unit || 'pcs',
+        notes: `Pre-Order ${body.order_number || body.order_id}`,
+      }, { addToProductStock: false });
+      logs.push(log);
+    }
+
+    const savedExpenses = await ProductionService.recordPreOrderExpenses({
+      order_number: body.order_number,
+      expenses,
+    });
+
+    return { logs, expenses: savedExpenses };
+  },
+
+  // ── PRE-ORDER: EXTRA / THEME EXPENSES ───────────────────────────
+  // Ang Pre-Order ay custom kada order, kaya may gastos na wala sa stocks
+  // o sa formula (theme, toppers, special materials, atbp.). Ang bawat
+  // expense row na inilagay ng owner sa "Produce" modal ay itinatala dito
+  // bilang sariling entry sa inventory_logs para pumasok sa expenses.
+  //
+  //  - transaction_type 'IN' + cost = pareho ng Restock/Initial Stock, kaya
+  //    kasama na ito sa totalExpenses (na kumukuha ng non-voided logs).
+  //  - item_type 'other' (kailangan ang migration sa enum inv_item_type) —
+  //    hindi ito ingredient o material, kaya hindi nito ginagalaw ang
+  //    anumang stock count.
+  //  - remaining_quantity 0 = hindi papasok sa FEFO tracking.
+  //  - Nasa item_name ang order number para ma-audit kung aling order ang
+  //    pinaggastusan: "ORD-3405 — Fondant topper".
+  recordPreOrderExpenses: async ({ order_number, expenses } = {}) => {
+    if (!Array.isArray(expenses) || expenses.length === 0) return [];
+
+    const cleaned = cleanPreOrderExpenses(expenses);
+
+    const saved = [];
+    for (const e of cleaned) {
+      const entry = await InventoryLogModel.logHistory({
+        item_type: 'other',
+        item_name: order_number ? `${order_number} — ${e.label}` : e.label,
+        transaction_type: 'IN',
+        quantity: 1,
+        cost: parseFloat(e.amount.toFixed(2)),
+        action: 'Pre-Order Expense',
+        remaining_quantity: 0,
+      });
+      // logHistory ay nagbabalik ng null (hindi nagte-throw) kapag pumalya.
+      if (!entry) {
+        throw new AppError(
+          `Hindi na-save ang expense na "${e.label}". Na-save na ang ${saved.length} sa ${cleaned.length}.`,
+          500
+        );
+      }
+      saved.push(entry);
+    }
+    return saved;
   },
 
   // Ito ang function para malaman ang kailangang stock para sa future orders
