@@ -1,6 +1,7 @@
 // backend/src/services/onlineOrdering.services.js
 import { randomUUID } from 'crypto';
 import { supabase } from '../config/supabase.js'; 
+import { createOrderError } from '../utils/orderError.js';
 import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
@@ -615,7 +616,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     );
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
-    throw new Error(`Items Error: ${itemsError.message}`);
+    throw createOrderError('items', itemsError);
   }
 
   let customerData;
@@ -626,7 +627,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
       alt_phone: payload.customer.alternativeNumber || ''
     });
   } catch (custError) {
-    throw new Error(`Customer Error: ${custError.message}`);
+    throw createOrderError('customer', custError);
   }
 
   const orderToInsert = {
@@ -650,7 +651,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   try {
     newOrder = await OrdersModel.create([orderToInsert]);
   } catch (orderError) {
-    throw new Error(`Order Error: ${orderError.message}`);
+    throw createOrderError('order', orderError);
   }
 
   const itemsToInsert = resolvedItems.map(item => ({
@@ -664,7 +665,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
   try {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (itemsError) {
-    throw new Error(`Items Error: ${itemsError.message}`);
+    throw createOrderError('items', itemsError);
   }
 
   notifyNewOrder(newOrder, payload);

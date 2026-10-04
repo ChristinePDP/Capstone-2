@@ -95,6 +95,7 @@ CREATE TABLE public.order_items (
   special_instructions text NOT NULL DEFAULT ''::text,
   selected_price_options jsonb,
   bundle_id uuid,
+  package_id uuid,
   bundle_group_id uuid,
   bundle_name text,
   original_unit_price numeric CHECK (original_unit_price IS NULL OR original_unit_price >= 0::numeric),

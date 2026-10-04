@@ -22,7 +22,7 @@ async function fetchPosBundles() {
 
   posBundlesPromise = (async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`);
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`);
       if (!res.ok) return posBundlesCache || [];
       const json = await res.json();
       const data = Array.isArray(json.data) ? json.data : [];
@@ -1041,7 +1041,11 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
   const bundleItems = useMemo(() => {
     return bundles
-      .filter(b => b.is_active && b.is_within_date_range !== false)
+      .filter(b =>
+        b.is_active
+        && b.is_within_date_range !== false
+        && b.has_production_formula === true
+      )
       .map(b => {
         const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
 
@@ -1052,6 +1056,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                   return cp ? { ...cp, package_qty: pi.quantity } : null;
               })
               .filter(Boolean);
+
+           if (packageComponents.length !== (b.package_items || []).length) return null;
 
            const packageStocks = computeComponentStocks(
              (b.package_items || []).map(pi => ({
@@ -1086,6 +1092,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
         }
 
         const bundleProducts = (b.product_ids || []).map(id => products.find(p => String(p.id) === String(id))).filter(Boolean);
+        if (bundleProducts.length !== (b.product_ids || []).length) return null;
         const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
 
         const bundleStocks = computeComponentStocks(
@@ -1119,7 +1126,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           price_groups: [],
           price_matrix: []
         };
-      });
+      })
+      .filter(Boolean);
   }, [bundles, products]);
 
   const visibleBundleItems = useMemo(() => {

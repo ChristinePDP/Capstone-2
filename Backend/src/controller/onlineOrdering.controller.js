@@ -330,8 +330,12 @@ export const placeOrder = async (req, res) => {
     const savedOrder = await createDatabaseOrder(orderData);
     res.status(201).json({ success: true, order: savedOrder });
   } catch (error) {
-    console.error('Order Creation Error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Order Creation Error:', error?.stack || error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.clientMessage
+        || "We couldn't complete the order. Please try again or contact support."
+    });
   }
 };
 

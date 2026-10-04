@@ -457,6 +457,27 @@ const findMatrixPrice = (product, options = {}) => {
   return Number.isFinite(lowest) ? lowest : null;
 };
 
+const getFormulaAvailability = async (componentIds, componentProducts) => {
+  const expectedIds = [...new Set((componentIds || []).map(id => String(id)))];
+  const productsById = new Map((componentProducts || []).map(product => [String(product.id), product]));
+  const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(expectedIds);
+  const invalidProducts = expectedIds
+    .map(id => productsById.get(id))
+    .filter((product, index) => {
+      if (!product) return true;
+      if (product.category === 'Celebration Material') return false;
+      return formulaByProductId.get(expectedIds[index])?.has_production_formula !== true;
+    });
+
+  return {
+    has_production_formula: expectedIds.length > 0 && invalidProducts.length === 0,
+    formula_status: invalidProducts.length === 0 && expectedIds.length > 0 ? 'ready' : 'missing',
+    unavailable_reason: invalidProducts.length > 0 ? 'No production formula yet' : null,
+    invalid_component_ids: invalidProducts.map(product => product?.id).filter(Boolean),
+    invalid_component_names: invalidProducts.map(product => product?.name).filter(Boolean),
+  };
+};
+
 const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
   // Accept string OR number ids — don't silently drop numeric ids.
   let safeIds = [];
@@ -467,6 +488,7 @@ const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
   }
 
   const products = await ProductModel.findByIds(safeIds);
+  const formulaAvailability = await getFormulaAvailability(safeIds, products);
   const bundleOptions = bundle.bundle_options || {};
 
   const originalTotal = products.reduce((sum, p) => {
@@ -500,6 +522,7 @@ const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
     original_total: originalTotal,
     bundle_price: bundlePrice,
     discount_percent: discountPercent,
+    ...formulaAvailability,
     is_within_date_range: isBundleWithinDateRange(bundle, new Date(), occasionsByTag)
   };
 };
@@ -521,6 +544,7 @@ const enrichPackageBundle = async (bundle) => {
   }
 
   const componentProducts = await ProductModel.findByIds(safeIds);
+  const formulaAvailability = await getFormulaAvailability(safeIds, componentProducts);
   const productsById = new Map(componentProducts.map(p => [String(p.id), p]));
 
   const packageItems = (bundle.package_items || []).map(item => {
@@ -549,6 +573,7 @@ const enrichPackageBundle = async (bundle) => {
     discount_percent: componentsTotal > packagePrice && componentsTotal > 0
       ? Math.round((1 - packagePrice / componentsTotal) * 100)
       : 0,
+    ...formulaAvailability,
     // Walang event/date-range na availability ang Package — laging
     // "within range" hangga't active. Ang stock/limit nito ay galing sa mga
     // component products.
@@ -587,7 +612,11 @@ export const getAllBundles = async (filters = {}) => {
 
     const visibleOnly = filters.visibleOnly === 'true' || filters.visibleOnly === true;
     if (visibleOnly) {
-      return byCategory.filter(b => b.is_active && b.is_within_date_range);
+      return byCategory.filter(b =>
+        b.is_active
+        && b.is_within_date_range
+        && b.has_production_formula === true
+      );
     }
 
     return byCategory;

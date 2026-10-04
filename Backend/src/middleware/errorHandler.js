@@ -6,7 +6,7 @@ class AppError extends Error {
 }
 
 function errorHandler(err, _req, res, _next) {
-  console.error('[ERROR]', err.message || err);
+  console.error('[ERROR]', err?.stack || err);
 
   if (err.name === 'ZodError') {
     // Kukunin niya ang err.errors o err.issues, kung wala, gagamit ng empty array para hindi mag-crash
@@ -23,8 +23,11 @@ function errorHandler(err, _req, res, _next) {
     });
   }
 
-  const status  = err.status || err.statusCode || 500;
-  const message = err.message || 'Internal server error';
+  const status = err.status || err.statusCode || 500;
+  const message = err.clientMessage
+    || (status >= 500
+      ? 'Something went wrong while processing your request. Please try again.'
+      : err.message || 'Request failed');
   res.status(status).json({ success: false, message });
 }
 

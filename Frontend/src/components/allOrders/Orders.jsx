@@ -148,12 +148,12 @@ const COLUMNS = [
 function SearchBar({ value, onChange, placeholder, className = '' }) {
   return (
     <div className={`relative ${className}`}>
-      <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A7264]" />
+      <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A7264]" />
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-9 pr-3.5 py-2.5 text-xs border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white transition-colors placeholder:text-gray-400"
+        className="w-full pl-10 pr-3.5 py-3 text-base sm:text-sm border border-[#DED4CC] rounded-xl outline-none focus:border-[#5A453C] bg-white transition-colors placeholder:text-gray-400"
       />
     </div>
   );
@@ -187,7 +187,7 @@ function Pagination({ page, count, perPage, total, onChange, className = '' }) {
         <button
           disabled={page === 1}
           onClick={() => onChange(page - 1)}
-          className="p-1 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
         >
           <ChevronLeft size={16} />
         </button>
@@ -196,7 +196,7 @@ function Pagination({ page, count, perPage, total, onChange, className = '' }) {
             key={i}
             disabled={p === '...'}
             onClick={() => p !== '...' && onChange(p)}
-            className={`min-w-[28px] h-7 px-2 rounded-md flex items-center justify-center text-xs font-medium transition-colors ${
+            className={`min-w-[36px] h-9 px-2 rounded-lg flex items-center justify-center text-xs font-medium transition-colors ${
               p === page
                 ? 'bg-[#3B1F0A] text-white'
                 : p === '...'
@@ -210,7 +210,7 @@ function Pagination({ page, count, perPage, total, onChange, className = '' }) {
         <button
           disabled={page === maxPage}
           onClick={() => onChange(page + 1)}
-          className="p-1 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
+          className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:hover:bg-transparent transition-colors"
         >
           <ChevronRight size={16} />
         </button>
@@ -253,6 +253,9 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
   }, [maxPage, page]);
 
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  // Background refreshes keep the current list on screen; the loading state only
+  // replaces it on the very first load (no flicker, no scroll jump).
+  const showLoading = loading && orders.length === 0;
 
   return (
     <div className="space-y-5">
@@ -266,7 +269,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
               <button
                 key={status}
                 onClick={() => { setStatusFilter(status); setPage(1); }}
-                className={`relative shrink-0 pb-2.5 text-xs sm:text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
+                className={`relative shrink-0 pb-3 text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
                   active
                     ? 'text-[#3B1F0A]'
                     : 'text-[#8A7264] hover:text-[#3B1F0A]'
@@ -285,7 +288,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
       </div>
 
       <div className="lg:hidden">
-        {loading ? (
+        {showLoading ? (
           <p className="text-center py-16 text-slate-400 font-medium bg-white rounded-xl border border-slate-200 shadow-sm">Loading orders…</p>
         ) : paged.length ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -299,47 +302,54 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
               const orderId    = order.order_number || order.id;
               const items      = order.items      || order.order_items || [];
               return (
-                <div key={order.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3 hover:shadow-md hover:border-slate-300 transition-all">
-                  <div className="flex items-start justify-between gap-2">
+                <div key={order.id} className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-4 flex flex-col gap-3.5">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[11px] font-medium text-slate-400 truncate">#{orderId}</p>
-                      <p className="font-semibold text-slate-900 text-[15px] leading-tight truncate">{displayName(order, customer)}</p>
-                      <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
+                      <p className="text-xs font-semibold text-[#8A7264] truncate">#{orderId}</p>
+                      <p className="font-bold text-[#3B1F0A] text-base leading-tight truncate">{displayName(order, customer)}</p>
+                      <p className="text-[13px] text-[#8A7264]">{displayPhone(customer)}</p>
                     </div>
-                    <Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none shrink-0">
+                    <Badge variant={statusVariant(order.status)} className="font-semibold px-2.5 py-1 text-xs shadow-none shrink-0">
                       {order.status}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <TypeCell order={order} orderType={orderType} />
-                    <span className="text-[13px] text-slate-700 font-medium flex items-center gap-1">
-                      <Calendar size={13} className="text-slate-400" />
-                      {pickupLabel(pickupDate, pickupTime, pickupTimeEnd)}
-                    </span>
+                  <div className="rounded-xl bg-[#FAF7F4] px-3.5 py-3 flex items-start gap-3">
+                    <Calendar size={18} className="text-[#8A7264] mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-bold text-[#3B1F0A] leading-snug">{formatDate(pickupDate) || '—'}</p>
+                      {formatTime(pickupTime) && (
+                        <p className="text-sm font-medium text-[#5A453C]">
+                          {formatTime(pickupTime)}{formatTime(pickupTimeEnd) ? ` – ${formatTime(pickupTimeEnd)}` : ''}
+                        </p>
+                      )}
+                      <p className="text-[13px] text-[#8A7264] mt-0.5">
+                        {[sourceLabel(order), orderType].filter(Boolean).join(' • ')}
+                      </p>
+                    </div>
                   </div>
                   {items.length > 0 && (
-                    <div className="border-t border-slate-100 pt-2 space-y-1">
+                    <div className="space-y-1.5">
                       {items.slice(0, 3).map((item, i) => (
-                        <div key={i} className="flex justify-between gap-2 text-[12.5px] text-slate-600">
+                        <div key={i} className="flex justify-between gap-3 text-sm text-[#3B1F0A]">
                           <span className="truncate">{item.name || item.product_name}</span>
-                          <span className="text-slate-400 shrink-0">x{item.qty || item.quantity}</span>
+                          <span className="text-[#8A7264] font-semibold shrink-0 tabular-nums">×{item.qty || item.quantity}</span>
                         </div>
                       ))}
                       {items.length > 3 && (
-                        <p className="text-[11px] text-slate-400">+{items.length - 3} more item(s)</p>
+                        <p className="text-[13px] font-medium text-[#8A7264]">+{items.length - 3} more item(s)</p>
                       )}
                     </div>
                   )}
-                  <div className="flex items-end justify-between border-t border-slate-100 pt-3 mt-auto gap-2">
+                  <div className="flex items-end justify-between border-t border-[#EAE4E0] pt-3.5 mt-auto gap-3">
                     <div className="min-w-0">
-                      <p className="text-[12px] text-slate-400 mb-0.5">Total {fmt(grandTotal)}</p>
+                      <p className="text-xs text-[#8A7264]">Total</p>
+                      <p className="text-lg font-bold text-[#3B1F0A] leading-tight tabular-nums">{fmt(grandTotal)}</p>
                       <PaymentDisplay order={order} />
                     </div>
-                    <Button size="sm" variant="secondary"
-                      className="font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs px-3 py-1.5 shrink-0"
-                      onClick={() => onViewOrder(order)}>
+                    <button type="button" onClick={() => onViewOrder(order)}
+                      className="shrink-0 min-h-[44px] px-5 rounded-xl border border-[#DED4CC] bg-white text-sm font-semibold text-[#3B1F0A] hover:bg-[#F5EFEB] active:bg-[#EFE6DF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5A453C] focus-visible:ring-offset-2">
                       More Details
-                    </Button>
+                    </button>
                   </div>
                 </div>
               );
@@ -355,7 +365,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
 
       <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         <Table columns={COLUMNS}>
-          {loading ? (
+          {showLoading ? (
             <Tr><Td className="text-center py-16 text-slate-400 font-medium" colSpan={8}>Loading orders…</Td></Tr>
           ) : paged.map(order => {
             const customer   = order.customer || order.customers || {};
@@ -388,7 +398,7 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
               </Tr>
             );
           })}
-          {!loading && !paged.length && (
+          {!showLoading && !paged.length && (
             <Tr><Td className="text-center text-slate-500 font-medium py-16 text-sm" colSpan={8}>No orders found.</Td></Tr>
           )}
         </Table>

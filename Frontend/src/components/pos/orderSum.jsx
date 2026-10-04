@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   User, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Calendar as CalendarIcon, Clock, Check, Lock, Receipt, AlertTriangle
+  Calendar as CalendarIcon, Clock, Check, Lock, Receipt, AlertTriangle, Trash2
 } from 'lucide-react';
 import CartSlipImages from '../shared/CartSlipImages';
 import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
@@ -151,9 +151,20 @@ export default function OrderSummaryModal({
   uploadProgress,
   onPlaceOrder,
   onValidate,
+  onRemoveItem,
   errors = {},
 }) {
   const isBuyNow = orderType === 'Buy Now';
+  const [expandedItemIndexes, setExpandedItemIndexes] = useState(() => new Set());
+
+  const toggleItemExpanded = (index) => {
+    setExpandedItemIndexes(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
 
   // Inline field validation styles — pulang border kapag may error.
   const baseField = 'w-full min-w-0 border px-3.5 py-2 text-xs rounded-xl focus:outline-none transition-colors bg-white';
@@ -535,11 +546,15 @@ export default function OrderSummaryModal({
 
                 <div className="min-w-0 flex-1 flex flex-col">
                   <div className="flex justify-between items-start gap-2 mb-1">
-                    <p className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
+                    <button type="button" onClick={() => toggleItemExpanded(i)} className="flex min-w-0 items-center gap-1 text-left">
+                      <span className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</span>
+                      {expandedItemIndexes.has(i) ? <ChevronUp size={14} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={14} className="text-[#8A7264] shrink-0" />}
+                    </button>
                     <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
                   </div>
+                  {!expandedItemIndexes.has(i) && <p className="text-[10px] text-[#8A7264]">Tap item to view details</p>}
 
-                  {item.selected_price_options && Object.entries(item.selected_price_options).map(([label, value]) => (
+                  {expandedItemIndexes.has(i) && item.selected_price_options && Object.entries(item.selected_price_options).map(([label, value]) => (
                     <p key={`sum-opt-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
                       <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                     </p>
@@ -552,7 +567,7 @@ export default function OrderSummaryModal({
                       bundle — pangalan ng produkto sa taas bilang header, tapos
                       ang mga fields/answers nito lang ang nakalista sa ilalim,
                       tulad ng aktwal na order slip na pinunan para dito. */}
-                  {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
+                  {expandedItemIndexes.has(i) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
                     <div className="flex flex-col gap-1.5 mt-1">
                       {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
                         const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
@@ -572,16 +587,16 @@ export default function OrderSummaryModal({
                       })}
                     </div>
                   ) : (
-                    item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
+                    expandedItemIndexes.has(i) && item.order_slip_details && Object.entries(item.order_slip_details).map(([label, value]) => (
                       <p key={`sum-slip-${label}`} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
                         <span className="font-medium">{label}:</span> {formatSlipValueForCart(value)}
                       </p>
                     ))
                   )}
 
-                  <CartSlipImages item={item} readOnly className="mt-1" />
+                  {expandedItemIndexes.has(i) && <CartSlipImages item={item} readOnly className="mt-1" />}
 
-                  {item.inspiration_image && (
+                  {expandedItemIndexes.has(i) && item.inspiration_image && (
                     <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug">
                       {item.type === 'bundle'
                         ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
@@ -589,9 +604,17 @@ export default function OrderSummaryModal({
                     </p>
                   )}
 
-                  {item.details && (
+                  {expandedItemIndexes.has(i) && item.details && (
                     <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => onRemoveItem?.(i)}
+                    className="mt-2 self-start inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold text-red-500 hover:bg-red-50"
+                    aria-label={`Remove ${item.name}`}
+                  >
+                    <Trash2 size={12} /> Remove
+                  </button>
                 </div>
               </div>
             ))}

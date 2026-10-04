@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { QrCode, Search } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { QrCode, Search, CheckCircle2, ReceiptText } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Badge, Button, Modal, Input, useToast } from '../ui';
 
@@ -10,16 +11,28 @@ function statusVariant(s) {
   return { Confirmed: 'confirmed', Ready: 'ready', Completed: 'completed', Cancelled: 'cancelled' }[s] || 'default';
 }
 
+const SAVE_KEY = 'qr-scanner-ui';
+function loadSaved(locKey) {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SAVE_KEY) || 'null');
+    return s && s.key === locKey ? s : null;
+  } catch { return null; }
+}
+
 // ─── QR SCANNER ───────────────────────────────────────────────
 // Button that opens a camera/manual-entry modal to find an order, then
 // shows a quick scan-result modal with status actions.
 export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
   const { show: showToast } = useToast();
+  const { key: locKey } = useLocation();
 
-  const [scannerOpen, setScannerOpen]     = useState(false);
+  // Survive a remount/reload (auto-refresh): the open modal is kept in sessionStorage together
+  // with the history entry's location.key, so it only comes back for the same page visit.
+  const [scannerOpen, setScannerOpen]     = useState(() => loadSaved(locKey)?.mode === 'scanner');
   const [manualOrderId, setManualOrderId] = useState('');
-  const [resultOpen, setResultOpen]       = useState(false);
-  const [resultOrder, setResultOrder]     = useState(null);
+  const [resultOpen, setResultOpen]       = useState(() => loadSaved(locKey)?.mode === 'result');
+  const [resultOrder, setResultOrder]     = useState(() => loadSaved(locKey)?.order ?? null);
+  const lastScanRef = useRef({ value: '', at: 0 });
 
   // Lock background scroll while either modal is open — otherwise, on
   // mobile, scrolling inside the modal (e.g. the items list) chains up
@@ -32,6 +45,14 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [scannerOpen, resultOpen]);
+
+  useEffect(() => {
+    try {
+      if (resultOpen && resultOrder) sessionStorage.setItem(SAVE_KEY, JSON.stringify({ key: locKey, mode: 'result', order: resultOrder }));
+      else if (scannerOpen) sessionStorage.setItem(SAVE_KEY, JSON.stringify({ key: locKey, mode: 'scanner' }));
+      else sessionStorage.removeItem(SAVE_KEY);
+    } catch { /* storage unavailable */ }
+  }, [scannerOpen, resultOpen, resultOrder, locKey]);
 
   const processOrderSearch = (scannedId) => {
     let foundOrder = null;
@@ -53,6 +74,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
       setManualOrderId('');
       setResultOrder(foundOrder);
       setResultOpen(true);
+      try { navigator.vibrate?.(80); } catch { /* not supported */ }
       showToast(`✓ Order found!`, 'success');
     } else {
       showToast('❌ Order not found.', 'error');
@@ -60,7 +82,14 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
   };
 
   const handleScan = (detectedCodes) => {
-    if (detectedCodes?.length > 0) processOrderSearch(detectedCodes[0].rawValue);
+    const raw = detectedCodes?.[0]?.rawValue;
+    if (!raw) return;
+    // the camera re-reads the same QR many times a second — ignore repeats for 2.5s
+    // so the beep and the "not found" toast don't spam
+    const now = Date.now();
+    if (raw === lastScanRef.current.value && now - lastScanRef.current.at < 2500) return;
+    lastScanRef.current = { value: raw, at: now };
+    processOrderSearch(raw);
   };
 
   const handleManualSubmit = (e) => {
@@ -68,16 +97,18 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
     if (manualOrderId) processOrderSearch(manualOrderId);
   };
 
-  const order       = resultOrder;
+  const order       = resultOrder ? (orders.find(o => o.id === resultOrder.id) || resultOrder) : null;
   const grandTotal  = order ? (order.grandTotal || order.grand_total || 0) : 0;
-  const subtotal    = order ? (order.subtotal || grandTotal) : 0;
   const items       = order ? (order.items || order.order_items || []) : [];
   const orderNumber = order ? (order.order_number || order.id) : null;
+  const balance     = order ? (order.balance ?? (grandTotal - (order.amountPaid || order.amount_paid || 0))) : 0;
+  const isDeposit   = order ? ((order.paymentType || order.payment_type) === 'deposit' && Number(balance) > 0) : false;
+  const canComplete = order ? (order.status === 'Confirmed' || order.status === 'Ready') : false;
 
   return (
     <>
       <Button variant="primary" className="w-full sm:w-auto bg-brand-900 text-white font-bold shadow-md flex items-center justify-center gap-2"
-        onClick={() => { setScannerOpen(true); setManualOrderId(''); }}>
+        onClick={() => { setScannerOpen(true); setManualOrderId(''); lastScanRef.current = { value: '', at: 0 }; }}>
         <QrCode size={18} /> Scan Receipt QR
       </Button>
 
@@ -87,7 +118,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
           <div className="w-full bg-black rounded-xl overflow-hidden shadow-inner flex items-center justify-center relative min-h-[300px]">
             {scannerOpen && (
               <Scanner onScan={handleScan} onError={err => showToast(`Camera error: ${err?.message || 'Unable to access camera'}`, 'error')}
-                formats={['qr_code']} components={{ audio: false, torch: true }}
+                formats={['qr_code']} components={{ audio: true, torch: true }}
                 constraints={{ video: { facingMode: 'environment' } }} />
             )}
             <div className="absolute top-2 right-2 bg-black/50 text-white/80 px-2 py-1 rounded text-[10px] font-bold tracking-widest uppercase">Camera Active</div>
@@ -99,9 +130,9 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
           </div>
           <form onSubmit={handleManualSubmit} className="flex gap-2">
             <div className="flex-1">
-              <Input value={manualOrderId} onChange={e => setManualOrderId(e.target.value)} placeholder="e.g. ORD-0001" className="w-full" />
+              <Input value={manualOrderId} onChange={e => setManualOrderId(e.target.value)} placeholder="e.g. ORD-0001" className="w-full text-base sm:text-sm" />
             </div>
-            <Button type="submit" variant="primary" className="bg-brand-900 text-white shrink-0 px-6"><Search size={16} /></Button>
+            <Button type="submit" variant="primary" className="bg-brand-900 text-white shrink-0 px-6 min-h-[44px]" aria-label="Find order"><Search size={18} /></Button>
           </form>
         </div>
       </Modal>
@@ -116,62 +147,62 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
             </div>
           }
         >
-          <div className="space-y-5">
-            <div className="bg-[#fdf8f6] rounded-xl p-4 border-2 border-brand-100">
-              <p className="text-[10px] font-black uppercase tracking-widest text-brand-600 mb-2">Order Details</p>
-              <p className="text-[10px] font-black text-brand-950 mb-2">#{orderNumber}</p>
-              <p className="text-[15px] font-bold text-brand-900 mb-3">{(order.customer || order.customers)?.name || 'Walk-in'}</p>
-              <div className="bg-white rounded-lg p-3 max-h-[120px] overflow-y-auto overscroll-contain">
-                <table className="w-full text-xs">
-                  <tbody className="divide-y divide-slate-200">
-                    {items.map((item, i) => (
-                      <tr key={i} className="py-2">
-                        <td className="font-bold text-brand-950 py-1">{item.name || item.product_name}</td>
-                        <td className="text-right font-black text-brand-950 py-1">x{item.qty || item.quantity}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          <div className="space-y-4">
+            {/* Who + what */}
+            <div>
+              <p className="text-xs font-semibold text-brand-600">#{orderNumber}</p>
+              <p className="text-lg font-bold text-brand-950 leading-tight">{(order.customer || order.customers)?.name || 'Walk-in'}</p>
+              <p className="mt-3 mb-1.5 text-xs font-semibold text-brand-600">Items ({items.length})</p>
+              {/* every item is listed; scrolls inside the box when the order is long */}
+              <ul className="max-h-[34dvh] overflow-y-auto overscroll-contain divide-y divide-slate-100 rounded-xl border border-slate-200 px-3">
+                {items.map((item, i) => (
+                  <li key={i} className="flex items-start justify-between gap-3 py-2.5 text-sm text-brand-950">
+                    <span className="min-w-0 break-words">{item.name || item.product_name}</span>
+                    <span className="shrink-0 font-bold text-brand-900 tabular-nums">×{item.qty || item.quantity}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <div className="bg-slate-50 rounded-lg p-4 border-2 border-slate-200">
-              <div className="flex justify-between mb-2 text-sm font-bold">
-                <span className="text-slate-600">Subtotal</span><span className="text-brand-950">₱{Number(subtotal).toLocaleString()}</span>
+
+            {/* Total + payment — one compact row */}
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500">Total</p>
+                <p className="text-xl font-bold text-brand-950 leading-tight tabular-nums">{fmt(grandTotal)}</p>
               </div>
-              <div className="flex justify-between text-lg font-black border-t-2 border-slate-200 pt-2">
-                <span className="text-brand-950">Total</span><span className="text-green-700">{fmt(grandTotal)}</span>
-              </div>
+              {order.status !== 'Cancelled' && (
+                isDeposit ? (
+                  <span className="shrink-0 rounded-full bg-amber-50 text-amber-800 text-[13px] font-bold px-3 py-1.5 text-right leading-tight">
+                    Balance due<br />{fmt(balance)}
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-green-50 text-green-800 text-[13px] font-bold px-3 py-1.5">✓ Fully paid</span>
+                )
+              )}
             </div>
+
             {order.status === 'Completed' && (
-              <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4 text-center">
-                <p className="text-2xl mb-2">✓</p>
-                <p className="text-green-900 font-black text-[14px]">This order is already completed.</p>
-              </div>
+              <p className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-center text-sm font-bold text-green-900">✓ This order is already completed.</p>
             )}
             {order.status === 'Cancelled' && (
-              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 text-center">
-                <p className="text-2xl mb-2">✕</p>
-                <p className="text-red-900 font-black text-[14px]">This order has been cancelled.</p>
-              </div>
+              <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-center text-sm font-bold text-red-900">✕ This order has been cancelled.</p>
             )}
-            {(order.status === 'Confirmed' || order.status === 'Ready') && (
-              <div className="space-y-2">
-                <Button variant="primary" className="w-full bg-green-600 text-white font-black hover:bg-green-700 flex items-center justify-center gap-2 py-3 rounded-lg"
+
+            {/* Two actions, side by side */}
+            <div className="flex gap-2.5">
+              <button type="button" aria-label="View full details"
+                className="flex-1 min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl border border-[#DED4CC] bg-white text-[15px] font-semibold text-brand-900 hover:bg-brand-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-900 focus-visible:ring-offset-2"
+                onClick={() => { setResultOpen(false); onViewOrder(order); }}>
+                <ReceiptText size={18} /> Details
+              </button>
+              {canComplete && (
+                <button type="button" aria-label="Mark as completed"
+                  className="flex-[1.3] min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl bg-green-700 text-white text-[15px] font-semibold shadow-sm hover:bg-green-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"
                   onClick={() => { onStatusChange(order.id, 'Completed'); setResultOpen(false); }}>
-                  ✓ Mark as Completed
-                </Button>
-                {order.status === 'Confirmed' && (
-                  <Button variant="secondary" className="w-full bg-blue-100 text-blue-900 font-black hover:bg-blue-200 py-2 rounded-lg border-2 border-blue-200"
-                    onClick={() => { onStatusChange(order.id, 'Ready'); setResultOpen(false); }}>
-                    Mark as Ready
-                  </Button>
-                )}
-              </div>
-            )}
-            <Button variant="secondary" className="w-full border-2 border-brand-200 text-brand-900 font-bold py-2 rounded-lg hover:bg-brand-50"
-              onClick={() => { setResultOpen(false); onViewOrder(order); }}>
-              View Full Details
-            </Button>
+                  <CheckCircle2 size={18} /> Complete
+                </button>
+              )}
+            </div>
           </div>
         </Modal>
       )}

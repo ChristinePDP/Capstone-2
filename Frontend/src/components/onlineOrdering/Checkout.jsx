@@ -2,12 +2,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Trash2 } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
 import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages, formatSlipValueForCart } from '../shared/orderSlipUploads';
+import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -163,11 +164,33 @@ export default function Checkout({ cart, setCart }) {
   const [pickupType, setPickupType] = useState(() => draft?.pickupType ?? forcedPickupType);
   const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [expandedSummaryIndexes, setExpandedSummaryIndexes] = useState(() => new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
   const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [errors, setErrors] = useState({});
+
+  const toggleSummaryItem = (index) => {
+    setExpandedSummaryIndexes(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const removeSummaryItem = (index) => {
+    setCart(prev => prev.filter((_, itemIndex) => itemIndex !== index));
+    setExpandedSummaryIndexes(prev => {
+      const next = new Set();
+      prev.forEach(value => {
+        if (value < index) next.add(value);
+        else if (value > index) next.add(value - 1);
+      });
+      return next;
+    });
+  };
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
@@ -568,7 +591,10 @@ if (data.success && data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else {
         // Basahin ang error message galing backend (data.message), kung wala, tsaka gamitin ang fallback
-        setToastMessage(data.message || 'Failed to generate payment link. Please try again.');
+        setToastMessage(getOrderErrorMessage(
+          { message: data.message },
+          'Failed to generate payment link. Please try again.'
+        ));
         setIsProcessing(false);
       setUploadProgress(null);
       }
@@ -1015,11 +1041,15 @@ if (data.success && data.checkoutUrl) {
                         {/* Item Details */}
                         <div className="min-w-0 flex-1 flex flex-col">
                           <div className="flex justify-between items-start gap-2 mb-1">
-                            <p className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</p>
+                            <button type="button" onClick={() => toggleSummaryItem(i)} className="flex min-w-0 items-center gap-1 text-left">
+                              <span className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</span>
+                              {expandedSummaryIndexes.has(i) ? <ChevronUp size={14} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={14} className="text-[#8A7264] shrink-0" />}
+                            </button>
                             <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
                           </div>
+                          {!expandedSummaryIndexes.has(i) && <p className="text-[10px] text-[#8A7264]">Tap item to view details</p>}
                           
-                          {item.selected_price_options && Object.keys(item.selected_price_options).length > 0 && (
+                          {expandedSummaryIndexes.has(i) && item.selected_price_options && Object.keys(item.selected_price_options).length > 0 && (
                             <div className="flex flex-col gap-0.5">
                               {Object.entries(item.selected_price_options).map(([label, value]) => (
                                 <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
@@ -1034,7 +1064,7 @@ if (data.success && data.checkoutUrl) {
                               as the header, its own filled-out fields underneath —
                               instead of repeating "ProductName - Label:" on every
                               single line. */}
-                          {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
+                          {expandedSummaryIndexes.has(i) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
                             <div className="flex flex-col gap-1.5 mt-1">
                               {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
                                 const pName = item.products?.find(p => p.id === prodId)?.name || 'Item';
@@ -1054,7 +1084,7 @@ if (data.success && data.checkoutUrl) {
                               })}
                             </div>
                           ) : (
-                            item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                            expandedSummaryIndexes.has(i) && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
                               <div className="flex flex-col gap-0.5 mt-1">
                                 {Object.entries(item.order_slip_details).map(([label, value]) => (
                                   <p key={label} className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">
@@ -1065,9 +1095,9 @@ if (data.success && data.checkoutUrl) {
                             )
                           )}
 
-                          <CartSlipImages item={item} readOnly className="mt-1.5" />
+                          {expandedSummaryIndexes.has(i) && <CartSlipImages item={item} readOnly className="mt-1.5" />}
 
-                          {item.inspiration_image && (
+                          {expandedSummaryIndexes.has(i) && item.inspiration_image && (
                             <p className="text-[10px] sm:text-xs font-semibold text-[#8A7264] leading-snug mt-1">
                               {isMultiItem && typeof item.inspiration_image === 'object' && !(item.inspiration_image instanceof File)
                                 ? `Image Attached (${Object.values(item.inspiration_image).filter(Boolean).length})`
@@ -1075,9 +1105,20 @@ if (data.success && data.checkoutUrl) {
                             </p>
                           )}
 
-                          {item.details && (
+                          {expandedSummaryIndexes.has(i) && item.details && (
                             <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              removeSummaryItem(i);
+                              if (cart.length <= 1) setShowSummaryModal(false);
+                            }}
+                            className="mt-2 self-start inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold text-red-500 hover:bg-red-50"
+                            aria-label={`Remove ${item.name}`}
+                          >
+                            <Trash2 size={12} /> Remove
+                          </button>
                         </div>
                       </div>
                     );

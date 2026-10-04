@@ -4,6 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { Bell, X, ShoppingBag, CheckCheck, Trash2, ChevronRight } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL;
+
+// Ang /notifications endpoint ay protected (HttpOnly cookie). Ang plain fetch() ay HINDI nagpapadala ng
+// cookies sa ibang origin (localhost:5173 -> localhost:3000) maliban kung `credentials: 'include'`,
+// kaya 401 ang bumabalik at walang notification na lumalabas. Lahat ng tawag dito ay dumadaan na sa helper na ito.
+const api = (path, init = {}) => fetch(`${API_BASE}${path}`, { credentials: 'include', ...init });
 const TYPE_STYLE = { new_order: { icon: ShoppingBag, iconBg: 'bg-brand-50', iconColor: 'text-brand-600' } };
 const DEFAULT_STYLE = { icon: Bell, iconBg: 'bg-brand-50', iconColor: 'text-brand-500' };
 const REDIRECT_MAP = { order: '/orders' };
@@ -74,7 +79,7 @@ export default function Notification() {
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/notifications`);
+      const res = await api('/notifications');
       const json = await res.json();
       if (json.success) setItems(json.data);
     } catch (error) {
@@ -105,18 +110,18 @@ export default function Notification() {
 
   const markRead = async (id) => {
     setItems(prev => prev.map(n => (n.id === id ? { ...n, is_read: true } : n)));
-    try { await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'PATCH' }); } catch (e) {}
+    try { await api(`/notifications/${id}/read`, { method: 'PATCH' }); } catch (e) {}
   };
 
   const markAllRead = async () => {
     setItems(prev => prev.map(n => ({ ...n, is_read: true })));
-    try { await fetch(`${API_BASE}/notifications/read-all`, { method: 'PATCH' }); } catch (e) {}
+    try { await api('/notifications/read-all', { method: 'PATCH' }); } catch (e) {}
   };
 
   const deleteNotification = async (id) => {
     const prevItems = items;
     setItems(prev => prev.filter(n => n.id !== id));
-    try { await fetch(`${API_BASE}/notifications/${id}`, { method: 'DELETE' }); } catch (e) { setItems(prevItems); }
+    try { await api(`/notifications/${id}`, { method: 'DELETE' }); } catch (e) { setItems(prevItems); }
   };
 
   const openNotification = (n) => {

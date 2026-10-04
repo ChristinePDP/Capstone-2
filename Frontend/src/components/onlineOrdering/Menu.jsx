@@ -1240,7 +1240,7 @@ function getMenuProducts() {
 let menuBundlesFetchPromise = null;
 function getMenuBundles() {
   if (!menuBundlesFetchPromise) {
-    menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles`)
+    menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`)
       .then(res => res.json())
       .then(json => (json.success && Array.isArray(json.data)) ? json.data : [])
       .catch(err => {
@@ -1319,7 +1319,11 @@ export default function Menu({ cart, setCart }) {
     const bundlesData = rawBundles;
 
     const activeBundlesAndPackages = bundlesData
-      .filter(b => b.is_active && b.is_within_date_range !== false)
+      .filter(b =>
+        b.is_active
+        && b.is_within_date_range !== false
+        && b.has_production_formula === true
+      )
       .map(b => {
         const fallbackImage = b.products && b.products.length > 0 ? (b.products[0].image_url || b.products[0].image) : null;
 
@@ -1330,6 +1334,8 @@ export default function Menu({ cart, setCart }) {
                   return cp ? { ...cp, package_qty: pi.quantity } : null;
               })
               .filter(Boolean);
+
+           if (packageComponents.length !== (b.package_items || []).length) return null;
 
            const packageOrderType = b.order_type || 'Both';
            const { stock: packageStock, tracked: isPackageTracked } = computeComponentStock(
@@ -1364,6 +1370,7 @@ export default function Menu({ cart, setCart }) {
         }
 
         const bundleProducts = (b.product_ids || []).map(id => allProducts.find(p => String(p.id) === String(id))).filter(Boolean);
+        if (bundleProducts.length !== (b.product_ids || []).length) return null;
         const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
         
         const { stock: bundleStock, tracked: isBundleTracked } = computeComponentStock(
@@ -1396,7 +1403,8 @@ export default function Menu({ cart, setCart }) {
           price_groups: [],
           price_matrix: []
         };
-      });
+      })
+      .filter(Boolean);
 
     const regularProducts = allProducts.filter(p => p.category !== 'Package');
 

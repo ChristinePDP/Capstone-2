@@ -4,6 +4,7 @@ import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
 import { MaterialModel } from '../model/material.model.js';
+import { createOrderError } from '../utils/orderError.js';
 // Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
 // Ordering (resolveBundleLineItem + resolveProductLineItem, na parehong
 // naka-wrap sa resolveOrderItems). Ito ang gumagawa ng maayos na product_id
@@ -24,6 +25,26 @@ const RECEIPT_SECRET = process.env.RECEIPT_TOKEN_SECRET || 'change_this_secret_i
 
 function makeReceiptToken(orderId) {
   return Buffer.from(`${orderId}${RECEIPT_SECRET}`).toString('base64');
+}
+
+async function cleanupFailedPosOrder(orderId, customerId) {
+  try {
+    await OrderItemsModel.deleteByOrderId(orderId);
+  } catch (cleanupError) {
+    console.error('[POS SERVICE] Failed to remove incomplete order items:', cleanupError?.stack || cleanupError);
+  }
+
+  try {
+    await OrdersModel.deleteById(orderId);
+  } catch (cleanupError) {
+    console.error('[POS SERVICE] Failed to remove incomplete order:', cleanupError?.stack || cleanupError);
+  }
+
+  try {
+    await CustomersModel.deleteById(customerId);
+  } catch (cleanupError) {
+    console.error('[POS SERVICE] Failed to remove incomplete order customer:', cleanupError?.stack || cleanupError);
+  }
 }
 
 // Same priority rule gaya ng ginagamit sa onlineOrdering.services.js at
@@ -160,7 +181,7 @@ export const createPosOrder = async (payload) => {
     await validateProductionFormulaAvailability(resolvedItems);
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
-    throw new Error(`Items Error: ${itemsError.message}`);
+    throw createOrderError('items', itemsError);
   }
 
   // 1. Handle Customer Data
@@ -175,7 +196,7 @@ export const createPosOrder = async (payload) => {
       alt_phone: payload.customer?.altPhone || ''
     });
   } catch (err) {
-    throw new Error(`Customer Error: ${err.message}`);
+    throw createOrderError('customer', err);
   }
 
   // 2. Create the Order
@@ -238,7 +259,12 @@ export const createPosOrder = async (payload) => {
   try {
     newOrder = await OrdersModel.create([orderToInsert]);
   } catch (err) {
-    throw new Error(`Order Error: ${err.message}`);
+    try {
+      await CustomersModel.deleteById(customerData.id);
+    } catch (cleanupError) {
+      console.error('[POS SERVICE] Failed to remove customer after order creation failure:', cleanupError?.stack || cleanupError);
+    }
+    throw createOrderError('order', err);
   }
 
   // 3. Insert Order Items
@@ -264,7 +290,8 @@ export const createPosOrder = async (payload) => {
   try {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (err) {
-    throw new Error(`Items Error: ${err.message}`);
+    await cleanupFailedPosOrder(newOrder.id, customerData.id);
+    throw createOrderError('items', err);
   }
 
   // 4. Stock Deduction Logic
@@ -274,7 +301,12 @@ export const createPosOrder = async (payload) => {
   // balance (deposit). Ang order na iyon ay ide-deduct na lang pagdating
   // ng aktwal na completion (confirmPosOrderPickup / Orders.jsx).
   if (shouldCompleteImmediately) {
-    await deductStockForOrderItems(itemsToInsert);
+    try {
+      await deductStockForOrderItems(itemsToInsert);
+    } catch (err) {
+      await cleanupFailedPosOrder(newOrder.id, customerData.id);
+      throw createOrderError('order', err);
+    }
   }
 
   // BAGO: idinagdag ang receiptToken sa response. Ginagamit ito ng frontend

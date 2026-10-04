@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 const PRODUCTS_API = `${API_BASE}/catalog`;
@@ -298,6 +298,13 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
   const originalTotal = Number(bundle.original_total || 0);
   const bundlePrice = Number(bundle.discounted_price || bundle.bundle_price || 0);
   const discountPercent = Number(bundle.discount_percent || 0);
+  const missingComponentFormula = bundle.has_production_formula === false;
+  const invalidComponentNames = Array.isArray(bundle.invalid_component_names)
+    ? bundle.invalid_component_names.filter(Boolean)
+    : [];
+  const formulaWarning = invalidComponentNames.length > 0
+    ? `Contains item with no production formula (${invalidComponentNames.join(', ')}) - Cannot appear in POS/Online Ordering`
+    : 'Contains item with no production formula - Cannot appear in POS/Online Ordering';
 
   const productDescription = products.length > 0 
     ? products.map(p => {
@@ -311,7 +318,7 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
     : '\u00A0';
 
   return (
-    <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0">
+    <div className={`bg-white rounded-2xl border overflow-hidden shadow-sm flex flex-col h-full min-w-0 ${missingComponentFormula ? 'border-red-200' : 'border-[#EAE4E0]'}`}>
       <div className="relative h-36 bg-[#F5EFEB] overflow-hidden shrink-0">
         <BundleImageGrid products={products} customImageUrl={bundle.custom_image_url} />
 
@@ -340,9 +347,21 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
         )}
 
         {bundle.is_within_date_range === false && (
-          <div className="absolute bottom-2 left-2">
+          <div className={`absolute left-2 ${missingComponentFormula ? 'bottom-12' : 'bottom-2'}`}>
             <span className="text-[10px] font-bold uppercase tracking-wide bg-white/90 text-[#8A7264] px-2 py-1 rounded-full shadow-sm">
               Out of season
+            </span>
+          </div>
+        )}
+
+        {missingComponentFormula && (
+          <div className="absolute left-2 right-2 bottom-2">
+            <span
+              title={formulaWarning}
+              className="flex items-start gap-1 rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm"
+            >
+              <AlertTriangle size={11} className="mt-px shrink-0" />
+              <span>Contains item with no production formula - Cannot appear in POS/Online Ordering</span>
             </span>
           </div>
         )}

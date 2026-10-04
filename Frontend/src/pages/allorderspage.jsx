@@ -5,6 +5,14 @@ import { useToast } from '../components/ui';
 import Orders from '../components/allOrders/Orders';
 import DetailsModal from '../components/allOrders/DetailsModal';
 
+const SAVE_KEY = 'orders-detail-open';
+function loadSaved(locKey) {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(SAVE_KEY) || 'null');
+    return s && s.key === locKey && s.order ? s : null;
+  } catch { return null; }
+}
+
 export default function AllOrdersPage() {
   const { orders, updateOrderStatus, loading } = useApp();
   const { show: showToast } = useToast();
@@ -12,8 +20,26 @@ export default function AllOrdersPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  // Ang bukas na modal ay sine-save sa sessionStorage kasama ang location.key ng history entry.
+// Kapag na-remount o na-reload ang page (auto-refresh, iOS Safari reload, atbp.), babalik ang modal.
+// Kapag ibang page ang pinuntahan at bumalik via link, bagong location.key na — hindi na ito ibabalik.
+const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)?.order ?? null);
+  const [detailOpen, setDetailOpen] = useState(() => !!loadSaved(location.key));
+
+  useEffect(() => {
+    try {
+      if (detailOpen && selectedOrder) {
+        sessionStorage.setItem(SAVE_KEY, JSON.stringify({ key: location.key, order: selectedOrder }));
+      } else {
+        sessionStorage.removeItem(SAVE_KEY);
+      }
+    } catch { /* storage unavailable */ }
+  }, [detailOpen, selectedOrder, location.key]);
+
+  // laging pinakabagong data ng order ang ipinapakita, pero hindi mawawala ang modal kung saglit na walang laman ang list
+  const liveOrder = selectedOrder
+    ? (orders || []).find(o => o.id === selectedOrder.id) || selectedOrder
+    : null;
 
   const openOrder = (order) => {
     setSelectedOrder(order);
@@ -65,7 +91,7 @@ export default function AllOrdersPage() {
         onStatusChange={handleStatusChange}
       />
       <DetailsModal
-        order={selectedOrder}
+        order={liveOrder}
         isOpen={detailOpen}
         onClose={handleCloseModal}
         onStatusChange={handleStatusChange}

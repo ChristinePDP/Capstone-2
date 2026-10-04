@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -37,14 +37,21 @@ const STATUS_STYLES = {
   Cancelled: 'bg-red-50 text-red-600',
 };
 
+// Primary action colour follows the status it leads to (same hue family as the
+// status badges) but in deeper tones, so it doesn't fight the Cancel button.
 const STATUS_BUTTON_STYLES = {
-  Ready: 'bg-orange-500 hover:bg-orange-600',
-  Completed: 'bg-green-600 hover:bg-green-700',
+  Ready: 'bg-[#C2570C] hover:bg-[#A84A0A] focus-visible:ring-[#C2570C]',
+  Completed: 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700',
 };
+
+const BTN_BASE = 'inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
+const BTN_CLOSE  = 'border border-[#DED4CC] bg-white text-[#5A453C] hover:bg-[#F5EFEB] focus-visible:ring-[#5A453C]';
+const BTN_CANCEL = 'border border-red-300 bg-white text-red-700 hover:bg-red-50 focus-visible:ring-red-500';
+const BTN_DANGER = 'bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-700';
 
 function StatusBadge({ status }) {
   return (
-    <span className={`text-xs font-bold px-3 py-1 rounded-full ${STATUS_STYLES[status] || 'bg-gray-100 text-gray-500'}`}>
+    <span className={`text-xs sm:text-sm font-bold px-3 py-1 rounded-full shrink-0 ${STATUS_STYLES[status] || 'bg-gray-100 text-gray-500'}`}>
       {status}
     </span>
   );
@@ -52,7 +59,7 @@ function StatusBadge({ status }) {
 
 function TagBadge({ children }) {
   return (
-    <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#F5EFEB] text-[#5A453C]">
+    <span className="text-[13px] font-bold px-3 py-1 rounded-full bg-[#F5EFEB] text-[#5A453C]">
       {children}
     </span>
   );
@@ -60,7 +67,7 @@ function TagBadge({ children }) {
 
 function BundleTag() {
   return (
-    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#3B1F0A] text-white uppercase tracking-wide shrink-0">
+    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-[#3B1F0A] text-white uppercase tracking-wide shrink-0">
       Bundle
     </span>
   );
@@ -161,17 +168,17 @@ async function downloadAllImages(urls, baseName) {
 
 function SlipImageGallery({ label, urls, baseName, onView }) {
   return (
-    <div className="pt-1">
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <span className="text-sm text-[#8A7264]">
-          {label} <span className="text-[10px] font-bold text-[#B7A99F]">({urls.length})</span>
+    <div className="py-3">
+      <div className="flex items-center justify-between gap-3 mb-2.5">
+        <span className="text-[13px] font-semibold text-[#8A7264]">
+          {label} <span className="text-xs font-bold text-[#B7A99F]">({urls.length})</span>
         </span>
         <button
           type="button"
           onClick={() => downloadAllImages(urls, baseName)}
-          className="shrink-0 flex items-center gap-1 text-[11px] font-bold text-[#5A453C] hover:text-[#3B1F0A] underline underline-offset-2"
+          className="shrink-0 inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-lg border border-[#DED4CC] bg-white text-[13px] font-bold text-[#5A453C] hover:bg-[#F5EFEB]"
         >
-          <Download size={12} /> Download {urls.length > 1 ? 'all' : ''}
+          <Download size={14} /> {urls.length > 1 ? 'Download all' : 'Download'}
         </button>
       </div>
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -220,22 +227,50 @@ function getItemSlipFields(item) {
   return Object.keys(fields).length > 0 ? fields : null;
 }
 
-function SectionLabel({ icon: Icon, children }) {
+function SectionLabel({ icon: Icon, children, className = '' }) {
   return (
-    <div className="flex items-center gap-1.5 mb-3">
-      {Icon && <Icon size={13} className="text-[#8A7264]" />}
-      <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">{children}</p>
+    <div className={`flex items-center gap-2 ${className}`}>
+      {Icon && <Icon size={16} className="text-[#8A7264]" />}
+      <h3 className="text-sm font-bold text-[#3B1F0A]">{children}</h3>
     </div>
   );
 }
 
+// Inline label/value (totals, balance) — roomy and readable
 function InfoRow({ label, value }) {
   if (!value) return null;
   return (
-    <div className="flex items-baseline justify-between gap-3 text-sm">
+    <div className="flex items-baseline justify-between gap-3 text-[15px]">
       <span className="text-[#8A7264]">{label}</span>
-      <span className="text-[#3B1F0A] font-semibold text-right">{value}</span>
+      <span className="text-[#3B1F0A] font-semibold text-right tabular-nums">{value}</span>
     </div>
+  );
+}
+
+// Order-slip field: stacked on mobile (label above value, left-aligned so long
+// text like cake messages reads naturally), two columns on larger screens.
+function SlipField({ label, value }) {
+  return (
+    <div className="py-3 sm:grid sm:grid-cols-[9.5rem_1fr] sm:gap-4">
+      <p className="text-[13px] font-semibold text-[#8A7264]">{label}</p>
+      <p className="mt-0.5 sm:mt-0 text-[15px] font-semibold text-[#3B1F0A] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{value}</p>
+    </div>
+  );
+}
+
+function IconTile({ icon: Icon }) {
+  return (
+    <span className="w-11 h-11 rounded-xl bg-[#F5EFEB] text-[#5A453C] flex items-center justify-center shrink-0">
+      <Icon size={20} />
+    </span>
+  );
+}
+
+function QtyChip({ children }) {
+  return (
+    <span className="inline-block px-2 py-0.5 rounded-md bg-[#F5EFEB] text-[13px] font-bold text-[#5A453C] tabular-nums">
+      ×{children}
+    </span>
   );
 }
 
@@ -244,21 +279,25 @@ function TabButton({ active, icon: Icon, children, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`shrink-0 flex items-center gap-1 sm:gap-1.5 pb-2.5 text-[11px] sm:text-sm font-bold whitespace-nowrap border-b-2 transition-colors ${
+      aria-pressed={active}
+      className={`flex items-center justify-center gap-2 min-h-[44px] sm:min-h-0 rounded-lg sm:rounded-none sm:pb-2.5 text-sm font-bold whitespace-nowrap transition-colors sm:border-b-2 ${
         active
-          ? 'border-[#3B1F0A] text-[#3B1F0A]'
-          : 'border-transparent text-[#8A7264] hover:text-[#5A453C]'
+          ? 'bg-white shadow-sm text-[#3B1F0A] sm:shadow-none sm:bg-transparent sm:border-[#3B1F0A]'
+          : 'text-[#8A7264] hover:text-[#5A453C] sm:border-transparent'
       }`}
     >
-      <Icon size={13} className={active ? 'text-[#3B1F0A]' : 'text-[#8A7264]'} />
+      <Icon size={16} className={active ? 'text-[#3B1F0A]' : 'text-[#8A7264]'} />
       {children}
     </button>
   );
 }
 
 // ── DETAILS MODAL ────────────────────────────────────────────
+// Mobile  : bottom sheet, one-row footer, roomy type, meta lives inside the scroll area
+// Desktop : centered dialog, Close left / actions right
 export default function DetailsModal({ order, isOpen, onClose, onStatusChange }) {
   const [activeTab, setActiveTab] = useState('order');
+  const [confirmCancel, setConfirmCancel] = useState(false);
   // { images: string[], index: number } — pwedeng isa lang (reference image) o marami (Multi-image field)
   const [lightbox, setLightbox] = useState(null);
   const openLightbox = (images, index = 0) => setLightbox({ images, index });
@@ -268,13 +307,13 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   ));
 
   const items = order ? (order.items || order.order_items || []) : [];
-  
-  const hasOrderSlipCheck = items.some(item => 
-    parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails) || 
-    item.customer_reference_url || 
+
+  const hasOrderSlipCheck = items.some(item =>
+    parseSlipDetails(item.order_slip_details ?? item.orderSlipDetails) ||
+    item.customer_reference_url ||
     item.customerReference
   );
-  
+
   const hasReferenceImageCheck = !!(order?.customerReference || order?.customer_reference_url);
 
   useEffect(() => {
@@ -282,6 +321,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
       setActiveTab('order');
     }
   }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
+
+  // laging bumalik sa "order" tab at isara ang cancel-confirm kapag ibang order / bagong bukas
+  useEffect(() => {
+    setConfirmCancel(false);
+  }, [order?.id, isOpen]);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -327,6 +371,8 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   const amountPaid       = order.amountPaid || order.amount_paid || 0;
   const balance           = order.balance ?? (grandTotal - amountPaid);
   const paymentRef         = order.paymongoPaymentId || order.paymongo_payment_id;
+  // Kapareho ng logic sa Orders.jsx: kapag 0 na ang balance, Fully Paid na kahit "deposit" ang payment_type
+  const isDeposit = paymentType === 'deposit' && Number(balance) > 0;
 
   const pickupDate     = order.pickupDate || order.pickup_date;
   const pickupTime     = order.pickupTime || order.pickup_time;
@@ -351,13 +397,13 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     groupOrderItems(items).forEach(g => {
       if (g.isBundle) {
         const sections = g.items
-          .map(item => ({ 
-            item, 
-            fields: getItemSlipFields(item), 
-            image: item.customer_reference_url || item.customerReference 
+          .map(item => ({
+            item,
+            fields: getItemSlipFields(item),
+            image: item.customer_reference_url || item.customerReference
           }))
           .filter(({ fields, image }) => fields || image);
-          
+
         if (sections.length > 0) {
           cards.push({ title: g.bundleName, sections });
         }
@@ -371,54 +417,54 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     });
     return cards;
   })();
-  
+
   const hasOrderSlip = orderSlipCards.length > 0;
   const showSlipTab = hasOrderSlip || !!globalReferenceImage;
 
   const nextStatus = { Confirmed: 'Ready', Ready: 'Completed' };
+  const next = nextStatus[order.status];
+  const canCancel = order.status === 'Confirmed';
+  const hasActions = canCancel || !!next;
 
   const pickupTimeLabel = pickupTime
     ? formatTime(pickupTime) + (pickupTimeEnd ? ` – ${formatTime(pickupTimeEnd)}` : '')
     : null;
 
+  // ── Items list ──
   const itemRows = [];
   groupOrderItems(items).forEach((g, i) => {
     if (g.isBundle) {
       const bundleTotal = g.items.reduce((sum, it) => sum + itemLineTotal(it), 0);
       itemRows.push(
-        <tr key={`bundle-${g.groupId}-${i}`} className="bg-[#FAF7F4]/70">
-          <td className="py-2.5 pr-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[#3B1F0A] font-bold">{g.bundleName}</span>
+        <li key={`bundle-${g.groupId}-${i}`} className="py-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
+              <span className="text-[15px] font-bold text-[#3B1F0A] break-words">{g.bundleName}</span>
               <BundleTag />
             </div>
-          </td>
-          <td className="py-2.5 text-right font-bold text-[#3B1F0A]">{fmt(bundleTotal)}</td>
-        </tr>
+            <span className="text-[15px] font-bold text-[#3B1F0A] shrink-0 tabular-nums">{fmt(bundleTotal)}</span>
+          </div>
+          <ul className="mt-2.5 ml-1 pl-3.5 border-l-2 border-[#EAE4E0] space-y-2">
+            {g.items.map((item, j) => (
+              <li key={`bundle-${g.groupId}-item-${j}`} className="flex items-start justify-between gap-3 text-sm text-[#5A453C]">
+                <span className="min-w-0 break-words">
+                  {item.name || item.product_name} <QtyChip>{item.qty || item.quantity}</QtyChip>
+                </span>
+                <span className="text-[#8A7264] shrink-0 tabular-nums">{fmt(itemLineTotal(item))}</span>
+              </li>
+            ))}
+          </ul>
+        </li>
       );
-      g.items.forEach((item, j) => {
-        itemRows.push(
-          <tr key={`bundle-${g.groupId}-item-${j}`}>
-            <td className="py-1.5 pl-5 text-[#5A453C] font-medium pr-2 text-[13px]">
-              {item.name || item.product_name}
-              <span className="text-[#8A7264] font-normal ml-1.5">x{item.qty || item.quantity}</span>
-            </td>
-            <td className="py-1.5 text-right text-[13px] text-[#8A7264] font-medium">
-              {fmt(itemLineTotal(item))}
-            </td>
-          </tr>
-        );
-      });
     } else {
       const item = g.item;
       itemRows.push(
-        <tr key={`item-${i}`}>
-          <td className="py-2.5 text-[#3B1F0A] font-semibold pr-2">
-            {item.name || item.product_name}
-            <span className="text-[#8A7264] font-medium ml-1.5">x{item.qty || item.quantity}</span>
-          </td>
-          <td className="py-2.5 text-right font-bold text-[#3B1F0A]">{fmt(itemLineTotal(item))}</td>
-        </tr>
+        <li key={`item-${i}`} className="flex items-start justify-between gap-3 py-3.5">
+          <span className="min-w-0 text-[15px] font-semibold text-[#3B1F0A] break-words">
+            {item.name || item.product_name} <QtyChip>{item.qty || item.quantity}</QtyChip>
+          </span>
+          <span className="text-[15px] font-bold text-[#3B1F0A] shrink-0 tabular-nums">{fmt(itemLineTotal(item))}</span>
+        </li>
       );
     }
   });
@@ -428,240 +474,252 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     ...(showSlipTab ? [{ id: 'slip', label: 'Order Slip', icon: FileText }] : []),
   ];
 
+  // ── Type / Source / Placed ──
+  const metaStrip = (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-2">
+      {[
+        orderType && { k: 'Type', node: <TagBadge>{orderType}</TagBadge> },
+        source && { k: 'Source', node: <TagBadge>{placedByAdmin ? 'Walk-in (Staff)' : source === 'online' ? 'Online' : source}</TagBadge> },
+        createdAt && { k: 'Placed', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(createdAt)}</span>, wide: true },
+        updatedAt && updatedAt !== createdAt && { k: 'Updated', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(updatedAt)}</span>, wide: true },
+      ].filter(Boolean).map(({ k, node, wide }) => (
+        <div key={k} className={`flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-2 ${wide ? 'col-span-2 sm:col-auto' : ''}`}>
+          <span className="text-xs sm:text-[11px] font-semibold sm:font-bold sm:uppercase sm:tracking-wider text-[#8A7264]">{k}</span>
+          {node}
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div
-      className="fixed inset-0 z-50 flex overflow-y-auto bg-[#1F1108]/60 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex overflow-y-auto bg-[#1F1108]/60 backdrop-blur-sm p-0 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="order-details-heading"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90dvh] m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
+        className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[92dvh] sm:max-h-[90dvh] mt-auto sm:m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile grab handle */}
+        <div className="sm:hidden mx-auto mt-2.5 h-1 w-10 rounded-full bg-[#DED4CC] shrink-0" aria-hidden="true" />
 
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-4 sm:px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <div className="flex items-center gap-3 flex-wrap min-w-0">
-            <h2 id="order-details-heading" className="text-lg sm:text-2xl font-bold text-[#3B1F0A] truncate">Order #{orderNumber}</h2>
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-7 pt-3 pb-3 sm:py-5 border-b border-[#EAE4E0] bg-white shrink-0">
+          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap min-w-0">
+            <h2 id="order-details-heading" className="text-xl sm:text-2xl font-bold text-[#3B1F0A]">Order #{orderNumber}</h2>
             <StatusBadge status={order.status} />
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors shrink-0"
+            aria-label="Close order details"
+            className="w-11 h-11 sm:w-9 sm:h-9 -mr-2 sm:mr-0 rounded-full flex items-center justify-center text-[#5A453C] hover:bg-[#F5EFEB] transition-colors shrink-0"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
-        {/* Order meta strip */}
-        <div className="px-4 sm:px-7 pt-5 pb-4 border-b border-[#EAE4E0] shrink-0">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            {orderType && (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">Type</span>
-                <TagBadge>{orderType}</TagBadge>
-              </div>
-            )}
-            {source && (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">Source</span>
-                <TagBadge>{placedByAdmin ? 'Walk-in (Staff)' : source === 'online' ? 'Online' : source}</TagBadge>
-              </div>
-            )}
-            {createdAt && (
-              <div className="flex items-center gap-2 text-[#5A453C]">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">Placed</span>
-                <span className="font-medium">{formatDateTime(createdAt)}</span>
-              </div>
-            )}
-            {updatedAt && updatedAt !== createdAt && (
-              <div className="flex items-center gap-2 text-[#5A453C]">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">Updated</span>
-                <span className="font-medium">{formatDateTime(updatedAt)}</span>
-              </div>
-            )}
-          </div>
+        {/* Desktop meta strip (on mobile it moves into the scroll area to save space) */}
+        <div className="hidden sm:block px-7 pt-5 pb-4 border-b border-[#EAE4E0] shrink-0">
+          {metaStrip}
         </div>
 
-        {/* Tab switcher */}
-        <div className="px-4 sm:px-7 pt-4 shrink-0">
-          <div className="flex items-center gap-4 sm:gap-8 overflow-x-auto scrollbar-hide border-b border-[#EAE4E0] pr-4">
-            {TABS.map(tab => (
-              <TabButton
-                key={tab.id}
-                icon={tab.icon}
-                active={activeTab === tab.id}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </TabButton>
-            ))}
+        {/* Tabs — hidden when there is only one */}
+        {TABS.length > 1 && (
+          <div className="px-4 sm:px-7 pt-3 sm:pt-4 pb-3 sm:pb-0 border-b border-[#EAE4E0] sm:border-b-0 shrink-0">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5EFEB] rounded-xl sm:flex sm:gap-8 sm:p-0 sm:bg-transparent sm:rounded-none sm:border-b sm:border-[#EAE4E0]">
+              {TABS.map(tab => (
+                <TabButton
+                  key={tab.id}
+                  icon={tab.icon}
+                  active={activeTab === tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.label}
+                </TabButton>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Body */}
-        <div className="px-4 sm:px-7 py-6 overflow-y-auto overscroll-contain flex-1">
+        <div className="px-4 sm:px-7 py-4 sm:py-6 overflow-y-auto overscroll-contain flex-1 bg-[#FAF7F4]">
 
           {activeTab === 'order' && (
-            <div className="flex flex-col gap-5">
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
-                <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
-                  <SectionLabel icon={User}>Customer Details</SectionLabel>
-                  <h3 className="text-base font-bold text-[#3B1F0A] mb-3 leading-tight">{customer.name || 'Walk-in'}</h3>
-                  {customer.phone && (
-                    <div className="flex items-center gap-2 text-sm text-[#5A453C]">
-                      <Phone size={13} className="text-[#8A7264]" />
-                      <span className="font-medium">{customer.phone}</span>
-                    </div>
-                  )}
-                </div>
+            <div className="flex flex-col gap-4">
 
-                <div className="bg-[#FAF7F4] rounded-2xl p-5 border border-[#EAE4E0]">
-                  <SectionLabel icon={Calendar}>Pick-up Schedule</SectionLabel>
-                  <p className="text-base font-bold text-[#3B1F0A]">{formatDate(pickupDate) || '—'}</p>
-                  {pickupTimeLabel && (
-                    <p className="text-sm text-[#5A453C] font-medium flex items-center gap-1.5 mt-1.5">
-                      <Clock size={13} className="text-[#8A7264]" />
-                      {pickupTimeLabel}
-                    </p>
-                  )}
+              {/* Mobile-only meta card */}
+              <section className="sm:hidden bg-white border border-[#EAE4E0] rounded-2xl p-4">
+                {metaStrip}
+              </section>
+
+              {/* Customer + Pick-up */}
+              <section className="bg-white border border-[#EAE4E0] rounded-2xl divide-y divide-[#EAE4E0] md:grid md:grid-cols-2 md:divide-y-0 md:divide-x">
+                <div className="flex items-center gap-3.5 p-4 sm:p-5 min-w-0">
+                  <IconTile icon={User} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[#8A7264]">Customer</p>
+                    <p className="text-base sm:text-lg font-bold text-[#3B1F0A] leading-snug break-words">{customer.name || 'Walk-in'}</p>
+                    {customer.phone && (
+                      <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1.5 mt-0.5 text-sm font-semibold text-[#5A453C] hover:underline underline-offset-2">
+                        <Phone size={14} className="text-[#8A7264]" />
+                        {customer.phone}
+                      </a>
+                    )}
+                  </div>
                 </div>
-              </div>
+                <div className="flex items-center gap-3.5 p-4 sm:p-5 min-w-0">
+                  <IconTile icon={Calendar} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[#8A7264]">Pick-up</p>
+                    <p className="text-base sm:text-lg font-bold text-[#3B1F0A] leading-snug">{formatDate(pickupDate) || '—'}</p>
+                    {pickupTimeLabel && (
+                      <p className="inline-flex items-center gap-1.5 mt-0.5 text-sm font-semibold text-[#5A453C]">
+                        <Clock size={14} className="text-[#8A7264]" />
+                        {pickupTimeLabel}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
 
               {/* Order Items */}
-              <div className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
-                  <ReceiptText size={14} className="text-[#8A7264]" />
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">Order Items</p>
+              <section className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
+                <div className="px-4 sm:px-5 pt-4 pb-1">
+                  <SectionLabel icon={ReceiptText}>
+                    Order items <span className="text-[#8A7264] font-semibold">({items.length})</span>
+                  </SectionLabel>
                 </div>
-                <div className="p-4">
-                  <table className="w-full text-sm">
-                    <tbody className="divide-y divide-[#EAE4E0]">
-                      {itemRows}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="border-t border-[#EAE4E0] p-5 space-y-2">
+                <ul className="px-4 sm:px-5 divide-y divide-[#F0EAE5]">
+                  {itemRows}
+                </ul>
+                <div className="bg-[#FAF7F4] border-t border-[#EAE4E0] px-4 sm:px-5 py-4 space-y-2">
                   <InfoRow label="Subtotal" value={fmt(subtotal || grandTotal)} />
                   {additionalCharge > 0 && <InfoRow label="Additional Charge" value={fmt(additionalCharge)} />}
                   {discountAmount > 0 && <InfoRow label="Discount" value={`−${fmt(discountAmount)}`} />}
-                  <div className="flex items-baseline justify-between pt-2.5 mt-1 border-t border-[#EAE4E0]">
-                    <span className="text-sm font-bold text-[#3B1F0A]">Grand Total</span>
-                    <span className="text-2xl font-bold text-green-700">{fmt(grandTotal)}</span>
+                  <div className="flex items-baseline justify-between gap-3 pt-3 mt-1 border-t border-[#EAE4E0]">
+                    <span className="text-base font-bold text-[#3B1F0A]">Grand Total</span>
+                    <span className="text-2xl sm:text-3xl font-bold text-green-700 tabular-nums">{fmt(grandTotal)}</span>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              {/* Payment Status */}
-              <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5">
-                <SectionLabel icon={Wallet}>Payment Status</SectionLabel>
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-sm text-[#5A453C] font-medium">
-                    {paymentType === 'deposit' ? 'Deposit Payment' : 'Fully Paid'}
-                  </span>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${paymentType === 'deposit' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
-                    {paymentType === 'deposit' ? fmt(amountPaid) : fmt(grandTotal)}
-                  </span>
+              {/* Payment */}
+              <section className="bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
+                <SectionLabel icon={Wallet}>Payment</SectionLabel>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  {isDeposit ? (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full bg-amber-50 text-amber-800 text-sm font-bold">Deposit paid</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 text-green-800 text-sm font-bold">
+                      <CheckCircle2 size={15} /> Fully paid
+                    </span>
+                  )}
+                  <span className="text-lg font-bold text-[#3B1F0A] tabular-nums">{isDeposit ? fmt(amountPaid) : fmt(grandTotal)}</span>
                 </div>
-                {paymentType === 'deposit' && (
-                  <InfoRow label="Balance Due" value={fmt(balance)} />
+                {isDeposit && (
+                  <div className="mt-3 flex items-baseline justify-between gap-3 rounded-xl bg-amber-50 px-3.5 py-3">
+                    <span className="text-sm font-semibold text-amber-900">Balance due</span>
+                    <span className="text-base font-bold text-amber-900 tabular-nums">{fmt(balance)}</span>
+                  </div>
                 )}
                 {paymentRef && (
-                  <p className="text-[11px] text-[#8A7264] font-mono mt-2.5 break-all">Ref: {paymentRef}</p>
+                  <p className="mt-3 text-xs text-[#8A7264] font-mono break-all">Ref: {paymentRef}</p>
                 )}
-              </div>
+              </section>
 
-              {/* Special Instructions — pinakababa ng order details */}
+              {/* Special Instructions — highlighted so the baker doesn't miss it */}
               {specialInstructions.length > 0 && (
-                <div className="bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5 min-w-0">
-                  <SectionLabel icon={MessageSquareText}>Special Instructions</SectionLabel>
-                  <div className="space-y-1.5">
+                <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4 sm:p-5 min-w-0">
+                  <SectionLabel icon={MessageSquareText} className="mb-2">Special instructions</SectionLabel>
+                  <div className="space-y-2">
                     {specialInstructions.map((text, i) => (
-                      <p key={i} className="text-sm text-[#3B1F0A] font-medium whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
+                      <p key={i} className="text-[15px] text-[#3B1F0A] font-medium whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
                     ))}
                   </div>
-                </div>
+                </section>
               )}
 
             </div>
           )}
 
           {activeTab === 'slip' && showSlipTab && (
-            <div className="flex flex-col gap-6 items-start">
-              
+            <div className="flex flex-col gap-4 items-start">
+
               {/* Product Component Cards: Slips + Specific References */}
               {hasOrderSlip && orderSlipCards.map((card, idx) => (
-                <div key={idx} className="w-full bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[#EAE4E0] bg-[#F5EFEB] flex items-center gap-2">
-                    <FileText size={14} className="text-[#8A7264]" />
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-[#8A7264]">
-                      {card.title}
-                    </p>
+                <section key={idx} className="w-full bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
+                  <div className="px-4 sm:px-5 py-3.5 bg-[#F5EFEB] border-b border-[#EAE4E0] flex items-center gap-2 flex-wrap">
+                    <FileText size={16} className="text-[#8A7264] shrink-0" />
+                    <h3 className="text-[15px] font-bold text-[#3B1F0A]">{card.title}</h3>
                     {card.sections.length > 1 && <BundleTag />}
                   </div>
-                  <div className="divide-y divide-[#EAE4E0]">
+                  <div className="divide-y-8 divide-[#FAF7F4]">
                     {card.sections.map(({ item, fields, image }, i) => (
-                      <div key={i} className="p-5 flex flex-col md:flex-row gap-6">
-                        
+                      <div key={i} className="p-4 sm:p-5 flex flex-col md:flex-row gap-5">
+
                         {/* Text Fields */}
-                        <div className="flex-1 space-y-2.5 min-w-0">
+                        <div className="flex-1 min-w-0">
                           {card.sections.length > 1 && (
-                            <p className="text-xs font-bold text-[#3B1F0A] mb-2 border-b border-[#EAE4E0] pb-1.5">
+                            <p className="flex items-center gap-2 text-sm font-bold text-[#3B1F0A] pb-1">
+                              <span className="w-1 h-4 rounded-full bg-[#C2570C]" aria-hidden="true" />
                               {item.name || item.product_name}
                             </p>
                           )}
-                          {fields ? Object.entries(fields).map(([key, value], j) => (
-                            isImageUrlList(value) ? (
-                              <SlipImageGallery
-                                key={`${key}-${j}`}
-                                label={formatSlipKey(key)}
-                                urls={value}
-                                baseName={safeName(`${orderNumber}-${item.name || item.product_name || 'item'}-${key}`)}
-                                onView={openLightbox}
-                              />
-                            ) : (
-                              <InfoRow key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
-                            )
-                          )) : (
-                            <p className="text-xs text-[#8A7264] italic">No slip details provided.</p>
-                          )}
+                          <div className="divide-y divide-[#F0EAE5]">
+                            {fields ? Object.entries(fields).map(([key, value], j) => (
+                              isImageUrlList(value) ? (
+                                <SlipImageGallery
+                                  key={`${key}-${j}`}
+                                  label={formatSlipKey(key)}
+                                  urls={value}
+                                  baseName={safeName(`${orderNumber}-${item.name || item.product_name || 'item'}-${key}`)}
+                                  onView={openLightbox}
+                                />
+                              ) : (
+                                <SlipField key={`${key}-${j}`} label={formatSlipKey(key)} value={formatSlipValue(value)} />
+                              )
+                            )) : (
+                              <p className="py-3 text-sm text-[#8A7264] italic">No slip details provided.</p>
+                            )}
+                          </div>
                         </div>
 
                         {/* Specific Component Image */}
                         {image && (
-                           <div className="w-full md:w-56 shrink-0">
-                             <div className="flex items-center gap-1.5 mb-2">
-                               <ImageIcon size={13} className="text-[#8A7264]" />
-                               <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264]">Reference Image</p>
-                             </div>
-                             <button
-                               type="button"
-                               onClick={() => openLightbox([image])}
-                               className="w-full group relative cursor-zoom-in rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center aspect-video md:aspect-square"
-                               aria-label="View reference image"
-                             >
-                               <img src={image} alt="reference" className="w-full h-full object-cover" />
-                               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                                 <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
-                                   View Image
-                                 </span>
-                               </div>
-                             </button>
-                           </div>
+                          <div className="w-full md:w-56 shrink-0">
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <ImageIcon size={14} className="text-[#8A7264]" />
+                              <p className="text-[13px] font-semibold text-[#8A7264]">Reference image</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openLightbox([image])}
+                              className="w-full group relative cursor-zoom-in rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center aspect-video md:aspect-square"
+                              aria-label="View reference image"
+                            >
+                              <img src={image} alt="reference" className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                                <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
+                                  View Image
+                                </span>
+                              </div>
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
-                </div>
+                </section>
               ))}
 
               {/* Global Reference Fallback (Kung may reference image ang Order na hindi nakatali sa items) */}
               {globalReferenceImage && !hasOrderSlip && (
-                <div className="w-full bg-[#FAF7F4] border border-[#EAE4E0] rounded-2xl p-5">
-                  <SectionLabel icon={ImageIcon}>Order Reference</SectionLabel>
+                <section className="w-full bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
+                  <SectionLabel icon={ImageIcon} className="mb-3">Order reference</SectionLabel>
                   <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center max-w-sm">
                     <button
                       type="button"
@@ -676,36 +734,70 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                       </div>
                     </button>
                   </div>
-                </div>
+                </section>
               )}
 
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        {(order.status === 'Confirmed' || nextStatus[order.status]) && (
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2.5 px-4 sm:px-7 py-5 border-t border-[#EAE4E0] shrink-0">
-            {order.status === 'Confirmed' && (
+        {/* Footer — one row on mobile; Close left / actions right on desktop */}
+        <div className="shrink-0 border-t border-[#EAE4E0] bg-white px-4 sm:px-7 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+          {confirmCancel ? (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm font-semibold text-[#3B1F0A]">Cancel order #{orderNumber}? It will be marked as Cancelled.</p>
+              <div className="flex gap-2.5">
+                <button type="button" onClick={() => setConfirmCancel(false)} className={`${BTN_BASE} ${BTN_CLOSE} flex-1 sm:flex-none`}>
+                  Keep order
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }}
+                  className={`${BTN_BASE} ${BTN_DANGER} flex-1 sm:flex-none`}
+                >
+                  Yes, cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 sm:justify-between">
+              {/* On mobile the header ✕ closes the sheet, so Close only takes footer space when it is the only action */}
               <button
-                onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }}
-                className="w-full sm:w-auto bg-red-600 text-white hover:bg-red-700 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors"
+                type="button"
+                onClick={onClose}
+                className={`${BTN_BASE} ${BTN_CLOSE} ${hasActions ? 'hidden sm:inline-flex' : 'flex-1 sm:flex-none'}`}
               >
-                Cancel Order
+                <X size={15} />
+                Close
               </button>
-            )}
-            {nextStatus[order.status] && (
-              <button
-                onClick={() => { onStatusChange(order.id, nextStatus[order.status]); onClose(); }}
-                className={`w-full sm:w-auto text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md transition-colors ${
-                  STATUS_BUTTON_STYLES[nextStatus[order.status]] || 'bg-green-600 hover:bg-green-700'
-                }`}
-              >
-                Mark as {nextStatus[order.status]}
-              </button>
-            )}
-          </div>
-        )}
+
+              {hasActions && (
+                <div className="flex flex-1 sm:flex-none gap-2.5">
+                  {canCancel && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCancel(true)}
+                      className={`${BTN_BASE} ${BTN_CANCEL} flex-1 sm:flex-none whitespace-nowrap`}
+                    >
+                      Cancel Order
+                    </button>
+                  )}
+                  {next && (
+                    <button
+                      type="button"
+                      onClick={() => { onStatusChange(order.id, next); onClose(); }}
+                      className={`${BTN_BASE} text-white shadow-sm flex-[1.3] sm:flex-none whitespace-nowrap ${
+                        STATUS_BUTTON_STYLES[next] || 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700'
+                      }`}
+                    >
+                      Mark as {next}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Lightbox — isa o maraming larawan (may prev/next at download) */}
@@ -718,7 +810,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             <button
               type="button"
               onClick={closeLightbox}
-              className="absolute -top-3 -right-3 z-10 w-9 h-9 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
+              className="absolute -top-3 -right-3 z-10 w-10 h-10 rounded-full bg-white shadow-lg hover:bg-gray-100 flex items-center justify-center text-[#3B1F0A] transition-colors"
               aria-label="Close"
             >
               <X size={18} />
@@ -734,7 +826,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                   type="button"
                   onClick={() => stepLightbox(-1)}
                   aria-label="Previous image"
-                  className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
+                  className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
                 >
                   <ChevronLeft size={18} />
                 </button>
@@ -742,7 +834,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                   type="button"
                   onClick={() => stepLightbox(1)}
                   aria-label="Next image"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-[#3B1F0A]"
                 >
                   <ChevronRight size={18} />
                 </button>
@@ -750,7 +842,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             )}
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2">
               {lightbox.images.length > 1 && (
-                <span className="px-2.5 py-1 rounded-full bg-black/60 text-white text-[11px] font-bold">
+                <span className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-bold">
                   {lightbox.index + 1} / {lightbox.images.length}
                 </span>
               )}
@@ -760,7 +852,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                   lightbox.images[lightbox.index],
                   `${safeName(orderNumber)}-image-${lightbox.index + 1}.${imageExt(lightbox.images[lightbox.index])}`
                 )}
-                className="flex items-center gap-1 px-3 py-1 rounded-full bg-white/95 hover:bg-white text-[#3B1F0A] text-[11px] font-bold shadow"
+                className="flex items-center gap-1 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white text-[#3B1F0A] text-xs font-bold shadow"
               >
                 <Download size={12} /> Save
               </button>

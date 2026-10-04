@@ -33,6 +33,15 @@ const OrderItemsModel = {
     return data;
   },
 
+  async deleteByOrderId(orderId) {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('order_id', orderId);
+
+    if (error) throw error;
+  },
+
   async findByOrderId(orderId) {
     const { data, error } = await getSupabase()
       .from(TABLE)

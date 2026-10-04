@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X
+  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Trash2
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, TIME_SLOTS } from './orderSum';
@@ -9,6 +9,7 @@ import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
 import CartReferenceImage from '../shared/CartReferenceImage';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages } from '../shared/orderSlipUploads';
+import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
 // ─────────────────────────────────────────────────────────────
 // Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
@@ -41,13 +42,17 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
-export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
+export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onRemoveItem, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
   const [uploadProgress, setUploadProgress] = useState(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
+  const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
+  const [openSwipeIndex, setOpenSwipeIndex] = useState(null);
+  const swipeStartX = useRef(null);
+  const submissionLockRef = useRef(false);
 
   // FIX (toast): iisang LOCAL na toast bar na ito (walang bagong/hiwalay
   // na file) — ginagamit na ito ngayon PARA SA LAHAT ng dating alert()/
@@ -87,6 +92,30 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   // Ginagamit ng handleUpdateQty (stock/daily-limit warning) ang parehong
   // LOCAL na toast bar sa itaas.
   const showLimitToast = (message) => showToast(message, 'error');
+
+  const toggleCartItemExpanded = (index) => {
+    setExpandedCartIndexes(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const handleCartPointerDown = (event) => {
+    swipeStartX.current = event.clientX;
+  };
+
+  const handleCartPointerMove = (index, event) => {
+    if (swipeStartX.current === null) return;
+    const delta = event.clientX - swipeStartX.current;
+    if (delta < -40) setOpenSwipeIndex(index);
+    else if (delta > 40) setOpenSwipeIndex(null);
+  };
+
+  const handleCartPointerUp = () => {
+    swipeStartX.current = null;
+  };
 
   // Prevent the background POS screen from scrolling while the Order
   // Summary modal (a `fixed inset-0` overlay) is open — now handled inside
@@ -237,11 +266,15 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   };
 
   const handlePlaceOrder = async () => {
+    if (submissionLockRef.current || isProcessing) return;
+    submissionLockRef.current = true;
+
     // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
     const missingImages = cart.flatMap(item =>
       findMissingRequiredSlipImages(item).map(label => `${item.name}: ${label}`)
     );
     if (missingImages.length > 0) {
+      submissionLockRef.current = false;
       showToast(`Please add the required photo(s) — ${missingImages.join(', ')}.`, 'error');
       return;
     }
@@ -326,6 +359,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       console.error('Order slip image upload error:', err);
       setIsProcessing(false);
       setUploadProgress(null);
+      submissionLockRef.current = false;
       showToast(err.message || 'Image upload failed. Please try again.', 'error');
       return;
     }
@@ -502,10 +536,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     } catch (error) {
       console.error('Checkout error:', error);
-      showToast(error.message || 'An error occurred while processing your order.', 'error');
+      showToast(getOrderErrorMessage(error), 'error');
     } finally {
       setIsProcessing(false);
       setUploadProgress(null);
+      submissionLockRef.current = false;
     }
   };
 
@@ -669,12 +704,39 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
               </div>
             ) : (
               cart.map((item, idx) => (
-                <div key={idx} className="flex justify-between items-start gap-3 pb-4 border-b border-[#F1EBE6] last:border-0 last:pb-0">
+                <div key={idx} className="relative overflow-hidden rounded-xl border-b border-[#F1EBE6] last:border-0">
+                  <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center lg:hidden">
+                    <button
+                      type="button"
+                      onClick={() => { onRemoveItem?.(idx); setOpenSwipeIndex(null); }}
+                      className="h-full w-full flex flex-col items-center justify-center gap-1 text-white"
+                      aria-label={`Remove ${item.name}`}
+                    >
+                      <Trash2 size={18} />
+                      <span className="text-[9px] font-bold uppercase tracking-wide">Delete</span>
+                    </button>
+                  </div>
+                  <div
+                    className="relative flex justify-between items-start gap-3 pb-4 last:pb-0 bg-white transition-transform duration-200 ease-out touch-pan-y"
+                    style={{ transform: openSwipeIndex === idx ? 'translateX(-80px)' : 'translateX(0)' }}
+                    onPointerDown={handleCartPointerDown}
+                    onPointerMove={(event) => handleCartPointerMove(idx, event)}
+                    onPointerUp={handleCartPointerUp}
+                    onPointerCancel={handleCartPointerUp}
+                  >
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</p>
-                    {item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
+                    <button
+                      type="button"
+                      onClick={() => toggleCartItemExpanded(idx)}
+                      className="w-full flex items-center justify-between gap-2 text-left"
+                    >
+                      <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
+                      {expandedCartIndexes.has(idx) ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
+                    </button>
+                    {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
+                    {expandedCartIndexes.has(idx) && item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
 
-                    {item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
+                    {expandedCartIndexes.has(idx) && item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
                       <p key={`opt-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
                         <span className="font-medium">{key}:</span> {val}
                       </p>
@@ -687,7 +749,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                         Cart, "Includes: ..." na lang na compact list ng mga product
                         (para sa bundle/package) o "Customized" tag na lang (para sa
                         single item na may sariling slip). */}
-                    {(item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
+                    {expandedCartIndexes.has(idx) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
                       <p className="text-[11px] text-[#8A7264] mt-0.5 leading-snug line-clamp-2">
                         <span className="font-medium">Includes:</span>{' '}
                         {Object.keys(item.order_slip_details)
@@ -695,32 +757,42 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                           .join(', ')}
                       </p>
                     ) : (
-                      item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                      expandedCartIndexes.has(idx) && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
                         <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
                       )
                     )}
 
-                    <CartSlipImages
+                    {expandedCartIndexes.has(idx) && <CartSlipImages
                       item={item}
                       className="mt-1.5"
                       readOnly={!onUpdateItem}
                       onChange={(next) => onUpdateItem?.(idx, { order_slip_details: next })}
-                    />
+                    />}
 
-                    <CartReferenceImage
+                    {expandedCartIndexes.has(idx) && <CartReferenceImage
                       item={item}
                       className="mt-0.5"
                       readOnly={!onUpdateItem}
                       onChange={(file) => onUpdateItem?.(idx, { inspiration_image: file })}
-                    />
+                    />}
 
                     <div className="flex items-center gap-2 mt-2">
                       <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
                       <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
                       <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveItem?.(idx)}
+                        className="ml-2 w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 lg:flex"
+                        aria-label={`Remove ${item.name}`}
+                        title="Remove item"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                   <span className="font-semibold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+                  </div>
                 </div>
               ))
             )}
@@ -787,6 +859,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         <OrderSummaryModal
           show={showSummaryModal}
           onBack={() => { setShowSummaryModal(false); setFormErrors({}); }}
+          onRemoveItem={(index) => {
+            onRemoveItem?.(index);
+            if (cart.length <= 1) setShowSummaryModal(false);
+          }}
           cart={cart}
           orderType={orderType}
           form={form}

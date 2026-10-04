@@ -82,6 +82,15 @@ const OrdersModel = {
     return data;
   },
 
+  async deleteById(id) {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
   async updateStatus(id, status) {
     const { data, error } = await getSupabase()
       .from(TABLE)
