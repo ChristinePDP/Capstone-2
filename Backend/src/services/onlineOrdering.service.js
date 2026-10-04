@@ -603,6 +603,69 @@ export const validateCelebrationMaterialAvailability = async (items = [], orderT
   }
 };
 
+// --- INITIAL STATUS NG ONLINE ORDER PARA SA "BOTH" NA PRODUCTS ---
+//
+// Ang "Both" na product ay pwedeng i-order bilang Pick-up Today (Buy Now)
+// O Pre-Order. Rule sa initial status ng online order:
+//   - Buy Now / Pick-up Today  -> 'Ready'. Naka-depende ito sa AVAILABLE
+//     stock_quantity ng product (produced na), kaya hindi na kailangang
+//     hintayin ang production.
+//   - Pre-Order                -> 'Confirmed'. Hindi pa napo-produce ang
+//     order kahit may stock ang product sa kasalukuyan.
+// 'Ready' lang kapag LAHAT ng product sa order ay "Both"; kung may kahalong
+// product na hindi "Both", 'Confirmed' pa rin (dating behavior).
+//
+// NOTE: i-adjust ang BOTH_ORDER_TYPE_FIELDS kung iba ang pangalan ng column
+// sa products table kung saan naka-save ang order type ng product.
+const BOTH_ORDER_TYPE_FIELDS = [
+  'order_type',
+  'order_types',
+  'availability',
+  'availability_type',
+  'available_order_types',
+];
+
+const normalizeOrderTypeToken = (value) =>
+  String(value || '').toLowerCase().replace(/[^a-z]/g, '');
+
+const isPickupToken = (token) => token.includes('buynow') || token.includes('pickup');
+const isPreOrderToken = (token) => token.includes('preorder');
+
+export const isBothOrderTypeProduct = (product) => {
+  if (!product) return false;
+
+  for (const field of BOTH_ORDER_TYPE_FIELDS) {
+    const raw = product[field];
+    if (raw === null || raw === undefined) continue;
+
+    if (Array.isArray(raw)) {
+      const tokens = raw.map(normalizeOrderTypeToken);
+      if (tokens.some(isPickupToken) && tokens.some(isPreOrderToken)) return true;
+      if (tokens.includes('both')) return true;
+      continue;
+    }
+
+    const token = normalizeOrderTypeToken(raw);
+    if (token === 'both') return true;
+    if (isPickupToken(token) && isPreOrderToken(token)) return true;
+  }
+  return false;
+};
+
+export const resolveInitialOnlineOrderStatus = async (resolvedItems = [], orderType) => {
+  // Pre-Order -> laging 'Confirmed' (di pa napo-produce).
+  if (orderType !== 'Buy Now') return 'Confirmed';
+
+  const productIds = [...new Set(resolvedItems.map(item => item.product_id).filter(Boolean))];
+  if (productIds.length === 0) return 'Confirmed';
+
+  for (const productId of productIds) {
+    const product = await ProductModel.findById(productId);
+    if (!isBothOrderTypeProduct(product)) return 'Confirmed';
+  }
+  return 'Ready';
+};
+
 export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => {
   // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
@@ -617,6 +680,15 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
     throw createOrderError('items', itemsError);
+  }
+
+  // Initial status: 'Ready' para sa "Both" na product kapag Pick-up Today,
+  // 'Confirmed' para sa Pre-Order (at sa lahat ng iba pa).
+  let initialStatus = 'Confirmed';
+  try {
+    initialStatus = await resolveInitialOnlineOrderStatus(resolvedItems, payload.orderType);
+  } catch (statusError) {
+    console.error('[ORDER] Failed to resolve initial status, defaulting to Confirmed:', statusError);
   }
 
   let customerData;
@@ -635,7 +707,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     customer_id: customerData.id,
     order_type: payload.orderType,
     source: 'online',
-    status: 'Confirmed',
+    status: initialStatus,
     subtotal: payload.payment.grandTotal,
     grand_total: payload.payment.grandTotal,
     payment_type: payload.payment.type,

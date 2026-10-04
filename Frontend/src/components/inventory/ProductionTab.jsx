@@ -123,7 +123,8 @@ function PreOrderProduction({ tabBar }) {
             let needs = [];
             if (recipe) {
               const yieldQty = Number(recipe.yield) > 0 ? Number(recipe.yield) : 1;
-              const batches = Math.ceil(qty / yieldQty);
+              // Prorated: ayon sa aktwal na ino-order (hindi buong batch).
+              const batches = qty / yieldQty;
               needs = (recipe.ingredients || []).map(req => {
                 const stockItem = findInventoryItem(req.name, req.itemType, ingredients, materials);
                 const reqUnit = normalizeUnit(req.unit || stockItem?.unit || 'pcs');
@@ -184,10 +185,16 @@ function PreOrderProduction({ tabBar }) {
         };
       })
       .filter(o => o.items.length > 0)
+      // Hidden sort: pinakamalapit na pickup date muna (kasama ang overdue sa
+      // pinakauna). Walang pickup date = pinakahuli. Kapag pareho ang petsa,
+      // sunod ang order number para stable ang pagkakasunod.
       .sort((a, b) => {
-        const da = a.pickup ? new Date(a.pickup).getTime() : Infinity;
-        const db = b.pickup ? new Date(b.pickup).getTime() : Infinity;
-        return da - db;
+        const ta = a.pickup ? new Date(a.pickup).getTime() : NaN;
+        const tb = b.pickup ? new Date(b.pickup).getTime() : NaN;
+        const da = Number.isNaN(ta) ? Number.POSITIVE_INFINITY : ta;
+        const db = Number.isNaN(tb) ? Number.POSITIVE_INFINITY : tb;
+        if (da !== db) return da < db ? -1 : 1; // iwas NaN sa Infinity - Infinity
+        return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
       });
   }, [orders, recipes, ingredients, materials, productsById]);
 
@@ -231,13 +238,15 @@ function PreOrderProduction({ tabBar }) {
     const payload = {
       order_id: produceTarget.id,
       order_number: produceTarget.number,
-      items: produceTarget.items.map(it => ({
-        product_id: it.productId,
-        product_name: it.productName,
-        recipe_id: it.recipe?.id,
-        quantity: it.qty,
-        batches: Math.ceil(it.qty / (Number(it.recipe?.yield) > 0 ? Number(it.recipe.yield) : 1)),
-      })),
+      items: produceTarget.items.map(it => {
+        // Ang backend ang nagko-compute ng prorated na ibabawas (qty ÷ yield).
+        return {
+          product_id: it.productId,
+          product_name: it.productName,
+          recipe_id: it.recipe?.id,
+          quantity: it.qty,
+        };
+      }),
       expenses: cleaned,
       total_expenses: roundQty(cleaned.reduce((sum, e) => sum + e.amount, 0)),
     };

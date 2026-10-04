@@ -1,5 +1,5 @@
 // src/components/onlineOrdering/Checkout.jsx
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Trash2 } from 'lucide-react';
@@ -29,7 +29,7 @@ function toDateStr(year, month, day) {
 }
 
 // Self-contained month calendar used for Pre-Order date selection.
-function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect, onClose }) {
+function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, onSelect, onClose }) {
   const initial = selectedDate || minDate || todayDate;
   const [iy, im] = initial.split('-').map(Number);
   const [viewYear, setViewYear] = useState(iy);
@@ -53,6 +53,38 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
     cells.push({ day, inMonth: false, dateStr: null });
   }
 
+  // Naka-portal sa <body> + position: fixed para hindi maputol ng scrollable/
+  // overflow-hidden na parent. Sa ibaba ng trigger kung kasya; kung hindi, sa
+  // itaas; tapos i-clamp sa loob ng viewport para hindi kailanman masagad/maputol.
+  const [pos, setPos] = useState({ top: 0, left: 0, ready: false });
+  const reposition = () => {
+    const trigger = triggerRef?.current;
+    const pop = popRef?.current;
+    if (!trigger || !pop) return;
+    const rect = trigger.getBoundingClientRect();
+    const popH = pop.offsetHeight;
+    const popW = pop.offsetWidth;
+    const GAP = 4;
+    const MARGIN = 8;
+    const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+    const spaceAbove = rect.top - MARGIN;
+    let top = (spaceBelow >= popH + GAP || spaceBelow >= spaceAbove)
+      ? rect.bottom + GAP
+      : rect.top - popH - GAP;
+    top = Math.max(MARGIN, Math.min(top, window.innerHeight - popH - MARGIN));
+    const left = Math.max(MARGIN, Math.min(rect.left, window.innerWidth - popW - MARGIN));
+    setPos({ top, left, ready: true });
+  };
+  useLayoutEffect(() => {
+    reposition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [viewYear, viewMonth]);
+
   const canGoPrev = viewYear > iy || viewMonth > im - 1 ? true : `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}` > minDate.slice(0, 7);
   const goPrev = () => {
     if (viewMonth === 0) { setViewYear(v => v - 1); setViewMonth(11); }
@@ -63,8 +95,12 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
     else setViewMonth(v => v + 1);
   };
 
-  return (
-    <div className={`absolute z-20 bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-3 w-[280px] ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+  return createPortal(
+    <div
+      ref={popRef}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, visibility: pos.ready ? 'visible' : 'hidden' }}
+      className="z-[6000] bg-white border border-[#EAE4E0] rounded-xl shadow-lg p-3 w-[280px]"
+    >
       <div className="flex items-center justify-between mb-2">
         <button type="button" onClick={goPrev} disabled={!canGoPrev} className={`p-1 rounded-lg hover:bg-[#F5EFEB] ${!canGoPrev ? 'opacity-30 cursor-not-allowed' : ''}`}>
           <ChevronLeft size={16} />
@@ -104,7 +140,8 @@ function MonthCalendar({ selectedDate, minDate, todayDate, openUpward, onSelect,
           );
         })}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -124,6 +161,17 @@ function getSlotLabel(value) {
 // nabubura ang nasulat na niyang detalye dito. Cleared lang ito pagka-successful
 // na ng order (tingnan sa Confirm.jsx).
 const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
+
+// Ang order type (Pick-up Today / Pre-Order) ay pinipili na sa CART ng Menu.jsx
+// at dito na lang binabasa — wala nang switch sa Checkout.
+const ORDER_TYPE_STORAGE_KEY = 'aileen_cake_max_order_type';
+function readStoredOrderType() {
+  try {
+    return localStorage.getItem(ORDER_TYPE_STORAGE_KEY) === 'Pre-Order' ? 'Pre-Order' : 'Buy Now';
+  } catch (err) {
+    return 'Buy Now';
+  }
+}
 
 function loadCheckoutDraft() {
   try {
@@ -145,23 +193,37 @@ export default function Checkout({ cart, setCart }) {
   // din ang isang Pre-order item (may required lead time) — kaya kapag may
   // isang Pre-order item, ang buong order ay dapat Pre-order na rin, hindi
   // basta ma-o-override ng ibang item na 'Pick-up Today'/'Both'.
-  const forcedPickupType = hasPreOrder ? 'later' : (hasPickUpToday ? 'now' : 'now');
+  // Para sa puro "Both" na cart, ang pinili sa cart switch ng Menu ang gagamitin.
+  const pickupType = hasPreOrder
+    ? 'later'
+    : hasPickUpToday
+      ? 'now'
+      : (readStoredOrderType() === 'Pre-Order' ? 'later' : 'now');
   
   const today = new Date();
   const todayString = new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
 
   const draft = loadCheckoutDraft();
 
-  const [form, setForm] = useState(() => draft?.form ?? {
-    name: '',
-    phone: '',
-    altPhone: '',
-    pickupDate: forcedPickupType === 'now' ? todayString : '',
-    pickupTime: '',
-    instructions: '',
+  // Kung nagbago ang order type mula nang ma-save ang draft (bumalik sa Menu at
+  // nag-switch), i-reset ang pickup date/time dahil magkaiba ang rules nila.
+  const draftOrderTypeChanged = Boolean(draft?.pickupType) && draft.pickupType !== pickupType;
+  const [form, setForm] = useState(() => {
+    if (draft?.form) {
+      return draftOrderTypeChanged
+        ? { ...draft.form, pickupDate: pickupType === 'now' ? todayString : '', pickupTime: '' }
+        : draft.form;
+    }
+    return {
+      name: '',
+      phone: '',
+      altPhone: '',
+      pickupDate: pickupType === 'now' ? todayString : '',
+      pickupTime: '',
+      instructions: '',
+    };
   });
 
-  const [pickupType, setPickupType] = useState(() => draft?.pickupType ?? forcedPickupType);
   const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [expandedSummaryIndexes, setExpandedSummaryIndexes] = useState(() => new Set());
@@ -192,9 +254,9 @@ export default function Checkout({ cart, setCart }) {
     });
   };
   const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarOpenUpward, setCalendarOpenUpward] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
+  const calendarPopRef = useRef(null);
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
   // timeDropdownRef = wrapper around the trigger button ONLY. The dropdown
   // list itself is portaled to <body> (see timeDropdownListRef below) so it
@@ -214,7 +276,10 @@ export default function Checkout({ cart, setCart }) {
   useEffect(() => {
     if (!showCalendar) return;
     const handleClickOutside = (e) => {
-      if (calendarWrapRef.current && !calendarWrapRef.current.contains(e.target)) {
+      // Naka-portal ang calendar sa <body>, kaya i-check din ang popover mismo.
+      const insideTrigger = calendarWrapRef.current && calendarWrapRef.current.contains(e.target);
+      const insidePopover = calendarPopRef.current && calendarPopRef.current.contains(e.target);
+      if (!insideTrigger && !insidePopover) {
         setShowCalendar(false);
       }
     };
@@ -310,16 +375,35 @@ export default function Checkout({ cart, setCart }) {
     }
   }, [form, pickupType, paymentType]);
 
-  // Kung bumalik sa Menu para magdagdag pa ng item (hal. nagdagdag ng
-  // Pre-order item), baka hindi na valid 'yung naka-save na pickupType sa
-  // draft laban sa BAGONG laman ng cart — i-correct agad.
-  useEffect(() => {
-    if (hasPreOrder && pickupType !== 'later') {
-      setPickupType('later');
-    } else if (!hasPreOrder && hasPickUpToday && pickupType !== 'now') {
-      setPickupType('now');
-    }
-  }, [hasPreOrder, hasPickUpToday]);
+  // Stock/limit check ayon sa NAPILING order type. Ang cart item ay may dalang
+  // buy_now_available_stock / pre_order_available_stock galing sa Menu. Kapag
+  // wala (hal. bundle/package), nilalaktawan; ang backend ang huling gate.
+  const stockIssues = useMemo(() => {
+    const field = pickupType === 'now' ? 'buy_now_available_stock' : 'pre_order_available_stock';
+    const label = pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order';
+    const qtyById = {};
+    cart.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
+    const seen = new Set();
+    const issues = [];
+    cart.forEach(i => {
+      if (seen.has(i.id)) return;
+      seen.add(i.id);
+      if (i.type === 'bundle' || i.type === 'package') return;
+      const limit = i[field];
+      if (limit === undefined || limit === null) return;
+      if (qtyById[i.id] > Number(limit)) {
+        issues.push({ name: i.name, limit: Number(limit), qty: qtyById[i.id], label });
+      }
+    });
+    return issues;
+  }, [cart, pickupType]);
+
+  const stockIssueMessage = (issue) => (
+    // Hindi ibinabanggit ang eksaktong available stock sa customer.
+    issue.limit <= 0
+      ? `${issue.name} is not available for ${issue.label}.`
+      : `${issue.name} is not available in that quantity for ${issue.label}.`
+  );
 
   const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
@@ -342,6 +426,12 @@ export default function Checkout({ cart, setCart }) {
     // 1. HIGHEST PRIORITY: Check if trying to pick up today when shop is already closed
     if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
       return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+    }
+
+    // 1b. Safety net lang (ang pangunahing stock guard ay nasa cart ng Menu na):
+    // para sa stale na cart kung nagbago ang stock habang nasa Checkout.
+    if (stockIssues.length > 0) {
+      return setToastMessage(`${stockIssueMessage(stockIssues[0])} Please go back to the menu and adjust your cart.`);
     }
 
     // 2. Check if all required fields are filled out, and their formats.
@@ -624,32 +714,15 @@ if (data.success && data.checkoutUrl) {
                   </div>
                   <div className="w-full h-px bg-[#EAE4E0] mb-4 shrink-0"></div>
 
-                  <div className="flex bg-[#F5EFEB] rounded-xl p-1 mb-4 w-full shrink-0">
-                    <button
-                      onClick={() => {
-                        if (hasPreOrder) return;
-                        // Re-sync date to the live clock whenever switching to Pick-up Today.
-                        const { dateStr } = getLiveNow();
-                        setPickupType('now');
-                        setForm({...form, pickupDate: dateStr, pickupTime: ''});
-                        setErrors(prev => ({...prev, pickupDate: false, pickupTime: false}));
-                      }}
-                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      Pick-up Today
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (hasPickUpToday && !hasPreOrder) return;
-                        setPickupType('later');
-                        setForm({...form, pickupDate: '', pickupTime: ''});
-                        setErrors(prev => ({...prev, pickupDate: false, pickupTime: false}));
-                      }}
-                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${pickupType === 'later' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'} ${hasPickUpToday && !hasPreOrder ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      Pre-Order
-                    </button>
-                  </div>
+                  {stockIssues.length > 0 && (
+                    <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700 shrink-0">
+                      <p className="font-bold mb-1 flex items-center gap-1.5"><AlertCircle size={13} /> Not enough for {stockIssues[0].label}</p>
+                      <ul className="list-disc pl-4 space-y-0.5">
+                        {stockIssues.map(i => <li key={i.name}>{stockIssueMessage(i)}</li>)}
+                      </ul>
+                      <p className="mt-1 text-red-600">Go back to the menu to reduce the quantity or change the order type.</p>
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-3.5 shrink-0">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -717,13 +790,6 @@ if (data.success && data.checkoutUrl) {
                                     type="button"
                                     ref={calendarTriggerRef}
                                     onClick={() => {
-                                      if (!showCalendar && calendarTriggerRef.current) {
-                                        const rect = calendarTriggerRef.current.getBoundingClientRect();
-                                        const CALENDAR_HEIGHT_ESTIMATE = 340;
-                                        const spaceBelow = window.innerHeight - rect.bottom;
-                                        const spaceAbove = rect.top;
-                                        setCalendarOpenUpward(spaceBelow < CALENDAR_HEIGHT_ESTIMATE && spaceAbove > spaceBelow);
-                                      }
                                       setShowCalendar(s => !s);
                                     }}
                                     className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
@@ -738,7 +804,8 @@ if (data.success && data.checkoutUrl) {
                                       selectedDate={form.pickupDate}
                                       minDate={minPreOrderDate}
                                       todayDate={getLiveNow().dateStr}
-                                      openUpward={calendarOpenUpward}
+                                      triggerRef={calendarTriggerRef}
+                                      popRef={calendarPopRef}
                                       onSelect={(dateStr) => {
                                         setForm(f => ({...f, pickupDate: dateStr}));
                                         setErrors(prev => ({...prev, pickupDate: false}));
@@ -828,13 +895,14 @@ if (data.success && data.checkoutUrl) {
                       <div className="min-w-0">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
                           <textarea
-                            rows={2}
+                            rows={5}
                             placeholder="Anything else we should know?"
                             maxLength={300}
                             value={form.instructions}
                             onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
-                            className="block w-full max-w-full min-w-0 resize-none border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-xs leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                           />
+                          <p className="mt-1 text-right text-[10px] text-[#B7A99F]">{(form.instructions || '').length}/300</p>
                       </div>
 
                   </div>

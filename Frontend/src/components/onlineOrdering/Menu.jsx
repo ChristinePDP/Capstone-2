@@ -1177,7 +1177,7 @@ function hasDailyLimitSet(item) {
 // walang sariling limit. Para sa bawat component: floor(available ÷ kailangan
 // kada 1 bundle/package); ang pinakamaliit sa lahat ang bilang na pwedeng i-order.
 // `components`: [{ product, qty }] (product galing sa allProducts, may available_stock).
-function computeComponentStock(components = [], orderType = 'Both') {
+function computeComponentStock(components = [], orderType = 'Both', stockField = null) {
   const byId = new Map();
   for (const { product, qty } of components) {
     if (!product) continue;
@@ -1192,8 +1192,10 @@ function computeComponentStock(components = [], orderType = 'Both') {
 
   const stock = Math.min(...tracked.map(({ product: p, need }) => {
     const basis = hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity;
-    const preOrder = orderType === 'Pre-order' ? p.pre_order_available_stock : undefined;
-    const available = preOrder ?? p.available_stock ?? basis ?? 0;
+    const typed = stockField
+      ? p[stockField]
+      : (orderType === 'Pre-order' ? p.pre_order_available_stock : undefined);
+    const available = typed ?? p.available_stock ?? basis ?? 0;
     return Math.floor(Number(available) / need);
   }));
   return { stock: Math.max(0, stock), tracked: true };
@@ -1206,10 +1208,106 @@ function isQuantityTracked(item) {
   return hasDailyLimitSet(item) || (item.stock_quantity !== null && item.stock_quantity !== undefined);
 }
 
-function getQuantityLimit(item) {
-  if (item.type === 'bundle' || item.type === 'package') return item.available_stock;
+// Kapag may `orderType` ('Buy Now' | 'Pre-Order'), ang limit ay ayon sa napiling
+// order type: buy_now_available_stock (physical stock_quantity) para sa
+// Pick-up Today, pre_order_available_stock (daily_limit slots) para sa Pre-Order.
+// Kapag wala, dating general `available_stock` (para sa product cards).
+function getQuantityLimit(item, orderType) {
+  const typedField = orderType === 'Pre-Order'
+    ? 'pre_order_available_stock'
+    : (orderType === 'Buy Now' ? 'buy_now_available_stock' : null);
+
+  if (item.type === 'bundle' || item.type === 'package') {
+    return (typedField && item[typedField]) ?? item.available_stock;
+  }
   const basis = hasDailyLimitSet(item) ? item.daily_limit : item.stock_quantity;
-  return item.available_stock ?? basis ?? 0;
+  return (typedField ? item[typedField] : undefined) ?? item.available_stock ?? basis ?? 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ORDER TYPE (Pick-up Today / Pre-Order) — ang switch ay nasa CART na (gaya ng
+// POS cart), hindi na sa Checkout. Dito ginagawa ang stock guard para sa
+// "Both" na products: ang limit ay ayon sa napiling order type, kaya hindi
+// makakalusot ang 10 pcs na Pick-up Today kung 0 ang physical stock.
+// Ang napiling order type ay sine-save sa localStorage para mabasa ng Checkout.
+// ─────────────────────────────────────────────────────────────
+const ORDER_TYPE_STORAGE_KEY = 'aileen_cake_max_order_type';
+const ORDER_TYPE_LABELS = { 'Buy Now': 'Pick-up Today', 'Pre-Order': 'Pre-Order' };
+
+function readStoredOrderType() {
+  try {
+    return localStorage.getItem(ORDER_TYPE_STORAGE_KEY) === 'Pre-Order' ? 'Pre-Order' : 'Buy Now';
+  } catch (err) {
+    return 'Buy Now';
+  }
+}
+
+// Pre-order ALWAYS wins (parehong rule na dating nasa Checkout): kapag may
+// strict Pre-order item, Pre-Order na ang buong order; kapag may strict
+// Pick-up Today item (at walang Pre-order), Pick-up Today. Kapag puro "Both",
+// null = malaya ang customer na pumili.
+function getForcedOrderType(cartItems = []) {
+  if (cartItems.some(i => i.order_type === 'Pre-order')) return 'Pre-Order';
+  if (cartItems.some(i => i.order_type === 'Pick-up Today')) return 'Buy Now';
+  return null;
+}
+
+// Unang line na lumalagpas sa limit ng napiling order type (total qty kada
+// product id, kasama ang lahat ng cart lines nito). `onlyId` = isa lang ang ichecheck.
+function findStockIssue(cartItems = [], orderType, onlyId) {
+  const qtyById = {};
+  cartItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
+  const seen = new Set();
+  for (const item of cartItems) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    if (onlyId !== undefined && item.id !== onlyId) continue;
+    if (!isQuantityTracked(item)) continue;
+    const limit = Number(getQuantityLimit(item, orderType));
+    if (Number.isNaN(limit)) continue;
+    if (qtyById[item.id] > limit) {
+      return { name: item.name, limit, qty: qtyById[item.id] };
+    }
+  }
+  return null;
+}
+
+function stockIssueMessage(issue, orderType) {
+  const label = ORDER_TYPE_LABELS[orderType] || orderType;
+  // Hindi ibinabanggit ang eksaktong available stock sa customer.
+  return issue.limit <= 0
+    ? `${issue.name} is not available for ${label}.`
+    : `${issue.name} is not available in that quantity for ${label}.`;
+}
+
+function OrderTypeSwitch({ value, forcedType, onChange }) {
+  return (
+    <div>
+      <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
+        {['Buy Now', 'Pre-Order'].map(type => {
+          const locked = Boolean(forcedType) && forcedType !== type;
+          return (
+            <button
+              key={type}
+              type="button"
+              disabled={locked}
+              onClick={() => onChange(type)}
+              className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
+                value === type ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
+              } ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {ORDER_TYPE_LABELS[type]}
+            </button>
+          );
+        })}
+      </div>
+      {forcedType && (
+        <p className="mt-1.5 text-[11px] text-[#8A7264]">
+          An item in your cart is {ORDER_TYPE_LABELS[forcedType]} only.
+        </p>
+      )}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1271,6 +1369,39 @@ export default function Menu({ cart, setCart }) {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ message });
     toastTimerRef.current = setTimeout(() => setToast(null), 3200);
+  };
+
+  // --- ORDER TYPE (Pick-up Today / Pre-Order) SWITCH NG CART ---
+  const [selectedOrderType, setSelectedOrderType] = useState(readStoredOrderType);
+  const forcedOrderType = getForcedOrderType(cart);
+  const effectiveOrderType = forcedOrderType ?? selectedOrderType;
+
+  // Kapag may forced type, sundan ito (para hindi bumalik sa lumang piniling type
+  // pagka-alis ng forced item); kapag walang laman ang cart, balik sa Pick-up Today.
+  useEffect(() => {
+    if (forcedOrderType) setSelectedOrderType(forcedOrderType);
+    else if (cart.length === 0) setSelectedOrderType('Buy Now');
+  }, [forcedOrderType, cart.length]);
+
+  // I-save para mabasa ng Checkout (wala nang switch doon).
+  useEffect(() => {
+    try {
+      localStorage.setItem(ORDER_TYPE_STORAGE_KEY, effectiveOrderType);
+    } catch (err) {
+      console.error('Failed to save order type:', err);
+    }
+  }, [effectiveOrderType]);
+
+  // GUARD: hindi puwedeng lumipat ng order type kung hindi kaya ng stock/limit
+  // ng kasalukuyang cart sa bagong type.
+  const handleOrderTypeChange = (nextType) => {
+    if (forcedOrderType || nextType === effectiveOrderType) return;
+    const issue = findStockIssue(cart, nextType);
+    if (issue) {
+      showToast(`Can't switch to ${ORDER_TYPE_LABELS[nextType]}. ${stockIssueMessage(issue, nextType)}`);
+      return;
+    }
+    setSelectedOrderType(nextType);
   };
 
   useEffect(() => {
@@ -1338,13 +1469,16 @@ export default function Menu({ cart, setCart }) {
            if (packageComponents.length !== (b.package_items || []).length) return null;
 
            const packageOrderType = b.order_type || 'Both';
+           const packageStockComponents = (b.package_items || []).map(pi => ({
+             product: allProducts.find(p => String(p.id) === String(pi.product_id)),
+             qty: pi.quantity
+           }));
            const { stock: packageStock, tracked: isPackageTracked } = computeComponentStock(
-             (b.package_items || []).map(pi => ({
-               product: allProducts.find(p => String(p.id) === String(pi.product_id)),
-               qty: pi.quantity
-             })),
+             packageStockComponents,
              packageOrderType
            );
+           const packageBuyNowStock = computeComponentStock(packageStockComponents, 'Both', 'buy_now_available_stock').stock;
+           const packagePreOrderStock = computeComponentStock(packageStockComponents, 'Both', 'pre_order_available_stock').stock;
 
            return {
               ...b,
@@ -1362,6 +1496,8 @@ export default function Menu({ cart, setCart }) {
               order_type: packageOrderType, 
               pricing_mode: 'fixed',
               available_stock: Math.max(0, packageStock), 
+              buy_now_available_stock: Math.max(0, packageBuyNowStock),
+              pre_order_available_stock: Math.max(0, packagePreOrderStock),
               is_tracked: isPackageTracked,
               order_slip_fields: [],
               price_groups: [],
@@ -1373,13 +1509,16 @@ export default function Menu({ cart, setCart }) {
         if (bundleProducts.length !== (b.product_ids || []).length) return null;
         const bundleOrderType = b.order_type || resolveBundleOrderType(bundleProducts);
         
+        const bundleStockComponents = (b.product_ids || []).map(id => ({
+          product: allProducts.find(p => String(p.id) === String(id)),
+          qty: 1
+        }));
         const { stock: bundleStock, tracked: isBundleTracked } = computeComponentStock(
-          (b.product_ids || []).map(id => ({
-            product: allProducts.find(p => String(p.id) === String(id)),
-            qty: 1
-          })),
+          bundleStockComponents,
           bundleOrderType
         );
+        const bundleBuyNowStock = computeComponentStock(bundleStockComponents, 'Both', 'buy_now_available_stock').stock;
+        const bundlePreOrderStock = computeComponentStock(bundleStockComponents, 'Both', 'pre_order_available_stock').stock;
 
         return {
           id: `bundle-${b.id}`,
@@ -1396,6 +1535,8 @@ export default function Menu({ cart, setCart }) {
           order_type: bundleOrderType,
           pricing_mode: 'fixed',
           available_stock: Math.max(0, bundleStock),
+          buy_now_available_stock: Math.max(0, bundleBuyNowStock),
+          pre_order_available_stock: Math.max(0, bundlePreOrderStock),
           is_tracked: isBundleTracked,
           type: 'bundle',
           bundleId: b.id,
@@ -1428,14 +1569,18 @@ export default function Menu({ cart, setCart }) {
         JSON.stringify(i.selected_price_options) === currentOptionsStr
       );
 
-      const currentQtyInCart = prev.filter(i => i.id === item.id).reduce((s, i) => s + i.qty, 0);
-
-      if (isQuantityTracked(item)) {
-        const limit = getQuantityLimit(item);
-        if (currentQtyInCart + item.qty > limit) {
-          showToast(`Sorry, you've reached the available limit for ${item.name}.`);
-          return prev;
-        }
+      // Stock guard ayon sa order type NA MAGIGING epektibo pagkatapos idagdag
+      // ang item (puwedeng ma-force sa Pre-Order ng bagong item). Kapag nagbago
+      // ang effective type, lahat ng lines ang ine-check; kung hindi, ang item lang.
+      const nextCart = idx >= 0
+        ? prev.map((c, n) => (n === idx ? { ...c, qty: c.qty + item.qty } : c))
+        : [...prev, item];
+      const prevType = getForcedOrderType(prev) ?? selectedOrderType;
+      const nextType = getForcedOrderType(nextCart) ?? selectedOrderType;
+      const issue = findStockIssue(nextCart, nextType, nextType === prevType ? item.id : undefined);
+      if (issue) {
+        showToast(`Sorry, ${stockIssueMessage(issue, nextType)}`);
+        return prev;
       }
 
       if (idx >= 0) {
@@ -1516,11 +1661,11 @@ export default function Menu({ cart, setCart }) {
     const item = newCart[index];
     const newQty = item.qty + delta;
 
-    if (isQuantityTracked(item) && delta > 0) {
-      const currentQtyInCart = prev.filter(i => i.id === item.id).reduce((s, i) => s + i.qty, 0);
-      const limit = getQuantityLimit(item);
-      if (currentQtyInCart + delta > limit) {
-        showToast(`Limit reached for ${item.name}.`);
+    if (delta > 0) {
+      const nextCart = prev.map((c, n) => (n === index ? { ...c, qty: newQty } : c));
+      const issue = findStockIssue(nextCart, effectiveOrderType, item.id);
+      if (issue) {
+        showToast(stockIssueMessage(issue, effectiveOrderType));
         return prev;
       }
     }
@@ -1810,6 +1955,9 @@ export default function Menu({ cart, setCart }) {
             </div>
           ) : (
             <>
+              <div className="px-6 pt-4 shrink-0">
+                <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} />
+              </div>
               <div className="px-6 py-4 flex-1 overflow-y-auto flex flex-col gap-4">
                 {cart.map((item, i) => (
                   <CartItemRow
@@ -1868,6 +2016,10 @@ export default function Menu({ cart, setCart }) {
                 <p className="text-xs text-[#8A7264] mt-0.5">{cartCount} item{cartCount > 1 ? 's' : ''}</p>
               </div>
               <button onClick={() => setIsMobileCartOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#EAE4E0] transition-colors shrink-0"><X size={20} /></button>
+            </div>
+
+            <div className="px-5 pt-4 shrink-0">
+              <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} />
             </div>
 
             <div className="overflow-y-auto p-5 flex flex-col gap-4">

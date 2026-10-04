@@ -7,6 +7,7 @@ import { ProductionModel } from '../model/production.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
 import { WasteModel } from '../model/waste.model.js';
 import { ProductModel } from '../model/product.model.js';
+import { OrdersService } from './orders.service.js';
 
 const ProductService = {
   getProducts: async (filters) => {
@@ -331,7 +332,10 @@ const ProductionService = {
 
   // addToProductStock = false para sa Pre-Order: ginagawa per order ang cake,
   // hindi ito pumapasok sa products stock ng Buy Now.
-  confirmBatch: async (body, { addToProductStock = true } = {}) => {
+  // deductionBatches = (opsyonal) ibang multiplier para sa ibabawas na ingredients,
+  // hal. prorated na 0.5 batch sa Pre-Order. Default: body.batches.
+  confirmBatch: async (body, { addToProductStock = true, deductionBatches } = {}) => {
+    const deductFactor = Number.isFinite(deductionBatches) ? deductionBatches : body.batches;
     const { data: recipe, error: recipeErr } = await RecipeModel.findWithIngredients(body.recipe_id);
     if (recipeErr || !recipe) throw new AppError('Recipe not found', 404);
     if (!Array.isArray(recipe.recipe_ingredients) || recipe.recipe_ingredients.length === 0
@@ -343,7 +347,7 @@ const ProductionService = {
     const deductions = recipe.recipe_ingredients.map(ri => ({
       item_type: ri.item_type,
       item_name: ri.item_name,
-      quantity:  +(ri.quantity * body.batches).toFixed(4),
+      quantity:  +(ri.quantity * deductFactor).toFixed(4),
       unit:      ri.unit,
     }));
 
@@ -427,6 +431,22 @@ const ProductionService = {
     if (items.some(it => !it.recipe_id)) {
       throw new AppError('May item na walang Production Formula — gumawa muna ng formula.', 400);
     }
+    if (items.some(it => !(Number(it.quantity) > 0))) {
+      throw new AppError('May item na invalid ang quantity.', 400);
+    }
+
+    // Guard laban sa double production: Confirmed Pre-Order lang ang
+    // puwedeng i-produce. Kapag Ready na (na-produce na dati), hihinto dito.
+    const order = await OrdersService.getOrderById(body.order_id);
+    if (order.order_type !== 'Pre-Order') {
+      throw new AppError('Pre-Order lang ang puwedeng i-produce dito.', 400);
+    }
+    if (order.status !== 'Confirmed') {
+      throw new AppError(
+        `Hindi na puwedeng i-produce — ang status ng order ay "${order.status}" na.`,
+        409
+      );
+    }
 
     // I-validate ang expenses BAGO gumalaw ang stock para hindi
     // mabawasan ang ingredients tapos mag-e-error pala sa expenses.
@@ -434,19 +454,25 @@ const ProductionService = {
 
     const logs = [];
     for (const it of items) {
-      const batches = Number(it.batches);
-      if (!Number.isFinite(batches) || batches <= 0) {
-        throw new AppError(`Invalid ang batches ng "${it.product_name}".`, 400);
-      }
+      // PRORATED: ang ingredients ay ayon sa aktwal na ino-order, hindi sa
+      // buong batch. Per piraso = recipe qty ÷ yield; ang ibabawas ay
+      // per piraso × quantity. Kaya 1 cake order, kahit 2 ang yield, ay
+      // kalahati lang ng recipe ang ibabawas.
+      const qty = Number(it.quantity);
+      const { data: recipeRow, error: recipeErr } = await RecipeModel.findById(it.recipe_id);
+      if (recipeErr || !recipeRow) throw new AppError(`Recipe not found for "${it.product_name}".`, 404);
+      const yieldQty = Number(recipeRow.yield_quantity) > 0 ? Number(recipeRow.yield_quantity) : 1;
+      const batchFraction = qty / yieldQty;
+
       const log = await ProductionService.confirmBatch({
         recipe_id: it.recipe_id,
         product_id: it.product_id,
         product_name: it.product_name,
-        batches,
-        total_produced: Number(it.quantity) || 0,
-        yield_unit: it.yield_unit || 'pcs',
+        batches: Math.max(1, Math.ceil(batchFraction)), // para sa log (buong bilang)
+        total_produced: qty,                            // eksaktong ino-order = nagawa
+        yield_unit: recipeRow.yield_unit || 'pcs',
         notes: `Pre-Order ${body.order_number || body.order_id}`,
-      }, { addToProductStock: false });
+      }, { addToProductStock: false, deductionBatches: batchFraction });
       logs.push(log);
     }
 
@@ -454,6 +480,20 @@ const ProductionService = {
       order_number: body.order_number,
       expenses,
     });
+
+    // Tapos na ang production at expenses → Confirmed ➜ Ready.
+    // Dumadaan sa OrdersService.changeOrderStatus para gumana rin ang
+    // existing logic doon (hal. bawas sa Celebration Material stock
+    // kapag 'Ready' ang isang Pre-Order).
+    try {
+      await OrdersService.changeOrderStatus(body.order_id, 'Ready');
+    } catch (err) {
+      throw new AppError(
+        'Na-log na ang production at expenses, pero hindi na-update ang status ng order. '
+        + 'Palitan ito ng "Ready" sa Orders para hindi maulit ang production.',
+        500
+      );
+    }
 
     return { logs, expenses: savedExpenses };
   },

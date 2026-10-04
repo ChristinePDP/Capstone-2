@@ -485,27 +485,17 @@ export function AppProvider({ children }) {
   };
 
   // ── Pre-Order production ────
-  // Nagbabawas ng ingredients, nagla-log ng production, at nire-record ang
-  // extra/theme expenses ng order. Pagkatapos, minamarkahang 'Ready' ang
-  // order para mawala sa listahan ng Pre-Order production at hindi na
-  // maulit (double deduction).
+  // Ang backend na ang nagbabawas ng ingredients, nagla-log ng production,
+  // nagre-record ng extra/theme expenses, at nagpapalit ng status ng order
+  // mula Confirmed ➜ Ready. Dito, refresh na lang ng data.
   const producePreOrder = async (payload) => {
     try {
       await apiClient.post('/production', { type: 'pre-order', ...payload });
     } catch (err) {
+      fetchAll().catch(() => {}); // may bahagi na baka na-save na kahit pumalya
       throw new Error(getErrMsg(err, 'Failed to produce pre-order'), { cause: err });
     }
 
-    try {
-      await updateOrderStatus(payload.order_id, 'Ready');
-    } catch (err) {
-      await fetchAll();
-      throw new Error(
-        'Na-log na ang production at expenses, pero hindi na-update ang status ng order. '
-        + 'Palitan ito ng "Ready" sa Orders para hindi maulit ang production.',
-        { cause: err }
-      );
-    }
     await fetchAll();
   };
 
