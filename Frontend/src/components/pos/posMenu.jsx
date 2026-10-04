@@ -1148,9 +1148,14 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
   }, [bundleItems.length]);
   
   const renderProductGrid = () => {
-    const categoriesToRender = activeCategory === 'All' 
+    const isAllView = activeCategory === 'All';
+    const categoriesToRender = isAllView
       ? categories.filter(c => c !== 'All') 
       : [activeCategory];
+    // Sa sm pataas, may label na ang mismong tab kaya hindi na uulitin ang pangalan ng category
+    // sa loob ng menu kapag specific category ang napili. Sa mobile (icon-only tabs) nananatili ito
+    // para malaman kung ano ang ibig sabihin ng icon.
+    const hideSectionHeaderOnWide = !isAllView;
 
     const hasAnyMatch = categoriesToRender.some(cat => displayItems.some(p => p.category === cat));
     if (isSearching && !hasAnyMatch) {
@@ -1167,14 +1172,20 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       );
     }
 
+    // "All": lahat ng category ay walang laman -> isang pangkalahatang notice lang
+    if (isAllView && !isSearching && bundlesLoaded && !categoriesToRender.some(cat => displayItems.some(p => p.category === cat))) {
+      return <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">No products yet</p>;
+    }
+
     return categoriesToRender.map(cat => {
       const catProducts = displayItems.filter(p => p.category === cat);
       if (catProducts.length === 0) {
-        // May label pa rin ang category na walang laman (maliban kapag nagse-search).
-        if (isSearching || (cat === 'Package' && !bundlesLoaded)) return null;
+        // Sa "All": hindi ilalabas ang category na walang laman.
+        // Specific category lang ang may "No ... yet" na notice.
+        if (isSearching || isAllView || (cat === 'Package' && !bundlesLoaded)) return null;
         return (
           <div key={cat} className="mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+            <div className={`flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5 ${hideSectionHeaderOnWide ? 'sm:hidden' : ''}`}>
               <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
               <span className="text-[11px] text-[#B7A99F]">0 items</span>
             </div>
@@ -1194,7 +1205,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
       return (
         <div key={cat} className="mb-8">
-          <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+          <div className={`flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5 ${hideSectionHeaderOnWide ? 'sm:hidden' : ''}`}>
             <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
             <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
           </div>
@@ -1365,7 +1376,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
         aria-label="Back to top"
         tabIndex={showBackToTop ? 0 : -1}
         aria-hidden={!showBackToTop}
-        className={`absolute bottom-6 right-6 z-50 w-11 h-11 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all duration-300 ease-out ${
+        className={`fixed bottom-24 right-7 lg:absolute lg:bottom-6 lg:right-6 z-50 w-12 h-12 lg:w-11 lg:h-11 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] transition-all duration-300 ease-out ${
           showBackToTop
             ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 scale-75 translate-y-3 pointer-events-none'

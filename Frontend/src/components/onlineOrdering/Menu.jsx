@@ -1545,9 +1545,14 @@ export default function Menu({ cart, setCart }) {
   }, [products, searchQuery]);
 
   const renderProductGrid = () => {
-    const categoriesToRender = activeTab === 'All' 
+    const isAllView = activeTab === 'All';
+    const categoriesToRender = isAllView
       ? ['All', ...categories].filter(c => c !== 'All') 
       : [activeTab];
+    // Sa sm pataas, may label na ang mismong tab kaya hindi na uulitin ang pangalan ng category
+    // sa loob ng menu kapag specific category ang napili. Sa mobile (icon-only tabs) nananatili ito
+    // para malaman kung ano ang ibig sabihin ng icon.
+    const hideSectionHeaderOnWide = !isAllView;
 
     const hasAnyMatch = categoriesToRender.some(cat => displayItems.some(p => p.category === cat));
     if (isSearching && !hasAnyMatch) {
@@ -1564,6 +1569,11 @@ export default function Menu({ cart, setCart }) {
       );
     }
 
+    // "All": lahat ng category ay walang laman -> isang pangkalahatang notice lang
+    if (isAllView && !isSearching && !categoriesToRender.some(cat => displayItems.some(p => p.category === cat))) {
+      return <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">No products yet</p>;
+    }
+
     return categoriesToRender.map(cat => {
       const catProducts = displayItems
         .filter(p => p.category === cat)
@@ -1576,11 +1586,12 @@ export default function Menu({ cart, setCart }) {
         });
         
       if (catProducts.length === 0) {
-        // May label pa rin ang category na walang laman (maliban kapag nagse-search).
-        if (isSearching) return null;
+        // Sa "All": hindi ilalabas ang category na walang laman.
+        // Specific category lang ang may "No ... yet" na notice.
+        if (isSearching || isAllView) return null;
         return (
-          <div key={cat} className="mb-8">
-            <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+          <div key={cat} className="mb-8 last:mb-0 lg:last:mb-8">
+            <div className={`flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5 ${hideSectionHeaderOnWide ? 'sm:hidden' : ''}`}>
               <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
               <span className="text-[11px] text-[#B7A99F]">0 items</span>
             </div>
@@ -1590,8 +1601,8 @@ export default function Menu({ cart, setCart }) {
       }
 
       return (
-        <div key={cat} className="mb-8">
-          <div className="flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5">
+        <div key={cat} className="mb-8 last:mb-0 lg:last:mb-8">
+          <div className={`flex items-center justify-between mb-4 border-b border-[#EAE4E0] pb-2.5 ${hideSectionHeaderOnWide ? 'sm:hidden' : ''}`}>
             <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[#8A7264] font-bold">{cat}</h3>
             <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
           </div>
@@ -1705,7 +1716,7 @@ export default function Menu({ cart, setCart }) {
   };
 
   return (
-    <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
+    <div className="bg-[#FCFAF9] lg:min-h-screen flex flex-col relative">
       {toast && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
           <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
@@ -1765,7 +1776,7 @@ export default function Menu({ cart, setCart }) {
             </div>
           </div>
 
-          <div ref={productListRef} onScroll={checkScrollPosition} className="flex-1 lg:overflow-y-auto scrollbar-thin pr-0 lg:pr-2 pb-10">
+          <div ref={productListRef} onScroll={checkScrollPosition} className="flex-1 lg:overflow-y-auto scrollbar-thin pr-0 lg:pr-2 pb-2 lg:pb-10">
             {isLoading ? (
                <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-[#8A7264]" size={32} /></div>
             ) : (
@@ -1936,8 +1947,10 @@ export default function Menu({ cart, setCart }) {
         </div>
       )}
 
-      {cartCount > 0 && <div className="lg:hidden h-24"></div>}
       <Footer />
+
+      {/* Espasyo para sa fixed na Checkout bar — nasa ILALIM ng footer (dati nasa itaas nito kaya may malaking blangko sa gitna) */}
+      {cartCount > 0 && !isMobileCartOpen && <div className="lg:hidden h-[88px] shrink-0"></div>}
     </div>
   );
 }
