@@ -32,19 +32,18 @@ function formatDateTime(ts) {
 
 const STATUS_STYLES = {
   Confirmed: 'bg-blue-50 text-blue-700',
+  'Pending Verification': 'bg-yellow-50 text-yellow-700',
   Ready: 'bg-orange-50 text-orange-700',
   Completed: 'bg-green-50 text-green-700',
   Cancelled: 'bg-red-50 text-red-600',
 };
 
-// Primary action colour follows the status it leads to (same hue family as the
-// status badges) but in deeper tones, so it doesn't fight the Cancel button.
 const STATUS_BUTTON_STYLES = {
   Ready: 'bg-[#C2570C] hover:bg-[#A84A0A] focus-visible:ring-[#C2570C]',
   Completed: 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700',
 };
 
-const BTN_BASE = 'inline-flex items-center justify-center gap-1.5 min-h-[44px] px-5 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
+const BTN_BASE = 'items-center justify-center gap-1.5 min-h-[44px] px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
 const BTN_CLOSE  = 'border border-[#DED4CC] bg-white text-[#5A453C] hover:bg-[#F5EFEB] focus-visible:ring-[#5A453C]';
 const BTN_CANCEL = 'border border-red-300 bg-white text-red-700 hover:bg-red-50 focus-visible:ring-red-500';
 const BTN_DANGER = 'bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-700';
@@ -125,9 +124,6 @@ function formatSlipValue(value) {
 }
 
 // ── customer-uploaded images (Multi-image order slip fields) ──────
-// Ang sagot sa Multi-image field ay array ng image URLs sa loob ng
-// order_slip_details, kaya dito natin nakikilala at ipinapakita bilang gallery
-// sa halip na i-join bilang text.
 const IMAGE_URL_RE = /^https?:\/\/.+\.(png|jpe?g|gif|webp|avif|bmp|heic|heif)(\?.*)?$/i;
 const isImageUrl = (v) => typeof v === 'string' && IMAGE_URL_RE.test(v);
 const isImageUrlList = (v) => Array.isArray(v) && v.length > 0 && v.every(isImageUrl);
@@ -138,9 +134,6 @@ const imageExt = (url) => {
 };
 const safeName = (str) => String(str || 'image').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
 
-// Cross-origin ang storage URL kaya hindi gagana ang plain <a download> —
-// kinukuha muna bilang blob. Kapag pumalya (CORS, atbp.), bubuksan na lang sa
-// bagong tab para makapag-"Save image as" pa rin ang admin.
 async function downloadImage(url, filename) {
   try {
     const res = await fetch(url);
@@ -236,7 +229,6 @@ function SectionLabel({ icon: Icon, children, className = '' }) {
   );
 }
 
-// Inline label/value (totals, balance) — roomy and readable
 function InfoRow({ label, value }) {
   if (!value) return null;
   return (
@@ -247,8 +239,6 @@ function InfoRow({ label, value }) {
   );
 }
 
-// Order-slip field: stacked on mobile (label above value, left-aligned so long
-// text like cake messages reads naturally), two columns on larger screens.
 function SlipField({ label, value }) {
   return (
     <div className="py-3 sm:grid sm:grid-cols-[9.5rem_1fr] sm:gap-4">
@@ -293,13 +283,12 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 }
 
 // ── DETAILS MODAL ────────────────────────────────────────────
-// Mobile  : bottom sheet, one-row footer, roomy type, meta lives inside the scroll area
-// Desktop : centered dialog, Close left / actions right
-export default function DetailsModal({ order, isOpen, onClose, onStatusChange }) {
+export default function DetailsModal({ order, isOpen, onClose, onStatusChange, onPaymentVerification }) {
   const [activeTab, setActiveTab] = useState('order');
   const [confirmCancel, setConfirmCancel] = useState(false);
-  // { images: string[], index: number } — pwedeng isa lang (reference image) o marami (Multi-image field)
+  const [paymentVerificationPending, setPaymentVerificationPending] = useState(false);
   const [lightbox, setLightbox] = useState(null);
+
   const openLightbox = (images, index = 0) => setLightbox({ images, index });
   const closeLightbox = () => setLightbox(null);
   const stepLightbox = (delta) => setLightbox(prev => (
@@ -322,9 +311,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     }
   }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
 
-  // laging bumalik sa "order" tab at isara ang cancel-confirm kapag ibang order / bagong bukas
   useEffect(() => {
     setConfirmCancel(false);
+    setPaymentVerificationPending(false);
   }, [order?.id, isOpen]);
 
   useEffect(() => {
@@ -336,7 +325,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightbox]);
 
   useEffect(() => {
@@ -371,7 +359,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
   const amountPaid       = order.amountPaid || order.amount_paid || 0;
   const balance           = order.balance ?? (grandTotal - amountPaid);
   const paymentRef         = order.paymongoPaymentId || order.paymongo_payment_id;
-  // Kapareho ng logic sa Orders.jsx: kapag 0 na ang balance, Fully Paid na kahit "deposit" ang payment_type
   const isDeposit = paymentType === 'deposit' && Number(balance) > 0;
 
   const pickupDate     = order.pickupDate || order.pickup_date;
@@ -383,15 +370,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
 
   const globalReferenceImage = order.customerReference || order.customer_reference_url;
 
-  // Special instructions ay nasa order_items.special_instructions (iisang text
-  // na inuulit sa bawat row), kaya dine-dedupe para isang beses lang ipakita.
-  // Fallback: kung nasa order level (order.special_instructions) ang text.
   const specialInstructions = [...new Set([
     ...items.map(it => (it.special_instructions ?? it.specialInstructions ?? '').toString().trim()),
     (order.special_instructions ?? order.specialInstructions ?? '').toString().trim(),
   ].filter(Boolean))];
 
-  // Grouped by Bundle / Package / Standalone Item na kasama na ang specific reference images per component
   const orderSlipCards = (() => {
     const cards = [];
     groupOrderItems(items).forEach(g => {
@@ -430,7 +413,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     ? formatTime(pickupTime) + (pickupTimeEnd ? ` – ${formatTime(pickupTimeEnd)}` : '')
     : null;
 
-  // ── Items list ──
   const itemRows = [];
   groupOrderItems(items).forEach((g, i) => {
     if (g.isBundle) {
@@ -474,7 +456,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
     ...(showSlipTab ? [{ id: 'slip', label: 'Order Slip', icon: FileText }] : []),
   ];
 
-  // ── Type / Source / Placed ──
   const metaStrip = (
     <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-2">
       {[
@@ -522,12 +503,12 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           </button>
         </div>
 
-        {/* Desktop meta strip (on mobile it moves into the scroll area to save space) */}
+        {/* Desktop meta strip */}
         <div className="hidden sm:block px-7 pt-5 pb-4 border-b border-[#EAE4E0] shrink-0">
           {metaStrip}
         </div>
 
-        {/* Tabs — hidden when there is only one */}
+        {/* Tabs */}
         {TABS.length > 1 && (
           <div className="px-4 sm:px-7 pt-3 sm:pt-4 pb-3 sm:pb-0 border-b border-[#EAE4E0] sm:border-b-0 shrink-0">
             <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5EFEB] rounded-xl sm:flex sm:gap-8 sm:p-0 sm:bg-transparent sm:rounded-none sm:border-b sm:border-[#EAE4E0]">
@@ -607,7 +588,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                 </div>
               </section>
 
-              {/* Payment */}
+              {/* Payment Section */}
               <section className="bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
                 <SectionLabel icon={Wallet}>Payment</SectionLabel>
                 <div className="mt-3 flex items-center justify-between gap-3">
@@ -629,9 +610,33 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                 {paymentRef && (
                   <p className="mt-3 text-xs text-[#8A7264] font-mono break-all">Ref: {paymentRef}</p>
                 )}
+
+                {/* Proof of Payment Thumbnail */}
+                {order.proof_of_payment_url && (
+                  <div className="mt-4 pt-4 border-t border-[#EAE4E0]">
+                    <p className="text-xs font-semibold text-[#8A7264] mb-2">Proof of payment</p>
+                    <button
+                      type="button"
+                      onClick={() => openLightbox([order.proof_of_payment_url])}
+                      className="group relative w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] cursor-zoom-in flex items-center justify-center"
+                      aria-label="Enlarge payment proof"
+                    >
+                      <img
+                        src={order.proof_of_payment_url}
+                        alt="Payment proof"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold uppercase tracking-wide transition-opacity">
+                          View Image
+                        </span>
+                      </div>
+                    </button>
+                  </div>
+                )}
               </section>
 
-              {/* Special Instructions — highlighted so the baker doesn't miss it */}
+              {/* Special Instructions */}
               {specialInstructions.length > 0 && (
                 <section className="bg-amber-50 border border-amber-200 rounded-2xl p-4 sm:p-5 min-w-0">
                   <SectionLabel icon={MessageSquareText} className="mb-2">Special instructions</SectionLabel>
@@ -649,7 +654,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           {activeTab === 'slip' && showSlipTab && (
             <div className="flex flex-col gap-4 items-start">
 
-              {/* Product Component Cards: Slips + Specific References */}
+              {/* Product Component Cards */}
               {hasOrderSlip && orderSlipCards.map((card, idx) => (
                 <section key={idx} className="w-full bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
                   <div className="px-4 sm:px-5 py-3.5 bg-[#F5EFEB] border-b border-[#EAE4E0] flex items-center gap-2 flex-wrap">
@@ -716,7 +721,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                 </section>
               ))}
 
-              {/* Global Reference Fallback (Kung may reference image ang Order na hindi nakatali sa items) */}
+              {/* Global Reference Fallback */}
               {globalReferenceImage && !hasOrderSlip && (
                 <section className="w-full bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
                   <SectionLabel icon={ImageIcon} className="mb-3">Order reference</SectionLabel>
@@ -741,19 +746,58 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
           )}
         </div>
 
-        {/* Footer — one row on mobile; Close left / actions right on desktop */}
+        {/* Footer */}
         <div className="shrink-0 border-t border-[#EAE4E0] bg-white px-4 sm:px-7 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
-          {confirmCancel ? (
+          {order.status === 'Pending Verification' ? (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                disabled={paymentVerificationPending}
+                onClick={async () => {
+                  setPaymentVerificationPending(true);
+                  try {
+                    await onPaymentVerification(order.id, true);
+                  } catch {
+                    // Parent handles toast error
+                  } finally {
+                    setPaymentVerificationPending(false);
+                  }
+                }}
+                className={`inline-flex ${BTN_BASE} flex-1 bg-green-700 text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {paymentVerificationPending ? 'Updating...' : 'Accept Payment'}
+              </button>
+              <button
+                type="button"
+                disabled={paymentVerificationPending}
+                onClick={async () => {
+                  const reason = window.prompt('Reason for rejecting this payment:');
+                  if (!reason?.trim()) return;
+                  setPaymentVerificationPending(true);
+                  try {
+                    await onPaymentVerification(order.id, false, reason.trim());
+                  } catch {
+                    // Parent handles toast error
+                  } finally {
+                    setPaymentVerificationPending(false);
+                  }
+                }}
+                className={`inline-flex ${BTN_BASE} flex-1 ${BTN_DANGER} disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {paymentVerificationPending ? 'Updating...' : 'Reject'}
+              </button>
+            </div>
+          ) : confirmCancel ? (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm font-semibold text-[#3B1F0A]">Cancel order #{orderNumber}? It will be marked as Cancelled.</p>
               <div className="flex gap-2.5">
-                <button type="button" onClick={() => setConfirmCancel(false)} className={`${BTN_BASE} ${BTN_CLOSE} flex-1 sm:flex-none`}>
+                <button type="button" onClick={() => setConfirmCancel(false)} className={`inline-flex ${BTN_BASE} ${BTN_CLOSE} flex-1 sm:flex-none`}>
                   Keep order
                 </button>
                 <button
                   type="button"
                   onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }}
-                  className={`${BTN_BASE} ${BTN_DANGER} flex-1 sm:flex-none`}
+                  className={`inline-flex ${BTN_BASE} ${BTN_DANGER} flex-1 sm:flex-none`}
                 >
                   Yes, cancel
                 </button>
@@ -761,23 +805,23 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
             </div>
           ) : (
             <div className="flex items-center gap-2.5 sm:justify-between">
-              {/* On mobile the header ✕ closes the sheet, so Close only takes footer space when it is the only action */}
+              {/* Sa mobile, hidden ang Close kapag may action buttons (dahil may header X naman). Sa desktop, lalabas ang Close sa kaliwa. */}
               <button
                 type="button"
                 onClick={onClose}
-                className={`${BTN_BASE} ${BTN_CLOSE} ${hasActions ? 'hidden sm:inline-flex' : 'flex-1 sm:flex-none'}`}
+                className={`${hasActions ? 'hidden sm:inline-flex' : 'inline-flex flex-1 sm:flex-none'} ${BTN_BASE} ${BTN_CLOSE}`}
               >
                 <X size={15} />
                 Close
               </button>
 
               {hasActions && (
-                <div className="flex flex-1 sm:flex-none gap-2.5">
+                <div className="flex flex-1 sm:flex-none gap-2.5 w-full sm:w-auto">
                   {canCancel && (
                     <button
                       type="button"
                       onClick={() => setConfirmCancel(true)}
-                      className={`${BTN_BASE} ${BTN_CANCEL} flex-1 sm:flex-none whitespace-nowrap`}
+                      className={`inline-flex ${BTN_BASE} ${BTN_CANCEL} flex-1 sm:flex-none whitespace-nowrap`}
                     >
                       Cancel Order
                     </button>
@@ -786,7 +830,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                     <button
                       type="button"
                       onClick={() => { onStatusChange(order.id, next); onClose(); }}
-                      className={`${BTN_BASE} text-white shadow-sm flex-[1.3] sm:flex-none whitespace-nowrap ${
+                      className={`inline-flex ${BTN_BASE} text-white shadow-sm flex-1 sm:flex-none whitespace-nowrap ${
                         STATUS_BUTTON_STYLES[next] || 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700'
                       }`}
                     >
@@ -800,7 +844,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
         </div>
       </div>
 
-      {/* Lightbox — isa o maraming larawan (may prev/next at download) */}
+      {/* Lightbox */}
       {lightbox && lightbox.images[lightbox.index] && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
@@ -838,25 +882,13 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange })
                 >
                   <ChevronRight size={18} />
                 </button>
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-bold">
+                    {lightbox.index + 1} / {lightbox.images.length}
+                  </span>
+                </div>
               </>
             )}
-            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-2">
-              {lightbox.images.length > 1 && (
-                <span className="px-3 py-1.5 rounded-full bg-black/60 text-white text-xs font-bold">
-                  {lightbox.index + 1} / {lightbox.images.length}
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => downloadImage(
-                  lightbox.images[lightbox.index],
-                  `${safeName(orderNumber)}-image-${lightbox.index + 1}.${imageExt(lightbox.images[lightbox.index])}`
-                )}
-                className="flex items-center gap-1 px-3.5 py-1.5 rounded-full bg-white/95 hover:bg-white text-[#3B1F0A] text-xs font-bold shadow"
-              >
-                <Download size={12} /> Save
-              </button>
-            </div>
           </div>
         </div>
       )}

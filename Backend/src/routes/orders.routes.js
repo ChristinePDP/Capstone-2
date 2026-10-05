@@ -17,5 +17,7 @@ router.get('/:id', OrdersController.getOrderById);
 
 // PATCH /api/inventory/orders/:id/status  -> i-edit ang status
 router.patch('/:id/status', OrdersController.updateOrderStatus);
+router.post('/:id/payment/accept', OrdersController.acceptPayment);
+router.post('/:id/payment/reject', OrdersController.rejectPayment);
 
 export default router;

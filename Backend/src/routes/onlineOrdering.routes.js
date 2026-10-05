@@ -9,7 +9,8 @@ import {
   placeOrder,
   markOrderCompleted,
   getPublicConfig,
-  getPendingOrderStatus
+  getPendingOrderStatus,
+  placeManualPaymentOrder
 } from '../controller/onlineOrdering.controller.js';
 
 const router = express.Router();
@@ -36,6 +37,7 @@ router.get('/config', getPublicConfig);
 router.post('/paymongo-checkout', checkoutLimiter, createPaymongoLink);
 
 router.post('/upload-inspiration', upload.single('image'), uploadInspiration);
+router.post('/manual-payment-order', checkoutLimiter, upload.single('proof'), placeManualPaymentOrder);
 router.post('/place-order', placeOrder);
 router.patch('/complete/:orderId', markOrderCompleted);
 router.get('/pending-order/:id', getPendingOrderStatus);

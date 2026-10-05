@@ -264,6 +264,23 @@ export function AppProvider({ children }) {
     };
   }, [isAuthed, fetchAll]);
 
+  // Keep the dashboard current even when the realtime stream is temporarily
+  // unavailable or a change was made by another browser tab.
+  useEffect(() => {
+    if (!isAuthed) return undefined;
+
+    const refresh = () => {
+      fetchAll({ silent: true }).catch(err => console.error('Live data refresh failed:', err));
+    };
+    const intervalId = window.setInterval(refresh, 5000);
+    window.addEventListener('cake:data-changed', refresh);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('cake:data-changed', refresh);
+    };
+  }, [isAuthed, fetchAll]);
+
   // ── Auth actions ──
   // I-tawag ito sa Login page/handler pagka-SUCCESS ng login, sa halip na
   // direktang `localStorage.setItem('isLoggedIn', 'true')` lang doon.
@@ -343,6 +360,14 @@ export function AppProvider({ children }) {
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to update order status'), { cause: err });
     }
+  };
+
+  const verifyOrderPayment = async (id, accepted, reason = '') => {
+    const endpoint = `${ORDERS_API_URL}/${id}/payment/${accepted ? 'accept' : 'reject'}`;
+    const res = await apiClient.post(endpoint, accepted ? {} : { reason });
+    const updated = res.data?.data;
+    setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
+    return updated;
   };
 
   // ── Product actions ────
@@ -545,7 +570,7 @@ export function AppProvider({ children }) {
     loading, error,
     isAuthed, authReady, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,
-    fetchOrders, fetchOrderById, updateOrderStatus,
+    fetchOrders, fetchOrderById, updateOrderStatus, verifyOrderPayment,
     addProduct, updateProduct, deleteProduct, uploadProductImage,
     addOrder, addOnlineOrder,
     addIngredient, updateIngredient, deleteIngredient, restockIngredient,

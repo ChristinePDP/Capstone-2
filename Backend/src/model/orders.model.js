@@ -159,6 +159,24 @@ const OrdersModel = {
     if (error) throw new Error(error.message);
     return data;
   },
+
+  async updatePaymentVerification(id, status, adminId, rejectionReason = null) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .update({
+        payment_verification_status: status,
+        status: status === 'Accepted' ? 'Confirmed' : 'Cancelled',
+        payment_verified_at: new Date().toISOString(),
+        payment_verified_by: adminId || null,
+        payment_rejection_reason: rejectionReason,
+      })
+      .eq('id', id)
+      .eq('status', 'Pending Verification')
+      .select('*, customers(name, phone), order_items(*)')
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
 };
 
 export { OrdersModel };

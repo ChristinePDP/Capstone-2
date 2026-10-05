@@ -173,14 +173,15 @@ const isTransientStorageError = (error) => {
 
 const UPLOAD_MAX_ATTEMPTS = 3;
 
-export const uploadImageToBucket = async (file, bucketName = 'inspiration-images') => {
-  const fileExt = file.originalname.split('.').pop();
+export const uploadImageToBucket = async (file, bucketName = 'inspiration-images', folder = '') => {
+  const fileExt = file.originalname.split('.').pop().toLowerCase();
   let lastError = null;
 
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt += 1) {
     // Bagong filename sa bawat subok — kung natuloy pala ang naunang upload
     // kahit pumalya ang response, hindi ito babangga ("already exists").
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const objectName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const fileName = folder ? `${folder.replace(/\/+$/, '')}/${objectName}` : objectName;
 
     try {
       const { error } = await supabase.storage
@@ -666,7 +667,7 @@ export const resolveInitialOnlineOrderStatus = async (resolvedItems = [], orderT
   return 'Ready';
 };
 
-export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => {
+export const createDatabaseOrder = async (payload, paymongoPaymentId = null, manualPayment = null) => {
   // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
   let resolvedItems;
@@ -707,7 +708,7 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     customer_id: customerData.id,
     order_type: payload.orderType,
     source: 'online',
-    status: initialStatus,
+    status: manualPayment ? 'Pending Verification' : 'Confirmed',
     subtotal: payload.payment.grandTotal,
     grand_total: payload.payment.grandTotal,
     payment_type: payload.payment.type,
@@ -717,6 +718,12 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null) => 
     pickup_time: payload.pickup.time,
     pickup_time_end: payload.pickup.timeEnd || null,
     paymongo_payment_id: paymongoPaymentId,
+    ...(manualPayment ? {
+      payment_verification_status: 'Pending',
+      proof_of_payment_url: manualPayment.url,
+      proof_of_payment_path: manualPayment.path,
+      proof_uploaded_at: new Date().toISOString(),
+    } : {}),
   };
 
   let newOrder;

@@ -339,6 +339,51 @@ export const placeOrder = async (req, res) => {
   }
 };
 
+export const placeManualPaymentOrder = async (req, res) => {
+  let proofUrl = null;
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Payment proof is required.' });
+    }
+    if (!req.file.mimetype?.startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'Payment proof must be an image.' });
+    }
+    if (req.file.size > MAX_FILE_SIZE_BYTES) {
+      return res.status(400).json({ success: false, message: 'Payment proof must be 5MB or smaller.' });
+    }
+
+    let orderPayload;
+    try {
+      orderPayload = JSON.parse(req.body.orderPayload || '');
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid order payload.' });
+    }
+
+    proofUrl = await uploadImageToBucket(req.file, 'payment-assets', 'proof_of_transaction');
+    const marker = '/storage/v1/object/public/payment-assets/';
+    const pathIndex = proofUrl.indexOf(marker);
+    const proofPath = pathIndex >= 0 ? decodeURIComponent(proofUrl.slice(pathIndex + marker.length)) : null;
+    const savedOrder = await createDatabaseOrder(orderPayload, null, { url: proofUrl, path: proofPath });
+    return res.status(201).json({ success: true, order: savedOrder });
+  } catch (error) {
+    if (proofUrl) {
+      const marker = '/storage/v1/object/public/payment-assets/';
+      const index = proofUrl.indexOf(marker);
+      if (index >= 0) {
+        const path = decodeURIComponent(proofUrl.slice(index + marker.length));
+        await supabase.storage.from('payment-assets').remove([path]).catch(cleanupError => {
+          console.error('Manual payment proof cleanup failed:', cleanupError);
+        });
+      }
+    }
+    console.error('Manual Payment Order Error:', error?.stack || error);
+    return res.status(error.status || 500).json({
+      success: false,
+      message: error.clientMessage || 'Unable to submit the order for verification.'
+    });
+  }
+};
+
 export const markOrderCompleted = async (req, res) => {
   console.log('\n--- MARK ORDER COMPLETED ENDPOINT HIT ---');
   try {

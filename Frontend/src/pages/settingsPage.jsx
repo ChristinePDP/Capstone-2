@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import SettingsNav from '../components/settings/settingsNav';
 import ChangePass from '../components/settings/changePass';
+import PaymentQrSettings from '../components/settings/paymentQrSettings';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('security');
@@ -27,6 +28,7 @@ export default function SettingsPage() {
           {/* Content column */}
           <div className="flex-1 min-w-0 p-5 md:p-8">
             {activeTab === 'security' && <ChangePass />}
+            {activeTab === 'payment' && <PaymentQrSettings />}
           </div>
         </div>
       </div>

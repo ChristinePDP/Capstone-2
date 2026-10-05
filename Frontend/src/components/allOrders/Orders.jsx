@@ -3,7 +3,7 @@ import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge, Button, Table, Tr, Td } from '../ui';
 import QrScanner from './QrScanner';
 
-const ORDER_STATUSES = ['All', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
+const ORDER_STATUSES = ['All', 'Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
 const PER_PAGE = 8;
 
 function fmt(n) {
@@ -33,7 +33,7 @@ function pickupLabel(date, time, timeEnd) {
   return `${d} — ${start}${end ? ` – ${end}` : ''}`;
 }
 function statusVariant(s) {
-  return { Confirmed: 'confirmed', Ready: 'ready', Completed: 'completed', Cancelled: 'cancelled' }[s] || 'default';
+  return { 'Pending Verification': 'pending', Confirmed: 'confirmed', Ready: 'ready', Completed: 'completed', Cancelled: 'cancelled' }[s] || 'default';
 }
 function typeVariant(t) {
   return t === 'Pre-Order' ? 'preorder' : 'buynow';

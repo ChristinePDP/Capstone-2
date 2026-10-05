@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 
 import Home from '../components/onlineOrdering/Home';
 import Menu from '../components/onlineOrdering/Menu';
@@ -60,6 +61,16 @@ async function saveCartToDb(cart) {
   }
 }
 
+// Ipinapakita habang bina-bawi pa ang naka-save na cart mula sa IndexedDB.
+function CartLoading() {
+  return (
+    <div role="status" aria-live="polite" className="flex min-h-[60vh] flex-col items-center justify-center gap-2 bg-[#FCFAF9] text-[#8A7264]">
+      <Loader2 size={28} className="animate-spin" />
+      <span className="text-xs font-medium">Loading your order…</span>
+    </div>
+  );
+}
+
 export default function OnlineOrderingPage() {
   const [cart, setCart] = useState([]);
   // Naghihintay muna tayo ng buong (async) restore mula sa IndexedDB bago
@@ -101,10 +112,26 @@ export default function OnlineOrderingPage() {
       <Route path="home" element={<Home />} />
       <Route path="menu" element={<Menu cart={cart} setCart={setCart} />} />
       
+      {/* FIX: dati, kapag nag-refresh (o na-reload ng browser ang tab, hal. sa
+          mobile habang nasa ibang app/file picker ang user) habang nasa
+          /checkout o /payment, EMPTY pa ang `cart` sa unang render dahil
+          async pa ang restore mula sa IndexedDB — kaya napagkamalang walang
+          laman ang cart at na-redirect agad sa Menu. Ngayon, hinihintay muna
+          ang `cartHydrated` bago mag-decide kung ire-redirect. */}
       <Route path="checkout" element={
-        cart.length === 0 
-          ? <Navigate to="/onlineOrdering/menu" replace /> 
-          : <Checkout cart={cart} setCart={setCart} />
+        !cartHydrated
+          ? <CartLoading />
+          : cart.length === 0
+            ? <Navigate to="/onlineOrdering/menu" replace />
+            : <Checkout cart={cart} setCart={setCart} />
+      } />
+
+      <Route path="payment" element={
+        !cartHydrated
+          ? <CartLoading />
+          : cart.length === 0
+            ? <Navigate to="/onlineOrdering/menu" replace />
+            : <Checkout cart={cart} setCart={setCart} paymentOnly />
       } />
       
       

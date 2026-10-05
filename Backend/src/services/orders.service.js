@@ -3,11 +3,12 @@ import { OrdersModel } from '../model/orders.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { MaterialModel } from '../model/material.model.js';
+import { supabase } from '../config/supabase.js';
 
 // Pinapayagang statuses lang — ito yung ginagamit talaga ng
 // AllOrdersPage.jsx (ORDER_STATUSES filter pills + nextStatus map),
 // kaya dito rin natin itinugma.
-const ALLOWED_STATUSES = ['Confirmed', 'Ready', 'Completed', 'Cancelled'];
+const ALLOWED_STATUSES = ['Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
 
 // Same priority rule gaya ng ginagamit sa onlineOrdering.services.js at
 // pos.service.js (getStockLimitField) — kailangan itong i-tugma dito dahil
@@ -21,13 +22,29 @@ const getStockLimitField = (product) => {
   return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
 };
 
+const withPaymentProofUrl = async (order) => {
+  if (!order?.proof_of_payment_path) return order;
+
+  const { data, error } = await supabase.storage
+    .from('payment-assets')
+    .createSignedUrl(order.proof_of_payment_path, 60 * 60);
+
+  if (error) {
+    console.error(`Failed to create payment proof URL for order ${order.id}:`, error.message);
+    return { ...order, proof_of_payment_url: null };
+  }
+
+  return { ...order, proof_of_payment_url: data.signedUrl };
+};
+
 const OrdersService = {
   /**
    * Kunin lahat ng orders KASAMA ang customer info at order items —
    * ginagamit ito ng "All Orders" admin page (table + search + modal).
    */
   async getAllOrders() {
-    return OrdersModel.findAllWithDetails();
+    const orders = await OrdersModel.findAllWithDetails();
+    return Promise.all((orders || []).map(withPaymentProofUrl));
   },
 
   /**
@@ -45,7 +62,7 @@ const OrdersService = {
       err.status = 404;
       throw err;
     }
-    return order;
+    return withPaymentProofUrl(order);
   },
 
   async getPendingCelebrationMaterialRestock() {
@@ -125,6 +142,11 @@ const OrdersService = {
     if (!existingOrder) {
       const err = new Error('Order not found');
       err.status = 404;
+      throw err;
+    }
+    if (existingOrder.status === 'Pending Verification' && status !== 'Pending Verification' && status !== 'Cancelled') {
+      const err = new Error('Pending payment must be accepted or rejected before fulfillment.');
+      err.status = 409;
       throw err;
     }
 
@@ -226,6 +248,24 @@ const OrdersService = {
     // --------------------------------------------------------
 
     return finalOrder;
+  },
+
+  async verifyPayment(id, accepted, adminId, reason = null) {
+    const order = await OrdersModel.findById(id);
+    if (!order) {
+      const err = new Error('Order not found');
+      err.status = 404;
+      throw err;
+    }
+    if (order.status !== 'Pending Verification' || !order.proof_of_payment_url) {
+      return null;
+    }
+    return OrdersModel.updatePaymentVerification(
+      id,
+      accepted ? 'Accepted' : 'Rejected',
+      adminId,
+      accepted ? null : reason
+    );
   },
 };
 

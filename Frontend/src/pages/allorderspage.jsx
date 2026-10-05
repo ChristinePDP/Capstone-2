@@ -14,7 +14,7 @@ function loadSaved(locKey) {
 }
 
 export default function AllOrdersPage() {
-  const { orders, updateOrderStatus, loading } = useApp();
+  const { orders, updateOrderStatus, verifyOrderPayment, loading } = useApp();
   const { show: showToast } = useToast();
   
   const location = useLocation();
@@ -82,6 +82,16 @@ const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)
     }
   };
 
+  const handlePaymentVerification = async (id, accepted, reason) => {
+    try {
+      await verifyOrderPayment(id, accepted, reason);
+      showToast(accepted ? 'Payment accepted.' : 'Payment rejected.');
+    } catch (err) {
+      showToast(err.message || 'Failed to verify payment.', 'error');
+      throw err;
+    }
+  };
+
   return (
     <div className="space-y-5">
       <Orders
@@ -89,12 +99,14 @@ const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)
         loading={loading}
         onViewOrder={openOrder}
         onStatusChange={handleStatusChange}
+        onPaymentVerification={handlePaymentVerification}
       />
       <DetailsModal
         order={liveOrder}
         isOpen={detailOpen}
         onClose={handleCloseModal}
         onStatusChange={handleStatusChange}
+        onPaymentVerification={handlePaymentVerification}
       />
     </div>
   );

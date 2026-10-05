@@ -2,19 +2,19 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Trash2 } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Trash2, Loader2, ZoomIn, X } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
 import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages, formatSlipValueForCart } from '../shared/orderSlipUploads';
+import { deleteFiles, getFiles, putFiles } from '../shared/cartImageStore';
 import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 // Formats a 'YYYY-MM-DD' string as an unambiguous long date, e.g. "August 8, 2026".
-// Avoids the MM/DD vs DD/MM confusion of native date inputs.
 function formatDateLong(dateStr) {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -53,9 +53,6 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
     cells.push({ day, inMonth: false, dateStr: null });
   }
 
-  // Naka-portal sa <body> + position: fixed para hindi maputol ng scrollable/
-  // overflow-hidden na parent. Sa ibaba ng trigger kung kasya; kung hindi, sa
-  // itaas; tapos i-clamp sa loob ng viewport para hindi kailanman masagad/maputol.
   const [pos, setPos] = useState({ top: 0, left: 0, ready: false });
   const reposition = () => {
     const trigger = triggerRef?.current;
@@ -156,14 +153,11 @@ function getSlotLabel(value) {
   return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
-// Same idea as the cart's `aileen_cake_max_cart` key sa parent — pinapayagan
-// nitong makapunta-balik ang customer sa Menu (mag-add pa ng item) nang hindi
-// nabubura ang nasulat na niyang detalye dito. Cleared lang ito pagka-successful
-// na ng order (tingnan sa Confirm.jsx).
 const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
+const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
+const PAYMENT_PROOF_AMOUNT_KEY = 'aileen_cake_max_payment_proof_amount';
+const PAYMENT_PROOF_NAMESPACE = 'online-order-payment-proof';
 
-// Ang order type (Pick-up Today / Pre-Order) ay pinipili na sa CART ng Menu.jsx
-// at dito na lang binabasa — wala nang switch sa Checkout.
 const ORDER_TYPE_STORAGE_KEY = 'aileen_cake_max_order_type';
 function readStoredOrderType() {
   try {
@@ -183,17 +177,13 @@ function loadCheckoutDraft() {
   }
 }
 
-export default function Checkout({ cart, setCart }) {
+export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const navigate = useNavigate();
+  const isPaymentStep = paymentOnly;
 
   const hasPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const hasPickUpToday = cart.some(item => item.order_type === 'Pick-up Today');
-  // Pre-order ALWAYS wins, kahit may kasamang item na 'Pick-up Today' o 'Both'
-  // sa cart. Kailangan ito dahil literal na hindi maaaring pick-upin ngayon
-  // din ang isang Pre-order item (may required lead time) — kaya kapag may
-  // isang Pre-order item, ang buong order ay dapat Pre-order na rin, hindi
-  // basta ma-o-override ng ibang item na 'Pick-up Today'/'Both'.
-  // Para sa puro "Both" na cart, ang pinili sa cart switch ng Menu ang gagamitin.
+
   const pickupType = hasPreOrder
     ? 'later'
     : hasPickUpToday
@@ -205,8 +195,6 @@ export default function Checkout({ cart, setCart }) {
 
   const draft = loadCheckoutDraft();
 
-  // Kung nagbago ang order type mula nang ma-save ang draft (bumalik sa Menu at
-  // nag-switch), i-reset ang pickup date/time dahil magkaiba ang rules nila.
   const draftOrderTypeChanged = Boolean(draft?.pickupType) && draft.pickupType !== pickupType;
   const [form, setForm] = useState(() => {
     if (draft?.form) {
@@ -225,13 +213,121 @@ export default function Checkout({ cart, setCart }) {
   });
 
   const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
+  const [paymentQrUrl, setPaymentQrUrl] = useState(null);
+  const [proofOfPayment, setProofOfPayment] = useState(null);
+  const [proofPreviewUrl, setProofPreviewUrl] = useState(null);
+  const proofInputRef = useRef(null);
+  const [paymentConfigLoading, setPaymentConfigLoading] = useState(true);
+  const [paymentConfigError, setPaymentConfigError] = useState(false);
+  const [paymentConfigAttempt, setPaymentConfigAttempt] = useState(0);
+  const [qrImageLoaded, setQrImageLoaded] = useState(false);
+  const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [expandedSummaryIndexes, setExpandedSummaryIndexes] = useState(() => new Set());
   const [isProcessing, setIsProcessing] = useState(false);
-  // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
   const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [errors, setErrors] = useState({});
+  const proofHydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!proofOfPayment) {
+      setProofPreviewUrl(null);
+      return undefined;
+    }
+
+    const previewUrl = URL.createObjectURL(proofOfPayment);
+    setProofPreviewUrl(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [proofOfPayment]);
+
+  useEffect(() => {
+    let active = true;
+
+    const restorePaymentProof = async () => {
+      try {
+        const marker = localStorage.getItem(PAYMENT_PROOF_KEY);
+        if (marker) {
+          const currentTotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
+          const savedAmount = localStorage.getItem(PAYMENT_PROOF_AMOUNT_KEY);
+          const isStale = cart.length > 0 && savedAmount !== String(currentTotal);
+          if (isStale) {
+            localStorage.removeItem(PAYMENT_PROOF_KEY);
+            localStorage.removeItem(PAYMENT_PROOF_AMOUNT_KEY);
+            await deleteFiles([marker]);
+          } else {
+            const files = await getFiles([marker]);
+            const savedProof = files.get(marker);
+            if (active && savedProof) setProofOfPayment(savedProof);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to restore payment proof from IndexedDB:', err);
+      } finally {
+        if (active) proofHydratedRef.current = true;
+      }
+    };
+
+    restorePaymentProof();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!proofHydratedRef.current) return;
+
+    const persistPaymentProof = async () => {
+      const previousMarker = localStorage.getItem(PAYMENT_PROOF_KEY);
+      if (!proofOfPayment) {
+        localStorage.removeItem(PAYMENT_PROOF_KEY);
+        localStorage.removeItem(PAYMENT_PROOF_AMOUNT_KEY);
+        if (previousMarker) await deleteFiles([previousMarker]);
+        return;
+      }
+
+      const marker = previousMarker || `${PAYMENT_PROOF_NAMESPACE}:${crypto.randomUUID()}`;
+      await putFiles([[marker, proofOfPayment]]);
+      localStorage.setItem(PAYMENT_PROOF_KEY, marker);
+      localStorage.setItem(PAYMENT_PROOF_AMOUNT_KEY, String(cart.reduce((sum, i) => sum + i.price * i.qty, 0)));
+      if (previousMarker && previousMarker !== marker) {
+        await deleteFiles([previousMarker]);
+      }
+    };
+
+    persistPaymentProof().catch(err => {
+      console.error('Failed to persist payment proof in IndexedDB:', err);
+    });
+  }, [proofOfPayment]);
+
+  useEffect(() => {
+    let active = true;
+    setPaymentConfigLoading(true);
+    setPaymentConfigError(false);
+    setQrImageLoaded(false);
+    fetch(`${import.meta.env.VITE_API_URL}/settings/payment`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => { if (active) setPaymentQrUrl(data.data?.payment_qr_code_url || null); })
+      .catch(err => {
+        console.error('Failed to load payment QR code:', err);
+        if (active) setPaymentConfigError(true);
+      })
+      .finally(() => { if (active) setPaymentConfigLoading(false); });
+    return () => { active = false; };
+  }, [paymentConfigAttempt]);
+
+  const handleProofChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrors(prev => ({ ...prev, proof: 'Please choose an image file (screenshot).' }));
+      return;
+    }
+    setErrors(prev => ({ ...prev, proof: false }));
+    setProofOfPayment(file);
+  };
 
   const toggleSummaryItem = (index) => {
     setExpandedSummaryIndexes(prev => {
@@ -253,30 +349,20 @@ export default function Checkout({ cart, setCart }) {
       return next;
     });
   };
+
   const [showCalendar, setShowCalendar] = useState(false);
   const calendarWrapRef = useRef(null);
   const calendarTriggerRef = useRef(null);
   const calendarPopRef = useRef(null);
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
-  // timeDropdownRef = wrapper around the trigger button ONLY. The dropdown
-  // list itself is portaled to <body> (see timeDropdownListRef below) so it
-  // can float above ancestors that clip with overflow-hidden/overflow-y-auto
-  // (e.g. the scrollable left column). Because of that, "click outside"
-  // detection needs to check BOTH refs — the trigger and the portaled list —
-  // otherwise clicking an option inside the portal would look like an
-  // "outside" click and instantly close the dropdown before onClick fires.
   const timeDropdownRef = useRef(null);
   const timeDropdownListRef = useRef(null);
-  // Where (in fixed/viewport coordinates) to render the portaled dropdown,
-  // and whether it should open upward instead of downward.
   const [timeDropdownPos, setTimeDropdownPos] = useState({ top: 0, left: 0, width: 0 });
   const [timeDropdownOpenUpward, setTimeDropdownOpenUpward] = useState(false);
 
-  // Close the custom calendar popover when clicking outside of it.
   useEffect(() => {
     if (!showCalendar) return;
     const handleClickOutside = (e) => {
-      // Naka-portal ang calendar sa <body>, kaya i-check din ang popover mismo.
       const insideTrigger = calendarWrapRef.current && calendarWrapRef.current.contains(e.target);
       const insidePopover = calendarPopRef.current && calendarPopRef.current.contains(e.target);
       if (!insideTrigger && !insidePopover) {
@@ -287,8 +373,6 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showCalendar]);
 
-  // Close the custom time dropdown when clicking outside of it (checking
-  // both the trigger button and the portaled list — see refs above).
   useEffect(() => {
     if (!showTimeDropdown) return;
     const handleClickOutside = (e) => {
@@ -302,9 +386,6 @@ export default function Checkout({ cart, setCart }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showTimeDropdown]);
 
-  // Keep the portaled dropdown glued to the trigger button while it's open
-  // (the page/column can still scroll or the window can resize underneath
-  // a `position: fixed` portal element).
   useEffect(() => {
     if (!showTimeDropdown) return;
     const reposition = () => {
@@ -326,10 +407,6 @@ export default function Checkout({ cart, setCart }) {
     };
   }, [showTimeDropdown]);
 
-  // Prevent the background page from scrolling while the Order Summary modal
-  // (a `fixed inset-0` overlay) is open. `fixed` overlays don't block scroll
-  // on their own — the page behind it stays scrollable unless we explicitly
-  // lock <body> here, and unlock/restore it again on close or unmount.
   useEffect(() => {
     if (!showSummaryModal) return;
     const previousOverflow = document.body.style.overflow;
@@ -349,11 +426,6 @@ export default function Checkout({ cart, setCart }) {
     return { dateStr, timeStr };
   };
 
-  // Defensive sync: whenever pickupType is 'now', force form.pickupDate to today.
-  // Needed because the initial useState only pre-fills pickupDate when
-  // hasPickUpToday is true, but items with order_type 'Both' don't set that
-  // flag — leaving pickupDate stuck at '' even though the UI shows a locked
-  // "(Today)" date. That mismatch was silently failing the required-field check.
   useEffect(() => {
     if (pickupType === 'now') {
       const { dateStr } = getLiveNow();
@@ -375,9 +447,6 @@ export default function Checkout({ cart, setCart }) {
     }
   }, [form, pickupType, paymentType]);
 
-  // Stock/limit check ayon sa NAPILING order type. Ang cart item ay may dalang
-  // buy_now_available_stock / pre_order_available_stock galing sa Menu. Kapag
-  // wala (hal. bundle/package), nilalaktawan; ang backend ang huling gate.
   const stockIssues = useMemo(() => {
     const field = pickupType === 'now' ? 'buy_now_available_stock' : 'pre_order_available_stock';
     const label = pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order';
@@ -399,7 +468,6 @@ export default function Checkout({ cart, setCart }) {
   }, [cart, pickupType]);
 
   const stockIssueMessage = (issue) => (
-    // Hindi ibinabanggit ang eksaktong available stock sa customer.
     issue.limit <= 0
       ? `${issue.name} is not available for ${issue.label}.`
       : `${issue.name} is not available in that quantity for ${issue.label}.`
@@ -411,11 +479,6 @@ export default function Checkout({ cart, setCart }) {
 
   const SHOP_CLOSE_TIME = '17:00';
 
-  // NOTE: date selection is now handled directly by the custom MonthCalendar's
-  // onSelect callback, which only ever passes already-valid, non-disabled dates —
-  // so no separate change-handler/alert is needed here anymore.
-
-  // A slot is disabled only for "Pick-up Today" orders once its end time has already passed.
   const isSlotDisabled = (slot) => {
     if (pickupType !== 'now') return false;
     const { timeStr } = getLiveNow();
@@ -423,21 +486,14 @@ export default function Checkout({ cart, setCart }) {
   };
 
   const handleProceedToOrder = () => {
-    // 1. HIGHEST PRIORITY: Check if trying to pick up today when shop is already closed
     if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
       return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
     }
 
-    // 1b. Safety net lang (ang pangunahing stock guard ay nasa cart ng Menu na):
-    // para sa stale na cart kung nagbago ang stock habang nasa Checkout.
     if (stockIssues.length > 0) {
       return setToastMessage(`${stockIssueMessage(stockIssues[0])} Please go back to the menu and adjust your cart.`);
     }
 
-    // 2. Check if all required fields are filled out, and their formats.
-    // NOTE: pickupDate is only user-selectable (and thus only required) for
-    // Pre-Order ('later'). For 'now' orders the date is always "today" and is
-    // derived live from getLiveNow() in the payload, so it isn't required here.
     const needsPickupDate = pickupType === 'later';
     const phoneRegex = /^\d{11}$/;
     const newErrors = {};
@@ -463,30 +519,54 @@ export default function Checkout({ cart, setCart }) {
     if (!form.pickupTime) {
       newErrors.pickupTime = 'Please select a pickup time.';
     }
+    if (paymentConfigLoading || !paymentQrUrl) {
+      newErrors.payment = 'Payment QR code is currently unavailable. Please try again later.';
+    }
+    if (!proofOfPayment) {
+      newErrors.proof = 'Please upload your payment screenshot before proceeding.';
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
 
-    // Passed all validations
     setErrors({});
     setShowSummaryModal(true);
   };
 
+  const handleContinueToPayment = () => {
+    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
+      return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+    }
+
+    const needsPickupDate = pickupType === 'later';
+    const phoneRegex = /^\d{11}$/;
+    const newErrors = {};
+
+    if (!form.name.trim()) newErrors.name = 'Full name is required.';
+    if (!form.phone) newErrors.phone = 'Contact number is required.';
+    else if (!phoneRegex.test(form.phone)) newErrors.phone = 'Enter a valid 11-digit contact number.';
+    if (form.altPhone && !phoneRegex.test(form.altPhone)) newErrors.altPhone = 'Enter a valid 11-digit number.';
+    if (needsPickupDate && !form.pickupDate) newErrors.pickupDate = 'Please select a pickup date.';
+    if (!form.pickupTime) newErrors.pickupTime = 'Please select a pickup time.';
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setErrors({});
+    navigate('/onlineOrdering/payment');
+  };
+
   const handlePlaceOrder = async () => {
-    // Re-check ito dito (hindi lang sa handleProceedToOrder) kasi puwedeng
-    // makatawid na ng SHOP_CLOSE_TIME habang bukas pa 'yung Order Summary
-    // modal (nag-review, kumuha ng oras bago pumindot ng "Place Order").
-    // Kung isang beses lang tinignan noong "Proceed", may window kung saan
-    // makakalusot pa rin ang "Buy Now" order kahit sarado na ang shop.
     if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
       setShowSummaryModal(false);
       setToastMessage('Shop is already closed for today. Please select Pre-Order.');
       return;
     }
 
-    // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
     const missingImages = cart.flatMap(item =>
       findMissingRequiredSlipImages(item).map(label => `${item.name}: ${label}`)
     );
@@ -495,11 +575,15 @@ export default function Checkout({ cart, setCart }) {
       setToastMessage(`Please add the required photo(s) — ${missingImages.join(', ')}.`);
       return;
     }
+    if (!proofOfPayment) {
+      setShowSummaryModal(false);
+      setToastMessage('Please upload your payment screenshot before placing the order.');
+      return;
+    }
 
     setIsProcessing(true);
     let updatedCart = [...cart];
 
-    // Bilangin ang lahat ng larawang ia-upload para sa progress ("2 of 4").
     const totalUploads = cart.reduce(
       (n, it) => n + countReferenceFiles(it.inspiration_image) + countSlipFiles(it.order_slip_details), 0
     );
@@ -514,7 +598,6 @@ export default function Checkout({ cart, setCart }) {
       const img = updatedCart[i].inspiration_image;
 
       if (img instanceof File) {
-        // Regular (non-bundle) product — iisang File lang.
         const formData = new FormData();
         formData.append('image', img);
 
@@ -533,13 +616,6 @@ export default function Checkout({ cart, setCart }) {
         }
         tickUpload();
       } else if (img && typeof img === 'object') {
-        // FIX: Bundle item — `inspiration_image` dito ay `{ [productId]: File }`
-        // (isang larawan per component, mula sa BundleModal). Dating hindi
-        // ito napapansin ng `instanceof File` check kaya kahit nag-upload
-        // na ng larawan ang customer sa bundle, hindi ito na-uupload sa
-        // storage at walang na-se-save na URL. Ngayon, ini-upload na ang
-        // bawat File sa map at binubuo ang `inspiration_urls` bilang
-        // `{ [productId]: url }` para maipasa sa backend.
         const urls = {};
         for (const [productId, file] of Object.entries(img)) {
           if (!(file instanceof File)) continue;
@@ -568,9 +644,6 @@ export default function Checkout({ cart, setCart }) {
       }
     }
 
-    // Multi-image order slip fields: i-upload ang bawat File at palitan ng URL
-    // sa loob ng order_slip_details (array of URLs, JSONB sa DB). Kapag pumalya
-    // ang kahit isa, ihihinto ang pag-place ng order para hindi mawalan ng larawan.
     try {
       for (let i = 0; i < updatedCart.length; i++) {
         const slip = updatedCart[i].order_slip_details;
@@ -589,7 +662,6 @@ export default function Checkout({ cart, setCart }) {
 
     if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
-    // 2. BUILD PAYLOAD
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
     const orderPayload = {
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
@@ -616,21 +688,9 @@ export default function Checkout({ cart, setCart }) {
           orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
           selectedPriceOptions: item.selected_price_options || null, 
           inspirationUrl: item.inspiration_url || null,
-          // FIX: idinagdag para sa bundle items — per-component image URLs
-          // (`{ [productId]: url }`), binabasa na ng resolveBundleLineItem
-          // sa backend para malagyan ng customer_reference_url ang tamang
-          // exploded row.
           inspirationUrls: item.inspiration_urls || null,
-          // Kailangan ito para malaman ng backend (onlineOrdering.services.js
-          // resolveOrderItems) na dapat i-explode ang item na ito sa
-          // individual component products ng bundle/package, sa halip na
-          // ituring itong isang regular na product (na magre-resulta sa
-          // invalid product_id / walang laman na order_items).
           type: item.type || (item.category === 'Package' ? 'package' : null),
           bundleId: item.bundleId || null,
-          // packageId para sa PACKAGE lang — dati, `|| item.id` ang fallback
-          // para sa LAHAT ng item kaya pati regular na produkto ay napupunta
-          // sa package resolver ng backend.
           packageId: (item.type === 'package' || item.category === 'Package')
             ? (item.packageId || item.id || null)
             : null,
@@ -644,11 +704,6 @@ export default function Checkout({ cart, setCart }) {
         createdAt: new Date().toISOString(),
       };
 
-    // IMPORTANT: wala nang direct save sa `orders` table dito. Ang order ay
-    // sina-save lang sa database ng backend sa loob ng PayMongo webhook
-    // (`/paymongo-webhook`), pagkatapos lang ma-confirm na nabayaran talaga.
-    // Ang tempOrderData dito ay para lang sa local receipt preview ni
-    // Confirm.jsx habang naghihintay ng webhook confirmation.
     sessionStorage.setItem('tempOrderData', JSON.stringify({
       form,
       pickupType,
@@ -657,36 +712,39 @@ export default function Checkout({ cart, setCart }) {
       cart: updatedCart,
     }));
 
-    const amountToPay = paymentType === 'half' ? halfAmount : totalAmount;
-
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/paymongo-checkout`, {
+      const formData = new FormData();
+      formData.append('proof', proofOfPayment);
+      formData.append('orderPayload', JSON.stringify(orderPayload));
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/manual-payment-order`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: amountToPay,
-          description: `Aileen Cake Max - ${pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}`,
-          customerName: form.name,
-          customerPhone: form.phone,
-          frontendUrl: window.location.origin,
-          orderPayload, // buong order payload — ito ang ida-stage server-side
-        })
+        body: formData
       });
 
       const data = await response.json();
-if (data.success && data.checkoutUrl) {
-        // I-remember kung anong pending order ang hinihintay natin,
-        // gagamitin ito ni Confirm.jsx para mag-poll ng status.
-        sessionStorage.setItem('pendingOrderId', data.pendingOrderId);
-        window.location.href = data.checkoutUrl;
+      if (data.success && data.order) {
+        sessionStorage.setItem('manualOrderResult', JSON.stringify(data.order));
+        setCart([]);
+        try {
+          localStorage.removeItem(CHECKOUT_DRAFT_KEY);
+          const proofMarker = localStorage.getItem(PAYMENT_PROOF_KEY);
+          localStorage.removeItem(PAYMENT_PROOF_KEY);
+          localStorage.removeItem(PAYMENT_PROOF_AMOUNT_KEY);
+          if (proofMarker) {
+            await deleteFiles([proofMarker]);
+          }
+        } catch (cleanupError) {
+          console.error('Failed to clear successful checkout draft and payment proof:', cleanupError);
+        }
+        setShowSummaryModal(false);
+        navigate('/onlineOrdering/confirm', { state: { ...JSON.parse(sessionStorage.getItem('tempOrderData') || '{}'), order: data.order } });
       } else {
-        // Basahin ang error message galing backend (data.message), kung wala, tsaka gamitin ang fallback
         setToastMessage(getOrderErrorMessage(
           { message: data.message },
-          'Failed to generate payment link. Please try again.'
+          'Failed to submit payment proof. Please try again.'
         ));
         setIsProcessing(false);
-      setUploadProgress(null);
+        setUploadProgress(null);
       }
     } catch (error) {
       console.error('Error initiating payment:', error);
@@ -702,7 +760,7 @@ if (data.success && data.checkoutUrl) {
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-6 lg:gap-10 px-5 sm:px-8 py-6 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
 
         {/* LEFT COLUMN: Step 1 */}
-        <div className="flex-1 flex flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2 lg:overflow-y-auto scrollbar-thin">
+        <div className={`${isPaymentStep ? 'hidden' : 'flex'} flex-1 flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2 lg:overflow-y-auto scrollbar-thin`}>
           <div className="flex flex-col lg:flex-1 lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
 
               <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:rounded-none lg:border-0 lg:shadow-none">
@@ -749,7 +807,6 @@ if (data.success && data.checkoutUrl) {
                                 value={form.phone}
                                 className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
-                                  // Regex removes any non-digit character
                                   const onlyNums = e.target.value.replace(/\D/g, '');
                                   setForm({...form, phone: onlyNums});
                                   setErrors(prev => ({...prev, phone: false}));
@@ -905,6 +962,22 @@ if (data.success && data.checkoutUrl) {
                           <p className="mt-1 text-right text-[10px] text-[#B7A99F]">{(form.instructions || '').length}/300</p>
                       </div>
 
+                      <button
+                        type="button"
+                        onClick={handleContinueToPayment}
+                        className="mt-1 w-full rounded-full bg-[#3B1F0A] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#2A1608]"
+                      >
+                        Continue to Payment
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => navigate('/onlineOrdering/menu')}
+                        className="w-full text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
+                      >
+                        &larr; Back to Menu
+                      </button>
+
                   </div>
               </div>
 
@@ -912,7 +985,7 @@ if (data.success && data.checkoutUrl) {
         </div>
 
         {/* RIGHT COLUMN: Step 2 (Payment) */}
-        <div className="flex lg:flex-col w-full lg:w-[360px] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 lg:max-h-[calc(100vh-112px)] overflow-hidden flex-col">
+        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[360px] lg:max-w-[560px] lg:mx-auto bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 lg:max-h-[calc(100vh-112px)] overflow-hidden flex-col`}>
 
           <div className="flex-1 min-h-0 px-5 py-4 flex flex-col gap-5 overflow-y-auto scrollbar-thin">
               <div className="flex flex-col shrink-0">
@@ -953,6 +1026,103 @@ if (data.success && data.checkoutUrl) {
                           <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay in full for hassle-free pick-up.</p>
                           <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{totalAmount.toLocaleString()}</div>
                       </div>
+                      <div className="mt-4 rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3">
+                        <p className="text-xs font-semibold text-[#3B1F0A]">Pay via QR code</p>
+                        {paymentConfigLoading ? (
+                          <div role="status" aria-live="polite" className="mx-auto my-3 flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
+                            <Loader2 size={24} className="animate-spin" />
+                            <span className="text-[11px] font-medium">Loading QR code…</span>
+                          </div>
+                        ) : paymentConfigError ? (
+                          <div role="alert" className="mx-auto my-3 flex min-h-[12rem] w-48 flex-col items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-center">
+                            <AlertCircle size={22} className="text-red-500" />
+                            <span className="text-[11px] text-red-700">Couldn't load the payment QR code.</span>
+                            <button
+                              type="button"
+                              onClick={() => setPaymentConfigAttempt(n => n + 1)}
+                              className="rounded-full bg-[#3B1F0A] px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#2A1608]"
+                            >
+                              Try again
+                            </button>
+                          </div>
+                        ) : paymentQrUrl ? (
+                          <div 
+                            className="relative mx-auto my-3 h-48 w-48 group cursor-zoom-in rounded-lg border border-[#EAE4E0] bg-white p-1 overflow-hidden"
+                            onClick={() => setIsQrExpanded(true)}
+                            title="Click to expand QR code"
+                          >
+                            {!qrImageLoaded && (
+                              <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
+                                <Loader2 size={24} className="animate-spin" />
+                                <span className="text-[11px] font-medium">Loading QR code…</span>
+                              </div>
+                            )}
+                            <img
+                              ref={el => { if (el && el.complete && el.naturalWidth > 0) setQrImageLoaded(true); }}
+                              src={paymentQrUrl}
+                              alt="Payment QR code"
+                              onLoad={() => setQrImageLoaded(true)}
+                              onError={() => setPaymentConfigError(true)}
+                              className={`h-full w-full object-contain transition-opacity duration-200 ${qrImageLoaded ? 'opacity-100' : 'opacity-0'}`}
+                            />
+                            {qrImageLoaded && (
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex flex-col items-center justify-end p-2">
+                                <span className="bg-[#3B1F0A]/85 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
+                                  <ZoomIn size={12} /> Tap to expand
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="py-8 text-center text-xs text-red-700">Payment QR code is not configured.</p>
+                        )}
+                        <p className="text-[10px] text-[#8A7264]">After paying, upload a screenshot of your successful transaction.</p>
+                        <input
+                          ref={proofInputRef}
+                          id="payment-proof-upload"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProofChange}
+                          className="sr-only"
+                        />
+                        {proofPreviewUrl ? (
+                          <div className="mt-3 flex items-center gap-3 rounded-lg border border-[#DED4CC] bg-white p-2">
+                            <img
+                              src={proofPreviewUrl}
+                              alt="Selected payment proof preview"
+                              className="h-16 w-16 shrink-0 rounded-md border border-[#EAE4E0] object-cover"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[11px] font-semibold text-green-700" title={proofOfPayment?.name}>{proofOfPayment?.name}</p>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                                <label
+                                  htmlFor="payment-proof-upload"
+                                  className={`inline-flex cursor-pointer items-center rounded-full border border-[#DED4CC] bg-white px-3 py-1 text-[10px] font-semibold text-[#3B1F0A] transition-colors hover:bg-[#F5EFEB] ${isProcessing ? 'pointer-events-none opacity-50' : ''}`}
+                                >
+                                  Choose another
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={isProcessing}
+                                  onClick={() => setProofOfPayment(null)}
+                                  className="rounded-full px-2 py-1 text-[10px] font-semibold text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <label
+                            htmlFor="payment-proof-upload"
+                            className="mt-2 inline-flex cursor-pointer items-center rounded-lg bg-[#3B1F0A] px-3 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-[#2A1608]"
+                          >
+                            Choose payment screenshot
+                          </label>
+                        )}
+                      </div>
+                      {errors.proof && <p className="mt-2 text-xs text-red-700">{errors.proof}</p>}
+                      {errors.payment && <p className="mt-2 text-xs text-red-700">{errors.payment}</p>}
                   </div>
               </div>
 
@@ -988,21 +1158,60 @@ if (data.success && data.checkoutUrl) {
             </div>
             <button
               onClick={handleProceedToOrder}
-              disabled={isProcessing}
-              className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+              disabled={isProcessing || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
+              className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isProcessing ? 'Processing Payment...' : 'Proceed to Order'}
             </button>
             <button
-              onClick={() => navigate('/onlineOrdering/menu')}
+              onClick={() => navigate(isPaymentStep ? '/onlineOrdering/checkout' : '/onlineOrdering/menu')}
               disabled={isProcessing}
               className="w-full text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] mt-2 text-center transition-colors disabled:opacity-50"
             >
-              &larr; Back to Menu
+              &larr; Back to Details
             </button>
           </div>
         </div>
       </div>
+
+      {/* --- EXPANDED QR LIGHTBOX MODAL --- */}
+      {isQrExpanded && paymentQrUrl && createPortal(
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setIsQrExpanded(false)}
+        >
+          <div 
+            className="relative bg-white p-5 rounded-3xl max-w-sm w-full flex flex-col items-center shadow-2xl border border-[#EAE4E0]" 
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setIsQrExpanded(false)}
+              className="absolute top-3.5 right-3.5 w-9 h-9 rounded-full bg-[#F5EFEB] hover:bg-[#EAE4E0] flex items-center justify-center text-[#3B1F0A] transition-colors"
+              aria-label="Close expanded QR"
+            >
+              <X size={18} />
+            </button>
+            <h4 className="text-base font-serif font-bold text-[#3B1F0A] mb-1">Payment QR Code</h4>
+            <p className="text-xs text-[#8A7264] mb-4 text-center">Scan directly using your e-wallet app or take a screenshot</p>
+            <div className="bg-white p-2.5 rounded-2xl border border-[#EAE4E0] shadow-inner w-full flex justify-center">
+              <img
+                src={paymentQrUrl}
+                alt="Expanded Payment QR code"
+                className="w-full max-w-[300px] h-auto object-contain rounded-xl"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsQrExpanded(false)}
+              className="mt-4 w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* --- REVISED TWO-COLUMN ORDER SUMMARY MODAL --- */}
       {showSummaryModal && (
@@ -1017,21 +1226,6 @@ if (data.success && data.checkoutUrl) {
               <h3 className="text-base sm:text-lg font-serif text-[#3B1F0A] leading-none">Order Summary</h3>
             </div>
 
-            {/* Scrollable Body: Order Details + Items.
-                FIX (mobile): dati, ang Payment + Action Buttons ay NASA
-                LOOB ng Right Column (kasama ng Items), at ang Left Column
-                (Order Details) ay flex-shrink-0 — kumukuha ng buong
-                natural height niya. Sa mobile (naka-stack ang columns
-                pababa), kapag mahaba ang Order Details + Items, wala nang
-                natitirang space ang buttons sa ilalim ng flex-1 na Right
-                Column — at dahil overflow-hidden ang parent, basta
-                NAWAWALA na lang sila (hindi man lang ma-scroll papuntang
-                doon). Ginawa na lang natin ITONG buong Order Details +
-                Items na IISANG unified scroll area (may sariling scroll
-                pa rin bawat column sa md+/desktop), at inilabas natin ang
-                Payment + Buttons bilang hiwalay, laging-nakikitang footer
-                sa ibaba (see closing tags) — kaya garantisadong visible
-                na ito lagi, kahit gaano pa kahaba ang laman sa itaas. */}
             <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden scrollbar-thin">
               
               {/* Left Column: Customer & Pickup Details */}
@@ -1078,18 +1272,9 @@ if (data.success && data.checkoutUrl) {
                   <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
                   
                   {cart.map((item, i) => {
-                    // Thumbnail = MISMONG larawan ng product/package/bundle (gaya ng
-                    // POS Order Summary na `item.image_url`) — HINDI ang reference
-                    // image na in-upload ng customer para sa isang component (hal.
-                    // balloons). Ang na-upload ay may "Image Attached" label na lang
-                    // sa ilalim. Wala ring URL.createObjectURL dito, kaya wala nang
-                    // memory leak tuwing nagre-render.
                     let imgSrc = item.custom_image_url || item.image_url || item.image;
 
-                    // Safety check: kung relative path/filename lang ang galing sa
-                    // database, idugtong ang backend URL para lumabas nang tama.
                     if (imgSrc && typeof imgSrc === 'string' && !imgSrc.startsWith('http') && !imgSrc.startsWith('blob:') && !imgSrc.startsWith('data:')) {
-                      // Note: I-adjust ang '/uploads/' kung iba ang folder name mo sa backend (e.g. '/images/')
                       imgSrc = `${import.meta.env.VITE_API_URL}/uploads/${imgSrc.replace(/^\//, '')}`;
                     }
 
@@ -1127,11 +1312,6 @@ if (data.success && data.checkoutUrl) {
                             </div>
                           )}
                           
-                          {/* FIX (per-product slip): each component product of the
-                              bundle now gets its own small slip card — product name
-                              as the header, its own filled-out fields underneath —
-                              instead of repeating "ProductName - Label:" on every
-                              single line. */}
                           {expandedSummaryIndexes.has(i) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 ? (
                             <div className="flex flex-col gap-1.5 mt-1">
                               {Object.entries(item.order_slip_details).map(([prodId, answers]) => {
@@ -1193,13 +1373,7 @@ if (data.success && data.checkoutUrl) {
                   })}
               </div>
             </div>
-            {/* End of scrollable body (Order Details + Items) */}
 
-            {/* Fixed Payment Section — BAGONG LOKASYON: hiwalay na footer ng
-                buong modal (sibling ng scrollable body sa itaas), hindi na
-                nested sa loob ng Right Column. `shrink-0` ito kaya hindi ito
-                sinisiksik/nawawala kahit gaano pa kahaba ang Order Details
-                o Items list — palaging bisible ang Back/Place Order. */}
             <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
               <div className="mb-4">
                 {paymentType === 'half' ? (
@@ -1231,7 +1405,6 @@ if (data.success && data.checkoutUrl) {
 
               {isProcessing && <UploadProgressNote progress={uploadProgress} finalLabel="Connecting to payment..." className="mb-3" />}
 
-              {/* Action Buttons side by side */}
               <div className="flex gap-2.5">
                 <button
                   onClick={() => setShowSummaryModal(false)}
@@ -1254,7 +1427,6 @@ if (data.success && data.checkoutUrl) {
         </div>
       )}
 
-      {/* --- Custom Alert Modal (Toast) --- */}
       {toastMessage && (
         <div className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/50 px-4">
           <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-xl p-5 sm:p-6 w-full max-w-[320px] flex flex-col items-center text-center">

@@ -236,7 +236,12 @@ export default function PosPage() {
     });
   };
 
-  const handleClearCart = () => setCart([]);
+  const handleClearCart = () => {
+    // Clear the persisted snapshot before updating React state so a
+    // successful checkout cannot restore the previous cart on remount.
+    localStorage.removeItem('pos_cart');
+    setCart([]);
+  };
 
   const handleRemoveItem = (index) => {
     setCart(prev => prev.filter((_, i) => i !== index));

@@ -49,6 +49,24 @@ const OrdersController = {
       next(err);
     }
   },
+
+  async acceptPayment(req, res, next) {
+    try {
+      const order = await OrdersService.verifyPayment(req.params.id, true, req.user?.id);
+      if (!order) return res.status(409).json({ success: false, message: 'Order is no longer pending verification.' });
+      return res.json({ success: true, data: order });
+    } catch (err) { next(err); }
+  },
+
+  async rejectPayment(req, res, next) {
+    try {
+      const reason = String(req.body?.reason || '').trim();
+      if (!reason) return res.status(400).json({ success: false, message: 'A rejection reason is required.' });
+      const order = await OrdersService.verifyPayment(req.params.id, false, req.user?.id, reason);
+      if (!order) return res.status(409).json({ success: false, message: 'Order is no longer pending verification.' });
+      return res.json({ success: true, data: order });
+    } catch (err) { next(err); }
+  },
 };
 
 export { OrdersController };

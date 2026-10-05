@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import Footer from '../onlineOrdering/Footer';
+import { deleteFiles } from '../shared/cartImageStore';
 
 const DUMMY_CART = [
   { name: 'Package B', qty: 1, price: 550 },
@@ -12,6 +13,7 @@ const DUMMY_CART = [
 // Kailangang MAGKATUGMA ito sa CHECKOUT_DRAFT_KEY sa Checkout.jsx — dito lang
 // ito ini-clear, pagkatapos ma-confirm na successful na ang order.
 const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
+const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
 
 // Gaano katagal mag-poll bago sabihin sa customer na tumagal ang confirmation.
 const POLL_INTERVAL_MS = 2000;
@@ -31,9 +33,10 @@ export default function Confirm({ orderId, setCart }) {
   // backup. Wala itong ibig sabihin kung POS/admin flow ang gumamit ng
   // Confirm nang direkta (walang PayMongo involved).
   const pendingOrderId = searchParams.get('pending_id') || sessionStorage.getItem('pendingOrderId');
+  const manualOrder = JSON.parse(sessionStorage.getItem('manualOrderResult') || 'null');
 
-  const [paymentStatus, setPaymentStatus] = useState(pendingOrderId ? 'checking' : 'unknown');
-  const [resolvedOrder, setResolvedOrder] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState(manualOrder ? 'manual-pending' : (pendingOrderId ? 'checking' : 'unknown'));
+  const [resolvedOrder, setResolvedOrder] = useState(manualOrder);
 
   // Mag-poll sa backend hanggang makumpirma ng PayMongo webhook ang bayad at
   // magawa na ang TOTOONG order sa database. Hindi natin ito nilalagay sa
@@ -59,8 +62,13 @@ export default function Confirm({ orderId, setCart }) {
           setCart?.([]); // successful na ang order — i-clear na 'yung TOTOONG cart (auto ring mabubura sa localStorage via parent's useEffect)
           try {
             localStorage.removeItem(CHECKOUT_DRAFT_KEY);
+            const proofMarker = localStorage.getItem(PAYMENT_PROOF_KEY);
+            localStorage.removeItem(PAYMENT_PROOF_KEY);
+            if (proofMarker) {
+              await deleteFiles([proofMarker]);
+            }
           } catch (err) {
-            console.error('Failed to clear checkout draft from storage:', err);
+            console.error('Failed to clear successful checkout draft and payment proof:', err);
           }
           return;
         }
@@ -157,7 +165,7 @@ export default function Confirm({ orderId, setCart }) {
             <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
             <h2 className="text-lg font-serif text-[#3B1F0A] mb-1">Confirming your payment…</h2>
             <p className="text-xs text-[#8A7264] max-w-[320px] text-center">
-              We are still confirming your payment with PayMongo. Please do not close this tab.
+              Your order was submitted and is waiting for owner verification. Please do not close this tab.
             </p>
           </div>
         </div>
@@ -204,9 +212,12 @@ export default function Confirm({ orderId, setCart }) {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 className="text-lg sm:text-xl font-serif text-[#3B1F0A] mb-1">Order Placed!</h2>
-            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[420px] mx-auto truncate px-2">
+            <h2 className="text-lg sm:text-xl font-serif text-[#3B1F0A] mb-1">Order Submitted for Verification</h2>
+            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[420px] mx-auto px-2 leading-snug">
               Please save your digital receipt. Present the QR code at the counter to claim your order.
+            </p>
+            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[420px] mx-auto px-2 mt-1.5 leading-snug">
+              We will update you via text message once your payment is verified and your order is accepted. If no valid payment is found, please do not expect a text from us.
             </p>
           </div>
 

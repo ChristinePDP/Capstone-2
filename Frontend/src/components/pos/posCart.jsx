@@ -509,6 +509,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       }
 
       onClearCart();
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: { table: 'orders', action: 'created', source: 'pos' }
+      }));
 
       // FIX: dati'y hindi nirerefresh ang product list pagkatapos mag-order,
       // kaya kahit nabawasan na ang stock sa DB, tama pa rin ang lumang
@@ -524,7 +527,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       setDiscountPercentage('');
       setPaymentMode('Full Payment');
       
-      localStorage.removeItem('pos_cart');
       localStorage.removeItem('pos_orderType');
       localStorage.removeItem('pos_form');
       localStorage.removeItem('pos_additionalCharge');

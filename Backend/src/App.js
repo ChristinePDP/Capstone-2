@@ -14,6 +14,7 @@ import productAndEventRoutes from './routes/productAndEvent.routes.js';
 import ordersRoutes from './routes/orders.routes.js'; 
 import cronRoutes from './routes/cron.routes.js';
 import realtimeRoutes from './routes/realtime.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 import { handlePaymongoWebhook } from './controller/onlineOrdering.controller.js';
@@ -67,6 +68,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/online-ordering/products', productAndEventRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/realtime', realtimeRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.use(errorHandler);
 

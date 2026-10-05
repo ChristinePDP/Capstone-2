@@ -1,8 +1,9 @@
-import { ChevronDown, Lock } from 'lucide-react';
+import { ChevronDown, Lock, QrCode } from 'lucide-react';
 
 // ─── Sections shown in Settings ────────────────────────────────
 export const SETTINGS_TABS = [
-  { id: 'security', label: 'Security', icon: Lock }
+  { id: 'security', label: 'Security', icon: Lock },
+  { id: 'payment', label: 'Payment QR Code', icon: QrCode }
 ];
 
 export default function SettingsNav({ active, onChange }) {

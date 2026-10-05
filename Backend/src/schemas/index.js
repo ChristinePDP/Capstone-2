@@ -112,7 +112,7 @@ const CreateOrderSchema = z.object({
 });
 
 const UpdateOrderStatusSchema = z.object({
-  status: z.enum(['Confirmed', 'Ready', 'Completed', 'Cancelled']),
+  status: z.enum(['Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled']),
 });
 
 // ─── INVENTORY ───────────────────────────────────────────────────────────────
