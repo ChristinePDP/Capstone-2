@@ -22,19 +22,54 @@ const getStockLimitField = (product) => {
   return hasDailyLimit ? 'daily_limit' : 'stock_quantity';
 };
 
-const withPaymentProofUrl = async (order) => {
-  if (!order?.proof_of_payment_path) return order;
+const PAYMENT_PROOF_BUCKET = 'payment-assets';
 
-  const { data, error } = await supabase.storage
-    .from('payment-assets')
-    .createSignedUrl(order.proof_of_payment_path, 60 * 60);
+const normalizePaymentProofPath = (value) => {
+  if (!value) return null;
 
-  if (error) {
-    console.error(`Failed to create payment proof URL for order ${order.id}:`, error.message);
-    return { ...order, proof_of_payment_url: null };
+  const rawValue = String(value).trim();
+  if (!rawValue) return null;
+
+  try {
+    const parsedUrl = new URL(rawValue);
+    const marker = `/storage/v1/object/${parsedUrl.pathname.includes('/sign/') ? 'sign' : 'public'}/${PAYMENT_PROOF_BUCKET}/`;
+    const markerIndex = parsedUrl.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      return decodeURIComponent(parsedUrl.pathname.slice(markerIndex + marker.length));
+    }
+  } catch {
+    // The database normally stores a bucket-relative path, not a URL.
   }
 
-  return { ...order, proof_of_payment_url: data.signedUrl };
+  return rawValue.replace(/^\/+/, '').split('?')[0];
+};
+
+const withPaymentProofUrl = async (order) => {
+  const paths = [
+    normalizePaymentProofPath(order?.proof_of_payment_path),
+    normalizePaymentProofPath(order?.proof_of_payment_url),
+  ].filter((path, index, allPaths) => path && allPaths.indexOf(path) === index);
+
+  if (paths.length === 0) return order;
+
+  let lastError = null;
+  for (const path of paths) {
+    const { data, error } = await supabase.storage
+      .from(PAYMENT_PROOF_BUCKET)
+      .createSignedUrl(path, 60 * 60);
+
+    if (!error && data?.signedUrl) {
+      return { ...order, proof_of_payment_url: data.signedUrl };
+    }
+
+    lastError = error || new Error('Supabase did not return a signed URL');
+  }
+
+  console.error(
+    `Failed to create payment proof URL for order ${order.id} (paths: ${paths.join(', ')}):`,
+    lastError.message
+  );
+  return { ...order, proof_of_payment_url: null };
 };
 
 const OrdersService = {

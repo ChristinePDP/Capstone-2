@@ -188,7 +188,11 @@ export default function Confirm({ orderId, setCart }) {
                 : 'Your payment may have gone through, but confirmation is taking longer than usual. Please try refreshing after a few seconds, or contact us if this persists.'}
             </p>
             <button
-              onClick={() => navigate('/onlineOrdering/home')}
+              onClick={() => {
+                sessionStorage.removeItem('tempOrderData');
+                sessionStorage.removeItem('manualOrderResult');
+                navigate('/onlineOrdering/home');
+              }}
               className="text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] transition-colors"
             >
               &larr; Back to Home
@@ -388,6 +392,8 @@ export default function Confirm({ orderId, setCart }) {
           <div className="w-full max-w-[340px] flex flex-col mt-5 sm:mt-6 shrink-0">
             <button
               onClick={() => {
+                sessionStorage.removeItem('tempOrderData');
+                sessionStorage.removeItem('manualOrderResult');
                 navigate('/onlineOrdering/home');
               }}
               className="w-full text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
@@ -402,3 +408,4 @@ export default function Confirm({ orderId, setCart }) {
     </div>
   );
 }
+
