@@ -363,6 +363,9 @@ export const placeManualPaymentOrder = async (req, res) => {
     const marker = '/storage/v1/object/public/payment-assets/';
     const pathIndex = proofUrl.indexOf(marker);
     const proofPath = pathIndex >= 0 ? decodeURIComponent(proofUrl.slice(pathIndex + marker.length)) : null;
+    if (!proofPath || !proofPath.startsWith('proof_of_transaction/')) {
+      throw new Error('Failed to determine the uploaded payment proof path.');
+    }
     const savedOrder = await createDatabaseOrder(orderPayload, null, { url: proofUrl, path: proofPath });
     return res.status(201).json({ success: true, order: savedOrder });
   } catch (error) {

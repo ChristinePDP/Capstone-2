@@ -23,6 +23,20 @@ const OrdersController = {
     }
   },
 
+  async getPaymentProof(req, res, next) {
+    try {
+      const image = await OrdersService.getPaymentProof(req.params.id);
+      const buffer = Buffer.isBuffer(image)
+        ? image
+        : Buffer.from(await image.arrayBuffer());
+      res.set('Content-Type', image.type || 'application/octet-stream');
+      res.set('Cache-Control', 'private, no-store');
+      return res.status(200).send(buffer);
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async getPendingCelebrationMaterialRestock(_req, res, next) {
     try {
       const materials = await OrdersService.getPendingCelebrationMaterialRestock();

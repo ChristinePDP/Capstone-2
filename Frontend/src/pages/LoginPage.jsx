@@ -391,7 +391,9 @@ export default function LoginPage({ onLogin }) {
   const doLogin = async () => {
     const errs = {};
     if (!email || !isValidEmail(email)) errs.email = 'Please enter a valid email address.';
-    if (!password) errs.password = 'Password is required.';
+    if (!password) {
+      errs.password = 'Password is required.';
+    }
     setLoginErrors(errs);
     if (Object.keys(errs).length > 0) return;
 

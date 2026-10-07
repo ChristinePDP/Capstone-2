@@ -2,6 +2,12 @@ import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
+function getApiErrorMessage(error, fallback) {
+  const response = error?.response?.data;
+  const fieldError = response?.errors?.find((item) => item?.issue)?.issue;
+  return fieldError || response?.message || fallback;
+}
+
 export async function login(email, password) {
   try {
     const res = await axios.post(`${API_BASE}/login`, { email, password }, {
@@ -17,7 +23,7 @@ export async function login(email, password) {
 
     return res.data.data;
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Login failed', { cause: err });
+    throw new Error(getApiErrorMessage(err, 'Login failed'), { cause: err });
   }
 }
 
@@ -51,7 +57,7 @@ export async function changePassword(currentPassword, newPassword) {
     });
     return res.data;
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Failed to change password', { cause: err });
+    throw new Error(getApiErrorMessage(err, 'Failed to change password'), { cause: err });
   }
 }
 
@@ -60,7 +66,7 @@ export async function requestPasswordReset(email) {
     const res = await axios.post(`${API_BASE}/forgot-password`, { email });
     return res.data;
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Failed to send OTP', { cause: err });
+    throw new Error(getApiErrorMessage(err, 'Failed to send OTP'), { cause: err });
   }
 }
 
@@ -70,7 +76,7 @@ export async function verifyOtpOnly(email, otp) {
     const res = await axios.post(`${API_BASE}/verify-otp`, { email, otp });
     return res.data;
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Invalid or expired OTP', { cause: err });
+    throw new Error(getApiErrorMessage(err, 'Invalid or expired OTP'), { cause: err });
   }
 }
 
@@ -80,6 +86,6 @@ export async function resetPasswordWithOtp(email, otp, newPassword) {
     const res = await axios.post(`${API_BASE}/reset-password`, { email, otp, newPassword });
     return res.data;
   } catch (err) {
-    throw new Error(err.response?.data?.message || 'Failed to reset password', { cause: err });
+    throw new Error(getApiErrorMessage(err, 'Failed to reset password'), { cause: err });
   }
 }

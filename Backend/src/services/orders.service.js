@@ -24,37 +24,6 @@ const getStockLimitField = (product) => {
 
 const PAYMENT_PROOF_BUCKET = 'payment-assets';
 
-// Extra buckets to try kapag "Object not found" sa default bucket. Pwedeng
-// i-set via env: PAYMENT_PROOF_FALLBACK_BUCKETS=bucket-a,bucket-b
-const ENV_FALLBACK_BUCKETS = (process.env.PAYMENT_PROOF_FALLBACK_BUCKETS || '')
-  .split(',')
-  .map((b) => b.trim())
-  .filter(Boolean);
-
-// Cache ng lahat ng bucket names (listBuckets) para hindi paulit-ulit ang call.
-let bucketNamesCache = { at: 0, names: [] };
-const BUCKET_CACHE_MS = 5 * 60 * 1000;
-
-const getAllBucketNames = async () => {
-  if (Date.now() - bucketNamesCache.at < BUCKET_CACHE_MS) return bucketNamesCache.names;
-  try {
-    const { data, error } = await supabase.storage.listBuckets();
-    if (error) throw error;
-    bucketNamesCache = { at: Date.now(), names: (data || []).map((b) => b.name) };
-    // Kapag service role ang gamit pero empty ang buckets, kakaiba — i-log.
-    if (bucketNamesCache.names.length === 0) {
-      console.error(
-        `[STORAGE] listBuckets() returned 0 buckets (usingServiceRole=${usingServiceRole}). ` +
-        'Malamang limitado ang key na ginagamit ng backend.'
-      );
-    }
-  } catch (err) {
-    console.error('Failed to list storage buckets:', err.message);
-    bucketNamesCache = { at: Date.now(), names: [] };
-  }
-  return bucketNamesCache.names;
-};
-
 // Ang nakaimbak sa DB ay pwedeng (a) bucket-relative path, o (b) buong
 // Supabase URL. Kapag URL, kunin din ang BUCKET mula rito — dati ay
 // laging ipinapalagay na 'payment-assets', kaya "Object not found" kapag
@@ -85,66 +54,23 @@ const parseStoredProofValue = (value) => {
   return { bucket: null, path };
 };
 
-const trySign = async (bucket, path) => {
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .createSignedUrl(path, 60 * 60);
-  if (!error && data?.signedUrl) return { url: data.signedUrl };
-
-  // Fallback para sa PUBLIC buckets: kapag pumalya ang signing (hal. limitado
-  // ang key), subukan ang public URL at i-verify na talagang umiiral ang file.
-  try {
-    const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
-    if (pub?.publicUrl) {
-      const res = await fetch(pub.publicUrl, { method: 'HEAD' });
-      if (res.ok) return { url: pub.publicUrl };
-    }
-  } catch {
-    // Ignore — babalik sa error sa ibaba.
-  }
-
-  return { error: error || new Error('Supabase did not return a signed URL') };
-};
-
-const withPaymentProofUrl = async (order) => {
+const getStoredPaymentProofPath = (order) => {
   const candidates = [
     parseStoredProofValue(order?.proof_of_payment_path),
     parseStoredProofValue(order?.proof_of_payment_url),
-  ].filter((c, i, all) => c && c.path && all.findIndex((x) => x.path === c.path && x.bucket === c.bucket) === i);
+  ].filter((candidate, index, all) => (
+    candidate?.path
+    && all.findIndex((item) => item.path === candidate.path && item.bucket === candidate.bucket) === index
+  ));
 
-  if (candidates.length === 0) return order;
+  const candidate = candidates.find(({ bucket }) => !bucket || bucket === PAYMENT_PROOF_BUCKET);
+  const path = candidate?.path;
 
-  let lastError = null;
-  const tried = [];
-
-  for (const { bucket: hintedBucket, path } of candidates) {
-    // Priority: bucket mula sa URL -> default -> env fallbacks.
-    const buckets = [hintedBucket, PAYMENT_PROOF_BUCKET, ...ENV_FALLBACK_BUCKETS]
-      .filter((b, i, all) => b && all.indexOf(b) === i);
-
-    for (const bucket of buckets) {
-      tried.push(`${bucket}/${path}`);
-      const result = await trySign(bucket, path);
-      if (result.url) return { ...order, proof_of_payment_url: result.url };
-      lastError = result.error;
-    }
-
-    // Last resort: hanapin sa lahat ng iba pang bucket.
-    const allBuckets = await getAllBucketNames();
-    for (const bucket of allBuckets) {
-      if (buckets.includes(bucket)) continue;
-      tried.push(`${bucket}/${path}`);
-      const result = await trySign(bucket, path);
-      if (result.url) return { ...order, proof_of_payment_url: result.url };
-      lastError = result.error;
-    }
+  if (!path || !path.startsWith('proof_of_transaction/') || path.includes('..')) {
+    return null;
   }
 
-  console.error(
-    `Failed to create payment proof URL for order ${order.id} (tried: ${tried.join(', ')}):`,
-    lastError?.message
-  );
-  return { ...order, proof_of_payment_url: null };
+  return path;
 };
 
 const OrdersService = {
@@ -154,7 +80,7 @@ const OrdersService = {
    */
   async getAllOrders() {
     const orders = await OrdersModel.findAllWithDetails();
-    return Promise.all((orders || []).map(withPaymentProofUrl));
+    return orders || [];
   },
 
   /**
@@ -172,7 +98,47 @@ const OrdersService = {
       err.status = 404;
       throw err;
     }
-    return withPaymentProofUrl(order);
+    return order;
+  },
+
+  async getPaymentProof(id) {
+    if (!id) {
+      const error = new Error('Order id is required');
+      error.status = 400;
+      throw error;
+    }
+
+    const order = await OrdersModel.findById(id);
+    if (!order) {
+      const error = new Error('Order not found');
+      error.status = 404;
+      throw error;
+    }
+
+    const path = getStoredPaymentProofPath(order);
+    if (!path) {
+      const error = new Error('Payment proof is unavailable');
+      error.status = 404;
+      throw error;
+    }
+
+    if (!usingServiceRole) {
+      const error = new Error('Payment proof storage is not configured for private access');
+      error.status = 503;
+      throw error;
+    }
+
+    const { data, error } = await supabase.storage
+      .from(PAYMENT_PROOF_BUCKET)
+      .download(path);
+
+    if (error || !data) {
+      const storageError = new Error(error?.message || 'Payment proof object not found');
+      storageError.status = 404;
+      throw storageError;
+    }
+
+    return data;
   },
 
   async getPendingCelebrationMaterialRestock() {
@@ -349,7 +315,7 @@ const OrdersService = {
       err.status = 404;
       throw err;
     }
-    if (order.status !== 'Pending Verification' || !order.proof_of_payment_url) {
+    if (order.status !== 'Pending Verification' || !getStoredPaymentProofPath(order)) {
       return null;
     }
     return OrdersModel.updatePaymentVerification(

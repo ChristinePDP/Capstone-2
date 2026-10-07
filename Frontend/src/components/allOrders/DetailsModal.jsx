@@ -345,6 +345,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
   const customer     = order.customer || order.customers || {};
   const orderNumber   = order.order_number || order.id;
+  const paymentProofUrl = (order.proof_of_payment_path || order.proof_of_payment_url)
+    ? `${import.meta.env.VITE_API_URL}/allOrders/${order.id}/payment-proof`
+    : null;
   const orderType     = order.orderType || order.order_type || order.type;
   const source        = order.source || order.order_source;
   const placedByAdmin = order.placedByAdmin || order.placed_by_admin;
@@ -612,17 +615,17 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                 )}
 
                 {/* Proof of Payment Thumbnail */}
-                {order.proof_of_payment_url && (
+                {paymentProofUrl && (
                   <div className="mt-4 pt-4 border-t border-[#EAE4E0]">
                     <p className="text-xs font-semibold text-[#8A7264] mb-2">Proof of payment</p>
                     <button
                       type="button"
-                      onClick={() => openLightbox([order.proof_of_payment_url])}
+                      onClick={() => openLightbox([paymentProofUrl])}
                       className="group relative w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] cursor-zoom-in flex items-center justify-center"
                       aria-label="Enlarge payment proof"
                     >
                       <img
-                        src={order.proof_of_payment_url}
+                        src={paymentProofUrl}
                         alt="Payment proof"
                         className="w-full h-full object-cover"
                       />

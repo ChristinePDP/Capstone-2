@@ -12,6 +12,8 @@ router.get('/', OrdersController.getAllOrders);
 
 router.get('/pending-celebration-materials', OrdersController.getPendingCelebrationMaterialRestock);
 
+router.get('/:id/payment-proof', OrdersController.getPaymentProof);
+
 // GET  /api/inventory/orders/:id      -> isang order (with customer + items)
 router.get('/:id', OrdersController.getOrderById);
 

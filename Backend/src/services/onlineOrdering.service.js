@@ -720,7 +720,6 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null, man
     paymongo_payment_id: paymongoPaymentId,
     ...(manualPayment ? {
       payment_verification_status: 'Pending',
-      proof_of_payment_url: manualPayment.url,
       proof_of_payment_path: manualPayment.path,
       proof_uploaded_at: new Date().toISOString(),
     } : {}),

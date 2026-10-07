@@ -66,10 +66,9 @@ UPDATE storage.buckets
 SET public = false
 WHERE id = 'payment-assets';
 
--- The customer submits proof through the backend. When the backend is
--- configured with SUPABASE_SERVICE_ROLE_KEY these policies are bypassed;
--- they also support installations that still use the anon key. Proof files
--- remain private because no SELECT policy is granted.
+-- The customer submits proof through the application backend. The bucket
+-- remains private; admins view proofs through the authenticated backend
+-- endpoint, which reads objects with SUPABASE_SERVICE_ROLE_KEY.
 DROP POLICY IF EXISTS "Customers can upload payment proof" ON storage.objects;
 CREATE POLICY "Customers can upload payment proof"
   ON storage.objects
@@ -82,14 +81,8 @@ CREATE POLICY "Customers can upload payment proof"
   );
 
 DROP POLICY IF EXISTS "Backend can delete payment proof" ON storage.objects;
-CREATE POLICY "Backend can delete payment proof"
-  ON storage.objects
-  FOR DELETE
-  TO anon, authenticated
-  USING (
-    bucket_id = 'payment-assets'
-    AND name LIKE 'proof_of_transaction/%'
-  );
+DROP POLICY IF EXISTS "Public can view payment proofs" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated admins can view payment proofs" ON storage.objects;
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('payment-qr', 'payment-qr', true)

@@ -19,6 +19,9 @@ const AuthController = {
 
       ok(res, { admin: result.admin }, 'Login successful');
     } catch (err) {
+      if (err.name === 'ZodError') {
+        return next(err);
+      }
       if (err.message?.toLowerCase().includes('credential') ||
           err.message?.toLowerCase().includes('password') ||
           err.message?.toLowerCase().includes('invalid')) {

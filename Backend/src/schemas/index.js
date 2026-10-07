@@ -3,8 +3,9 @@ import { z } from 'zod';
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 
 const LoginSchema = z.object({
-  email:    z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  email:    z.string().trim().toLowerCase().email('Please enter a valid email address.'),
+  // Login validates presence only; password strength belongs to password creation/reset.
+  password: z.string().min(1, 'Password is required.'),
 });
 
 // Validate the credentials submitted by the logged-in password-change form using the same password rules as recovery.
