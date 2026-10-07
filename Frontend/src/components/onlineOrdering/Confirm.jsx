@@ -210,34 +210,34 @@ export default function Confirm({ orderId, setCart }) {
         
         <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
 
-          <div className="text-center mb-3 sm:mb-4 shrink-0 w-full">
-            <div className="w-10 h-10 rounded-full bg-[#DCFCE7] text-[#16A34A] flex items-center justify-center mx-auto mb-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <div className="text-center mb-2 shrink-0 w-full">
+            <div className="w-8 h-8 rounded-full bg-[#DCFCE7] text-[#16A34A] flex items-center justify-center mx-auto mb-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 className="text-lg sm:text-xl font-serif text-[#3B1F0A] mb-1">Order Submitted for Verification</h2>
-            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[420px] mx-auto px-2 leading-snug">
+            <h2 className="text-base sm:text-lg font-serif text-[#3B1F0A] mb-0.5">Order Submitted for Verification</h2>
+            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[600px] mx-auto px-2 leading-snug">
               Please save your digital receipt. Present the QR code at the counter to claim your order.
             </p>
-            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[420px] mx-auto px-2 mt-1.5 leading-snug">
+            <p className="text-[11px] sm:text-xs text-[#8A7264] max-w-[600px] mx-auto px-2 mt-1 leading-snug">
               We will update you via text message once your payment is verified and your order is accepted. If no valid payment is found, please do not expect a text from us.
             </p>
           </div>
 
           <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-sm overflow-hidden flex flex-col w-full max-w-[340px] md:flex-row md:max-w-[650px] shrink-0">
 
-            <div className="flex-1 p-4 sm:p-5 flex flex-col min-h-0">
-              <div className="text-center mb-2">
-                <div className="font-serif text-lg text-[#3B1F0A]">Aileen Cake Max</div>
+            <div className="flex-1 p-3 sm:p-4 flex flex-col min-h-0">
+              <div className="text-center mb-1">
+                <div className="font-serif text-base text-[#3B1F0A]">Aileen Cake Max</div>
                 <div className="text-[9px] text-[#B7A99F] tracking-[0.25em] uppercase font-semibold mt-0.5">
                   Bake Shop
                 </div>
               </div>
 
-              <div className="border-b border-dashed border-[#DED4CC] my-2 sm:my-3 shrink-0" />
+              <div className="border-b border-dashed border-[#DED4CC] my-1.5 shrink-0" />
 
-              <div className="grid grid-cols-2 gap-3 mb-2 sm:mb-3 shrink-0">
+              <div className="grid grid-cols-2 gap-3 mb-1.5 shrink-0">
                 <div>
                   <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Order No.</p>
                   <p className="text-[11px] sm:text-xs font-semibold text-[#3B1F0A]">{id}</p>
@@ -250,7 +250,7 @@ export default function Confirm({ orderId, setCart }) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[120px] lg:max-h-[16vh] scrollbar-thin pr-1">
+              <div className="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[80px] lg:max-h-[12vh] scrollbar-thin pr-1">
                 {cart.map((item, idx) => (
                   <div key={idx} className="flex justify-between items-start text-[11px] sm:text-xs text-[#5A453C]">
                     <span className="pr-2 leading-snug">
@@ -263,7 +263,7 @@ export default function Confirm({ orderId, setCart }) {
                 ))}
               </div>
 
-              <div className="bg-[#F5EFEB] rounded-xl p-3 sm:p-4 mt-3 shrink-0 flex flex-col gap-1.5">
+              <div className="bg-[#F5EFEB] rounded-xl p-2.5 mt-2 shrink-0 flex flex-col gap-1">
                 <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-[#8A7264]">
                   <span className="uppercase tracking-[0.1em]">Grand Total</span>
                   <span>{formatPeso(totalAmount)}</span>
@@ -284,16 +284,16 @@ export default function Confirm({ orderId, setCart }) {
               </div>
             </div>
 
-            <div className="p-4 sm:p-6 flex flex-col items-center justify-center shrink-0 border-t md:border-t-0 md:border-l border-[#F1EBE6]">
-              <div className="p-3 bg-white border border-[#EAE4E0] rounded-xl shadow-sm">
-                <QRCodeSVG value={qrPayload} size={130} fgColor="#3B1F0A" />
+            <div className="p-3 sm:p-4 flex flex-col items-center justify-center shrink-0 border-t md:border-t-0 md:border-l border-[#F1EBE6]">
+              <div className="p-2 bg-white border border-[#EAE4E0] rounded-xl shadow-sm">
+                <QRCodeSVG value={qrPayload} size={112} fgColor="#3B1F0A" />
               </div>
-              <p className="text-[9px] tracking-widest text-[#B7A99F] mt-3 font-bold uppercase">
+              <p className="text-[9px] tracking-widest text-[#B7A99F] mt-2 font-bold uppercase">
                 Scan to Verify
               </p>
               <button
                 onClick={handleSaveAsImage}
-                className="w-full bg-[#3B1F0A] text-white py-2.5 sm:py-3 px-4 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] transition-colors mt-4 flex items-center justify-center gap-1.5"
+                className="w-full bg-[#3B1F0A] text-white py-2 px-4 rounded-full text-xs font-semibold hover:bg-[#2A1608] transition-colors mt-3 flex items-center justify-center gap-1.5"
               >
                 <span>↓</span>
                 <span>Save Receipt as Image</span>
@@ -408,4 +408,3 @@ export default function Confirm({ orderId, setCart }) {
     </div>
   );
 }
-

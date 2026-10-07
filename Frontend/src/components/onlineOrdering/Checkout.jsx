@@ -763,14 +763,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         <div className={`${isPaymentStep ? 'hidden' : 'flex'} flex-1 flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2 lg:overflow-y-auto scrollbar-thin`}>
           <div className="flex flex-col lg:flex-1 lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
 
-              <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:rounded-none lg:border-0 lg:shadow-none">
+              <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:grow lg:rounded-none lg:border-0 lg:shadow-none">
                   <div className="flex items-center gap-2.5 mb-3.5 shrink-0">
                     <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
                       <ClipboardList size={14} />
                     </div>
                     <h3 className="text-lg font-serif text-[#3B1F0A] leading-none">Pick-up & Customer Details</h3>
                   </div>
-                  <div className="w-full h-px bg-[#EAE4E0] mb-4 shrink-0"></div>
+                  <div className="w-full h-px bg-[#EAE4E0] mb-4 lg:mb-5 shrink-0"></div>
 
                   {stockIssues.length > 0 && (
                     <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700 shrink-0">
@@ -782,15 +782,16 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                     </div>
                   )}
 
-                  <div className="flex flex-col gap-3.5 shrink-0">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          <div className="relative">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 shrink-0 lg:grow lg:grid-cols-[repeat(3,minmax(0,1fr))] lg:grid-rows-[repeat(3,minmax(auto,1fr))_auto_auto] lg:gap-x-5 lg:gap-y-5">
+                      {/* LEFT: name, numbers, pickup date/time */}
+                      <div className="contents">
+                          <div className="relative lg:col-start-1 lg:col-span-2 lg:row-start-1">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
                                 placeholder="e.g. Juan Dela Cruz" 
                                 value={form.name}
-                                className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                                className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   setForm({...form, name: e.target.value});
                                   setErrors(prev => ({...prev, name: false}));
@@ -798,14 +799,15 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               />
                               {errors.name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.name}</span>}
                           </div>
-                          <div className="relative">
+                      <div className="contents">
+                          <div className="relative lg:col-start-1 lg:row-start-2">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.phone ? 'text-red-500' : 'text-[#8A7264]'}`}>Contact Number <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
                                 placeholder="09xxxxxxxxx" 
                                 maxLength="11"
                                 value={form.phone}
-                                className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                                className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   const onlyNums = e.target.value.replace(/\D/g, '');
                                   setForm({...form, phone: onlyNums});
@@ -814,15 +816,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               />
                               {errors.phone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.phone}</span>}
                           </div>
-                      </div>
-                      <div className="relative">
+                      <div className="relative sm:col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-2">
                           <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.altPhone ? 'text-red-500' : 'text-[#8A7264]'}`}>Alternative Number</label>
                           <input 
                             type="text" 
                             placeholder="Optional (09xxxxxxxxx)" 
                             maxLength="11"
                             value={form.altPhone}
-                            className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                            className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                             onChange={e => {
                                 const onlyNums = e.target.value.replace(/\D/g, '');
                                 setForm({...form, altPhone: onlyNums});
@@ -832,12 +833,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           {errors.altPhone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.altPhone}</span>}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4">
-                          <div className="relative" ref={calendarWrapRef}>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4 sm:col-span-2 lg:contents">
+                          <div className="relative lg:col-start-1 lg:row-start-3" ref={calendarWrapRef}>
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupDate ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Date <span className="text-red-500">*</span></label>
 
                               {pickupType === 'now' ? (
-                                <div className="w-full border border-[#EAE4E0] px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
+                                <div className="w-full border border-[#EAE4E0] px-3.5 py-3 text-[13px] rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
                                   <Lock size={12} />
                                   {formatDateLong(getLiveNow().dateStr)} (Today)
                                 </div>
@@ -849,7 +852,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                     onClick={() => {
                                       setShowCalendar(s => !s);
                                     }}
-                                    className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
+                                    className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
                                   >
                                     <span className={form.pickupDate ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
                                       {form.pickupDate ? formatDateLong(form.pickupDate) : 'Select pickup date'}
@@ -878,13 +881,13 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 </>
                               )}
                           </div>
-                          <div ref={timeDropdownRef} className="relative">
+                          <div ref={timeDropdownRef} className="relative lg:col-start-2 lg:row-start-3">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupTime ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
                                 <button
                                   type="button"
                                   onClick={() => setShowTimeDropdown(s => !s)}
-                                  className={`w-full border px-3.5 py-2.5 text-xs rounded-xl focus:outline-none transition-colors bg-white flex items-center justify-between text-left ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                  className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors bg-white flex items-center justify-between text-left ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                                 >
                                   <span className="flex items-center gap-2 truncate">
                                     <Clock size={13} className="text-[#8A7264] shrink-0" />
@@ -949,7 +952,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           </div>
                       </div>
 
-                      <div className="min-w-0">
+                      </div>
+
+                      {/* RIGHT: special instructions + actions */}
+                      <div className="contents">
+                      <div className="min-w-0 sm:col-span-2 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-3 lg:flex lg:flex-col lg:relative">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
                           <textarea
                             rows={5}
@@ -957,15 +964,18 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                             maxLength={300}
                             value={form.instructions}
                             onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
-                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-xs leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y lg:flex-1 lg:max-h-none lg:resize-none lg:pb-7 border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-[13px] leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                           />
-                          <p className="mt-1 text-right text-[10px] text-[#B7A99F]">{(form.instructions || '').length}/300</p>
+                          <p className="mt-1 text-right text-[10px] text-[#B7A99F] lg:absolute lg:bottom-2 lg:right-3.5 lg:mt-0 lg:pointer-events-none">{(form.instructions || '').length}/300</p>
                       </div>
 
+                      <div className="hidden lg:block lg:col-span-3 lg:row-start-4 h-px bg-[#F1EBE6]"></div>
+
+                      <div className="contents lg:flex lg:flex-row-reverse lg:items-center lg:gap-3 lg:col-start-3 lg:row-start-5">
                       <button
                         type="button"
                         onClick={handleContinueToPayment}
-                        className="mt-1 w-full rounded-full bg-[#3B1F0A] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#2A1608]"
+                        className="mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full bg-[#3B1F0A] px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#2A1608]"
                       >
                         Continue to Payment
                       </button>
@@ -973,10 +983,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <button
                         type="button"
                         onClick={() => navigate('/onlineOrdering/menu')}
-                        className="w-full text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
+                        className="w-full sm:col-span-2 lg:col-span-1 lg:flex-1 text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
                       >
                         &larr; Back to Menu
                       </button>
+                      </div>
+                      </div>
 
                   </div>
               </div>
@@ -985,10 +997,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         </div>
 
         {/* RIGHT COLUMN: Step 2 (Payment) */}
-        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[360px] lg:max-w-[560px] lg:mx-auto bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 lg:max-h-[calc(100vh-112px)] overflow-hidden flex-col`}>
+        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[780px] lg:max-w-[780px] lg:mx-auto lg:h-[calc(100vh-112px)] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 overflow-hidden flex-col`}>
 
-          <div className="flex-1 min-h-0 px-5 py-4 flex flex-col gap-5 overflow-y-auto scrollbar-thin">
-              <div className="flex flex-col shrink-0">
+          <div className="flex-1 min-h-0 px-5 lg:px-7 py-4 flex flex-col gap-5 overflow-y-auto scrollbar-thin">
+              <div className="flex flex-col shrink-0 lg:flex-1 lg:min-h-0">
                   <div className="flex items-center gap-2.5 mb-3 shrink-0">
                       <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
                         <CreditCard size={14} />
@@ -996,12 +1008,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <h3 className="text-lg font-serif text-[#3B1F0A] leading-none">Payment</h3>
                   </div>
                   <div className="w-full h-px bg-[#EAE4E0] mb-3 shrink-0"></div>
+                  <div className="lg:grid lg:grid-cols-2 lg:grid-rows-1 lg:gap-6 lg:items-stretch lg:flex-1 lg:min-h-0">
+                  <div className="min-w-0 flex flex-col">
                   <p className="text-[11px] text-[#8A7264] mb-3.5 shrink-0">We require at least a 50% deposit to process your order.</p>
 
-                  <div className="grid grid-cols-1 gap-3 shrink-0">
+                  <div className="grid grid-cols-1 gap-3 shrink-0 lg:flex-1 lg:grid-rows-2">
                       <div
                           onClick={() => setPaymentType('half')}
-                          className={`border rounded-xl p-3 cursor-pointer transition-all ${paymentType === 'half' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
+                          className={`border rounded-xl p-3 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'half' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
                       >
                           <div className="flex items-center gap-2 mb-1">
                               <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${paymentType === 'half' ? 'border-[#4A3B36]' : 'border-[#B7A99F]'}`}>
@@ -1015,7 +1029,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
                       <div
                           onClick={() => setPaymentType('full')}
-                          className={`border rounded-xl p-3 cursor-pointer transition-all ${paymentType === 'full' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
+                          className={`border rounded-xl p-3 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'full' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
                       >
                           <div className="flex items-center gap-2 mb-1">
                               <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${paymentType === 'full' ? 'border-[#4A3B36]' : 'border-[#B7A99F]'}`}>
@@ -1026,15 +1040,18 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay in full for hassle-free pick-up.</p>
                           <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{totalAmount.toLocaleString()}</div>
                       </div>
-                      <div className="mt-4 rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3">
+                      </div>
+                  </div>
+                  <div className="min-w-0 mt-4 lg:mt-0 lg:flex lg:flex-col lg:min-h-0">
+                      <div className="rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:items-center lg:justify-center lg:text-center">
                         <p className="text-xs font-semibold text-[#3B1F0A]">Pay via QR code</p>
                         {paymentConfigLoading ? (
-                          <div role="status" aria-live="polite" className="mx-auto my-3 flex h-48 w-48 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
+                          <div role="status" aria-live="polite" className="mx-auto my-3 flex h-64 w-64 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
                             <Loader2 size={24} className="animate-spin" />
                             <span className="text-[11px] font-medium">Loading QR code…</span>
                           </div>
                         ) : paymentConfigError ? (
-                          <div role="alert" className="mx-auto my-3 flex min-h-[12rem] w-48 flex-col items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-center">
+                          <div role="alert" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-center">
                             <AlertCircle size={22} className="text-red-500" />
                             <span className="text-[11px] text-red-700">Couldn't load the payment QR code.</span>
                             <button
@@ -1047,7 +1064,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           </div>
                         ) : paymentQrUrl ? (
                           <div 
-                            className="relative mx-auto my-3 h-48 w-48 group cursor-zoom-in rounded-lg border border-[#EAE4E0] bg-white p-1 overflow-hidden"
+                            className="relative mx-auto my-3 h-64 w-64 group cursor-zoom-in rounded-lg border border-[#EAE4E0] bg-white p-1 overflow-hidden"
                             onClick={() => setIsQrExpanded(true)}
                             title="Click to expand QR code"
                           >
@@ -1066,8 +1083,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               className={`h-full w-full object-contain transition-opacity duration-200 ${qrImageLoaded ? 'opacity-100' : 'opacity-0'}`}
                             />
                             {qrImageLoaded && (
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex flex-col items-center justify-end p-2">
-                                <span className="bg-[#3B1F0A]/85 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex flex-col items-end justify-start p-2 pointer-events-none">
+                                <span className="bg-[#3B1F0A]/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
                                   <ZoomIn size={12} /> Tap to expand
                                 </span>
                               </div>
@@ -1086,7 +1103,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           className="sr-only"
                         />
                         {proofPreviewUrl ? (
-                          <div className="mt-3 flex items-center gap-3 rounded-lg border border-[#DED4CC] bg-white p-2">
+                          <div className="mt-3 flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-lg border border-[#DED4CC] bg-white p-2 text-left">
                             <img
                               src={proofPreviewUrl}
                               alt="Selected payment proof preview"
@@ -1124,38 +1141,29 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       {errors.proof && <p className="mt-2 text-xs text-red-700">{errors.proof}</p>}
                       {errors.payment && <p className="mt-2 text-xs text-red-700">{errors.payment}</p>}
                   </div>
+                  </div>
               </div>
 
           </div>
 
-          <div className="px-5 pt-2.5 pb-3.5 shrink-0 border-t border-[#F1EBE6] bg-white">
-            <div className="mb-2">
-              {paymentType === 'half' ? (
-                <>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[11px] text-[#8A7264]">To Pay Now (50%)</span>
-                    <span className="text-[11px] text-[#8A7264]">₱{halfAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] text-[#8A7264]">Balance at Pick-up</span>
-                    <span className="text-[11px] text-[#8A7264]">₱{halfAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="w-full h-px bg-[#F1EBE6] mb-1"></div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] text-[#8A7264]">To Pay Now</span>
-                    <span className="text-[11px] text-[#8A7264]">₱{totalAmount.toLocaleString()}</span>
-                  </div>
-                  <div className="w-full h-px bg-[#F1EBE6] mb-1"></div>
-                </>
-              )}
+          <div className="px-5 lg:px-7 pt-2.5 pb-3.5 lg:pt-4 lg:pb-5 shrink-0 border-t border-[#F1EBE6] bg-white lg:grid lg:grid-cols-2 lg:gap-6 lg:items-center">
+            <div className="mb-2 lg:mb-0">
+              {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[11px] text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
+                <span className="text-[11px] text-[#8A7264]">₱{(paymentType === 'half' ? halfAmount : totalAmount).toLocaleString()}</span>
+              </div>
+              <div className={`flex items-center justify-between mb-1 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
+                <span className="text-[11px] text-[#8A7264]">Balance at Pick-up</span>
+                <span className="text-[11px] text-[#8A7264]">₱{halfAmount.toLocaleString()}</span>
+              </div>
+              <div className="w-full h-px bg-[#F1EBE6] mb-1"></div>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
                 <span className="font-serif text-base text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
               </div>
             </div>
+            <div className="min-w-0">
             <button
               onClick={handleProceedToOrder}
               disabled={isProcessing || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
@@ -1170,6 +1178,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
             >
               &larr; Back to Details
             </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1376,27 +1385,16 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
             <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
               <div className="mb-4">
-                {paymentType === 'half' ? (
-                  <>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                      <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                      <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                      <span className="text-xs text-[#8A7264] font-medium">₱{totalAmount.toLocaleString()}</span>
-                    </div>
-                    <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-                  </>
-                )}
+                {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
+                  <span className="text-xs text-[#8A7264] font-medium">₱{(paymentType === 'half' ? halfAmount : totalAmount).toLocaleString()}</span>
+                </div>
+                <div className={`flex items-center justify-between mb-2 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
+                  <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                  <span className="text-xs text-[#8A7264] font-medium">₱{halfAmount.toLocaleString()}</span>
+                </div>
+                <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
                   <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>

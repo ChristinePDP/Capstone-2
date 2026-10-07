@@ -3,7 +3,7 @@ import { OrdersModel } from '../model/orders.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { MaterialModel } from '../model/material.model.js';
-import { supabase } from '../config/supabase.js';
+import { supabase, usingServiceRole } from '../config/supabase.js';
 
 // Pinapayagang statuses lang — ito yung ginagamit talaga ng
 // AllOrdersPage.jsx (ORDER_STATUSES filter pills + nextStatus map),
@@ -24,7 +24,42 @@ const getStockLimitField = (product) => {
 
 const PAYMENT_PROOF_BUCKET = 'payment-assets';
 
-const normalizePaymentProofPath = (value) => {
+// Extra buckets to try kapag "Object not found" sa default bucket. Pwedeng
+// i-set via env: PAYMENT_PROOF_FALLBACK_BUCKETS=bucket-a,bucket-b
+const ENV_FALLBACK_BUCKETS = (process.env.PAYMENT_PROOF_FALLBACK_BUCKETS || '')
+  .split(',')
+  .map((b) => b.trim())
+  .filter(Boolean);
+
+// Cache ng lahat ng bucket names (listBuckets) para hindi paulit-ulit ang call.
+let bucketNamesCache = { at: 0, names: [] };
+const BUCKET_CACHE_MS = 5 * 60 * 1000;
+
+const getAllBucketNames = async () => {
+  if (Date.now() - bucketNamesCache.at < BUCKET_CACHE_MS) return bucketNamesCache.names;
+  try {
+    const { data, error } = await supabase.storage.listBuckets();
+    if (error) throw error;
+    bucketNamesCache = { at: Date.now(), names: (data || []).map((b) => b.name) };
+    // Kapag service role ang gamit pero empty ang buckets, kakaiba — i-log.
+    if (bucketNamesCache.names.length === 0) {
+      console.error(
+        `[STORAGE] listBuckets() returned 0 buckets (usingServiceRole=${usingServiceRole}). ` +
+        'Malamang limitado ang key na ginagamit ng backend.'
+      );
+    }
+  } catch (err) {
+    console.error('Failed to list storage buckets:', err.message);
+    bucketNamesCache = { at: Date.now(), names: [] };
+  }
+  return bucketNamesCache.names;
+};
+
+// Ang nakaimbak sa DB ay pwedeng (a) bucket-relative path, o (b) buong
+// Supabase URL. Kapag URL, kunin din ang BUCKET mula rito — dati ay
+// laging ipinapalagay na 'payment-assets', kaya "Object not found" kapag
+// ibang bucket ang pinag-upload-an.
+const parseStoredProofValue = (value) => {
   if (!value) return null;
 
   const rawValue = String(value).trim();
@@ -32,42 +67,82 @@ const normalizePaymentProofPath = (value) => {
 
   try {
     const parsedUrl = new URL(rawValue);
-    const marker = `/storage/v1/object/${parsedUrl.pathname.includes('/sign/') ? 'sign' : 'public'}/${PAYMENT_PROOF_BUCKET}/`;
-    const markerIndex = parsedUrl.pathname.indexOf(marker);
-    if (markerIndex >= 0) {
-      return decodeURIComponent(parsedUrl.pathname.slice(markerIndex + marker.length));
+    const match = parsedUrl.pathname.match(
+      /\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/
+    );
+    if (match) {
+      return { bucket: match[1], path: decodeURIComponent(match[2]) };
     }
   } catch {
     // The database normally stores a bucket-relative path, not a URL.
   }
 
-  return rawValue.replace(/^\/+/, '').split('?')[0];
+  let path = rawValue.replace(/^\/+/, '').split('?')[0];
+  // Kung may nakadikit na bucket name sa unahan (hal. "payment-assets/proof_of_transaction/x.png")
+  if (path.startsWith(`${PAYMENT_PROOF_BUCKET}/`)) {
+    path = path.slice(PAYMENT_PROOF_BUCKET.length + 1);
+  }
+  return { bucket: null, path };
+};
+
+const trySign = async (bucket, path) => {
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(path, 60 * 60);
+  if (!error && data?.signedUrl) return { url: data.signedUrl };
+
+  // Fallback para sa PUBLIC buckets: kapag pumalya ang signing (hal. limitado
+  // ang key), subukan ang public URL at i-verify na talagang umiiral ang file.
+  try {
+    const { data: pub } = supabase.storage.from(bucket).getPublicUrl(path);
+    if (pub?.publicUrl) {
+      const res = await fetch(pub.publicUrl, { method: 'HEAD' });
+      if (res.ok) return { url: pub.publicUrl };
+    }
+  } catch {
+    // Ignore — babalik sa error sa ibaba.
+  }
+
+  return { error: error || new Error('Supabase did not return a signed URL') };
 };
 
 const withPaymentProofUrl = async (order) => {
-  const paths = [
-    normalizePaymentProofPath(order?.proof_of_payment_path),
-    normalizePaymentProofPath(order?.proof_of_payment_url),
-  ].filter((path, index, allPaths) => path && allPaths.indexOf(path) === index);
+  const candidates = [
+    parseStoredProofValue(order?.proof_of_payment_path),
+    parseStoredProofValue(order?.proof_of_payment_url),
+  ].filter((c, i, all) => c && c.path && all.findIndex((x) => x.path === c.path && x.bucket === c.bucket) === i);
 
-  if (paths.length === 0) return order;
+  if (candidates.length === 0) return order;
 
   let lastError = null;
-  for (const path of paths) {
-    const { data, error } = await supabase.storage
-      .from(PAYMENT_PROOF_BUCKET)
-      .createSignedUrl(path, 60 * 60);
+  const tried = [];
 
-    if (!error && data?.signedUrl) {
-      return { ...order, proof_of_payment_url: data.signedUrl };
+  for (const { bucket: hintedBucket, path } of candidates) {
+    // Priority: bucket mula sa URL -> default -> env fallbacks.
+    const buckets = [hintedBucket, PAYMENT_PROOF_BUCKET, ...ENV_FALLBACK_BUCKETS]
+      .filter((b, i, all) => b && all.indexOf(b) === i);
+
+    for (const bucket of buckets) {
+      tried.push(`${bucket}/${path}`);
+      const result = await trySign(bucket, path);
+      if (result.url) return { ...order, proof_of_payment_url: result.url };
+      lastError = result.error;
     }
 
-    lastError = error || new Error('Supabase did not return a signed URL');
+    // Last resort: hanapin sa lahat ng iba pang bucket.
+    const allBuckets = await getAllBucketNames();
+    for (const bucket of allBuckets) {
+      if (buckets.includes(bucket)) continue;
+      tried.push(`${bucket}/${path}`);
+      const result = await trySign(bucket, path);
+      if (result.url) return { ...order, proof_of_payment_url: result.url };
+      lastError = result.error;
+    }
   }
 
   console.error(
-    `Failed to create payment proof URL for order ${order.id} (paths: ${paths.join(', ')}):`,
-    lastError.message
+    `Failed to create payment proof URL for order ${order.id} (tried: ${tried.join(', ')}):`,
+    lastError?.message
   );
   return { ...order, proof_of_payment_url: null };
 };
@@ -164,15 +239,9 @@ const OrdersService = {
       throw err;
     }
 
-    // FIX (scope bug): dating naka-scope lang ang `existingOrder` sa loob ng
-    // `if (status === 'Completed')` block sa ibaba, pero ginagamit din ito sa
-    // ibang branches (status === 'Ready', at isa pang hiwalay na `if (status
-    // === 'Completed')` block pa) — dahil block-scoped ang `const`, nawawala
-    // ito sa labas ng orihinal na block kung saan siya na-declare, kaya
-    // "existingOrder is not defined" (ReferenceError) tuwing "Ready" ang
-    // pinipiling status, at posible ring mag-crash din sa "Completed" path.
-    // Kaya dito na lang kinukuha ONCE bago pa mag-branch sa status — para
-    // available na ito sa LAHAT ng gumagamit nito sa ibaba.
+    // Kinukuha ONCE bago mag-branch sa status para available sa LAHAT ng
+    // gumagamit nito sa ibaba (iwas "existingOrder is not defined" at iwas
+    // duplicate na declaration/DB call).
     const existingOrder = await OrdersModel.findById(id);
     if (!existingOrder) {
       const err = new Error('Order not found');
@@ -185,23 +254,13 @@ const OrdersService = {
       throw err;
     }
 
-    // FIX (idempotency guard): kung "Completed" na ang order BAGO pa man
-    // ito i-update ulit (hal. na-double click ang status dropdown, o
-    // nag-scan nang dalawang beses ang QrScanner na naka-embed sa
-    // Orders.jsx), huwag nang ulitin ang balance settlement at stock
-    // deduction sa ibaba — hahantong lang ito sa DALAWANG BESES na
-    // pagbawas ng stock (at posibleng maling amount_paid) para sa
-    // parehong order.
-    if (status === 'Completed') {
-      const existingOrder = await OrdersModel.findById(id);
-      if (!existingOrder) {
-        const err = new Error('Order not found');
-        err.status = 404;
-        throw err;
-      }
-      if (existingOrder.status === 'Completed') {
-        return existingOrder;
-      }
+    // Idempotency guard: kung "Completed" na ang order BAGO pa man ito
+    // i-update ulit (hal. na-double click ang status dropdown, o nag-scan
+    // nang dalawang beses ang QrScanner), huwag nang ulitin ang balance
+    // settlement at stock deduction — hahantong lang ito sa DALAWANG BESES
+    // na pagbawas ng stock (at posibleng maling amount_paid).
+    if (status === 'Completed' && existingOrder.status === 'Completed') {
+      return existingOrder;
     }
 
     const updated = await OrdersModel.updateStatus(id, status);
@@ -237,10 +296,8 @@ const OrdersService = {
           finalOrder = await OrdersModel.updatePayment(id, {
             amount_paid: updated.grand_total,
             balance: 0,
-            // FIX: dapat din ma-update ang payment_type papuntang 'full' —
-            // dati'y amount_paid/balance lang ang na-a-update, kaya
-            // nananatiling nagpapakita ng "Deposit: ₱X" ang Orders.jsx
-            // admin page kahit fully paid na talaga ang order.
+            // Dapat ding ma-update ang payment_type papuntang 'full' para
+            // hindi manatiling "Deposit: ₱X" sa Orders.jsx admin page.
             payment_type: 'full',
           });
           console.log(`[ADMIN SERVICE] Settled balance for order ${id}. amount_paid is now:`, finalOrder.amount_paid);

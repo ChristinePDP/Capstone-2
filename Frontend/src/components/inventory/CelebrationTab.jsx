@@ -111,6 +111,77 @@ export default function CelebrationTab() {
   );
   const isLoading = !!context.loading;
 
+  // Celebration Material products that do not need stock on hand: Partner Shop
+  // items and any Pre-order only item. Only Pick-up Today / Both items need
+  // inventory stock. These rows come straight from Product Management and only
+  // show the order limit (no restock).
+  // Compare order type loosely so "Pre-order", "pre_order", "Preorder" all match.
+  const isPreOrderOnly = (p) =>
+    String(p.order_type ?? p.orderType ?? '').toLowerCase().replace(/[^a-z]/g, '') === 'preorder';
+  const needsNoStock = (p) => p.sourcing_type === 'partner' || isPreOrderOnly(p);
+  const partnerProducts = useMemo(
+    () => allProducts.filter(p =>
+      p.category === 'Celebration Material' &&
+      needsNoStock(p) &&
+      p.is_active !== false
+    ),
+    [allProducts]
+  );
+  const partnerProductIds = useMemo(
+    () => new Set(partnerProducts.map(p => p.id)),
+    [partnerProducts]
+  );
+  const partnerRows = useMemo(
+    () => partnerProducts.map(p => ({
+      id: `partner-${p.id}`,
+      name: p.name,
+      productId: p.id,
+      materialType: 'celebration',
+      isPartnerProduct: true,
+      isPartnerSource: p.sourcing_type === 'partner',
+      orderLimit: Number(p.daily_limit || 0),
+      partnerCost: p.partner_cost != null ? Number(p.partner_cost) : null,
+      price: Number(p.price || 0),
+      stock: 0,
+      min: 0,
+    })),
+    [partnerProducts]
+  );
+  const isPartnerMaterial = (mat) => mat.isPartnerProduct === true;
+
+  // Own-stock Celebration Material products are listed too, even before they
+  // have a stock record. Those rows show "Needs setup" and open the Add form
+  // with the product already selected.
+  const ownProductRows = useMemo(() => {
+    const linkedIds = new Set(
+      materials.map(m => m.productId ?? m.product_id).filter(Boolean)
+    );
+    return allProducts
+      .filter(p =>
+        p.category === 'Celebration Material' &&
+        !needsNoStock(p) &&
+        p.is_active !== false &&
+        !linkedIds.has(p.id)
+      )
+      .map(p => ({
+        id: `own-${p.id}`,
+        name: p.name,
+        productId: p.id,
+        materialType: 'celebration',
+        isUnsetOwn: true,
+        unit: 'pcs',
+        stock: 0,
+        min: 0,
+      }));
+  }, [allProducts, materials]);
+
+  // Materials are only used for own-stock items. Partner products replace any
+  // old material record that is linked to them (avoids duplicates).
+  const ownMaterials = useMemo(
+    () => materials.filter(m => !partnerProductIds.has(m.productId ?? m.product_id)),
+    [materials, partnerProductIds]
+  );
+
   const { show: showToast } = useToast();
   const [containerRef, isCompact] = useIsCompact();
   const [materialView, setMaterialView] = useState(() => localStorage.getItem('inv_material_view') || 'celebration');
@@ -127,20 +198,48 @@ export default function CelebrationTab() {
   const currentEditMat = materials.find(m => m.id === editMat?.id) || editMat;
   const activeView = MATERIAL_VIEWS.find(v => v.key === materialView) || MATERIAL_VIEWS[0];
 
+  // "Set Up Stock" for an own-stock product that has no material record yet.
+  // IMPORTANT: pass a draft WITHOUT an `id`. The modal treats anything with an
+  // id as an existing material (edit/PUT); with no id it is a new material
+  // (create/POST) that is already linked to the product.
+  const openSetup = (row) => {
+    setEditMat({
+      name: row.name,
+      productId: row.productId,
+      product_id: row.productId,
+      unit: row.unit || 'pcs',
+      materialType: 'celebration',
+      material_type: 'celebration',
+    });
+    setModalOpen(true);
+  };
+
   const handleViewChange = (key) => {
     setMaterialView(key);
     localStorage.setItem('inv_material_view', key);
     setPage(1);
   };
 
-  const materialsInView = useMemo(
-    () => materials.filter(m => getMaterialViewKey(m) === materialView),
-    [materials, materialView]
-  );
+  const materialsInView = useMemo(() => {
+    const own = ownMaterials.filter(m => getMaterialViewKey(m) === materialView);
+    return materialView === 'celebration' ? [...partnerRows, ...ownProductRows, ...own] : own;
+  }, [ownMaterials, partnerRows, ownProductRows, materialView]);
+
+  // One status label per row. Used by the Status column, the filter and the
+  // dropdown counts so they always agree.
+  //   Partner      = Partner Shop item (pre-order, order limit only)
+  //   Pre-order    = own item that is pre-order only (order limit only)
+  //   Needs setup  = Pick-up Today / Both item with no stock record yet
+  //   In Stock / Low Stock / Out of Stock = normal stock status
+  const rowStatusLabel = (m) => {
+    if (isPartnerMaterial(m)) return m.isPartnerSource ? 'Partner' : 'Pre-order';
+    if (m.isUnsetOwn) return 'Needs setup';
+    return ingStatus(m.stock, m.min).label;
+  };
 
   const filtered = materialsInView.filter(m => {
     const matchesSearch = m.name.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || ingStatus(m.stock, m.min).label === statusFilter;
+    const matchesStatus = statusFilter === 'all' || rowStatusLabel(m) === statusFilter;
     return matchesSearch && matchesStatus;
   });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -148,15 +247,16 @@ export default function CelebrationTab() {
   // Total per material type — shown as a small count beside each view tab.
   const viewCounts = useMemo(() => {
     const counts = { celebration: 0, product: 0 };
-    materials.forEach(m => { counts[getMaterialViewKey(m)] += 1; });
+    ownMaterials.forEach(m => { counts[getMaterialViewKey(m)] += 1; });
+    counts.celebration += partnerRows.length + ownProductRows.length;
     return counts;
-  }, [materials]);
+  }, [ownMaterials, partnerRows, ownProductRows]);
 
   // Counts shown in the status dropdown (for the material type currently
   // in view). Uses the same ingStatus() as the table's Status column and the
   // filter, so the numbers always match what you get after picking an option.
   const statusCounts = materialsInView.reduce((acc, m) => {
-    const label = ingStatus(m.stock, m.min).label;
+    const label = rowStatusLabel(m);
     acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
@@ -274,6 +374,13 @@ export default function CelebrationTab() {
               <option value="In Stock">In Stock ({statusCounts['In Stock'] || 0})</option>
               <option value="Low Stock">Low Stock ({statusCounts['Low Stock'] || 0})</option>
               <option value="Out of Stock">Out of Stock ({statusCounts['Out of Stock'] || 0})</option>
+              {materialView === 'celebration' && (
+                <>
+                  <option value="Needs setup">Needs setup ({statusCounts['Needs setup'] || 0})</option>
+                  <option value="Pre-order">Pre-order ({statusCounts['Pre-order'] || 0})</option>
+                  <option value="Partner">Partner ({statusCounts['Partner'] || 0})</option>
+                </>
+              )}
             </select>
           </div>
         </div>
@@ -291,6 +398,8 @@ export default function CelebrationTab() {
               {isCompact ? (
                 <div className="space-y-3">
                   {paged.map(mat => {
+                    const partner = isPartnerMaterial(mat);
+                    const unset = mat.isUnsetOwn === true;
                     const st = ingStatus(mat.stock, mat.min);
                     return (
                       <div key={mat.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
@@ -298,18 +407,37 @@ export default function CelebrationTab() {
                           <div>
                             <h4 className="font-bold text-brand-800 text-sm">{mat.name}</h4>
                             <p className="text-xs text-brand-500 mt-0.5">
-                              Stock: <span className="font-bold text-brand-700">{mat.stock} {mat.unit}</span>
+                              {partner
+                                ? `Order limit: ${mat.orderLimit > 0 ? `${mat.orderLimit} / day` : 'none set'}`
+                                : unset ? 'No stock record yet'
+                                : <>Stock: <span className="font-bold text-brand-700">{mat.stock} {mat.unit}</span></>}
                             </p>
                           </div>
-                          <Badge variant={st.cls}>{st.label}</Badge>
+                          {partner
+                            ? <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
+                            : unset
+                              ? <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
+                              : <Badge variant={st.cls}>{st.label}</Badge>}
                         </div>
-                        <div className="my-3">
-                          <LevelBar stock={mat.stock} min={mat.min} />
-                        </div>
-                        <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
-                          <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
-                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
-                        </div>
+                        {unset ? (
+                          <div className="flex justify-end pt-2 border-t border-brand-50">
+                            <Button size="sm" variant="secondary" onClick={() => openSetup(mat)}>Set Up Stock</Button>
+                          </div>
+                        ) : partner ? (
+                          <p className="text-[11px] text-brand-500 pt-2 border-t border-brand-50">
+                            {mat.isPartnerSource ? `Cost ₱${(mat.partnerCost ?? 0).toFixed(2)} / ` : ''}Price {`₱${mat.price.toFixed(2)}`}. Managed in Product Management.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="my-3">
+                              <LevelBar stock={mat.stock} min={mat.min} />
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
+                              <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
+                              <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     );
                   })}
@@ -323,18 +451,39 @@ export default function CelebrationTab() {
                   { label: 'Actions', align: 'right' },
                 ]}>
                   {paged.map(mat => {
+                    const partner = isPartnerMaterial(mat);
+                    const unset = mat.isUnsetOwn === true;
                     const st = ingStatus(mat.stock, mat.min);
                     return (
                       <Tr key={mat.id}>
-                        <Td><strong>{mat.name}</strong></Td>
-                        <Td><strong>{mat.stock}</strong> {mat.unit}</Td>
-                        <Td><LevelBar stock={mat.stock} min={mat.min} /></Td>
-                        <Td><Badge variant={st.cls}>{st.label}</Badge></Td>
+                        <Td>
+                          <strong>{mat.name}</strong>
+                          {partner && (
+                            <p className="text-[11px] text-brand-500 font-normal mt-0.5">
+                              {mat.isPartnerSource ? `Cost ₱${(mat.partnerCost ?? 0).toFixed(2)} / ` : ''}Price {`₱${mat.price.toFixed(2)}`}
+                            </p>
+                          )}
+                        </Td>
+                        <Td>{partner || unset ? <span className="text-brand-400">-</span> : <><strong>{mat.stock}</strong> {mat.unit}</>}</Td>
+                        <Td>{partner ? <span className="text-xs text-brand-600 font-semibold">Order limit: {mat.orderLimit > 0 ? `${mat.orderLimit} / day` : 'none set'}</span> : unset ? <span className="text-xs text-brand-500">No stock record yet</span> : <LevelBar stock={mat.stock} min={mat.min} />}</Td>
+                        <Td>{partner
+                          ? <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
+                          : unset
+                            ? <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
+                            : <Badge variant={st.cls}>{st.label}</Badge>}</Td>
                         <Td align="right">
-                          <div className="flex gap-2 justify-end">
-                            <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
-                            <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
-                          </div>
+                          {partner ? (
+                            <span className="text-[11px] text-brand-400">Managed in Product Management</span>
+                          ) : unset ? (
+                            <div className="flex justify-end">
+                              <Button size="sm" variant="secondary" onClick={() => openSetup(mat)}>Set Up Stock</Button>
+                            </div>
+                          ) : (
+                            <div className="flex gap-2 justify-end">
+                              <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
+                              <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
+                            </div>
+                          )}
                         </Td>
                       </Tr>
                     );
@@ -361,10 +510,10 @@ export default function CelebrationTab() {
       </Card>
 
       <MaterialModal
-        key={currentEditMat?.id ?? `new-${materialView}`}
+        key={currentEditMat?.id ?? (currentEditMat?.productId ? `new-product-${currentEditMat.productId}` : `new-${materialView}`)}
         isOpen={modalOpen}
         material={currentEditMat}
-        celebrationProducts={celebrationProducts}
+        celebrationProducts={celebrationProducts.filter(p => !needsNoStock(p))}
         regularProducts={regularProducts}
         productsById={productsById}
         defaultView={materialView}

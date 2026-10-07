@@ -127,6 +127,34 @@ const IngredientService = {
 };
 
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Only Celebration Material products that are Pick-up Today / Both are stocked
+// in inventory. Partner Shop and Pre-order only products are tracked by order
+// limit in Product Management, so they must never get a stock record.
+const assertProductNeedsStock = async (productId) => {
+  if (!productId) return;
+  if (!UUID_RE.test(String(productId))) {
+    throw new AppError('Invalid product id.', 400);
+  }
+  const { data: product, error } = await supabase
+    .from('products')
+    .select('id, name, category, order_type, sourcing_type')
+    .eq('id', productId)
+    .maybeSingle();
+  if (error) throw new AppError(`Failed to check product: ${error.message}`, 500);
+  if (!product) throw new AppError('Linked product not found.', 404);
+
+  const orderType = String(product.order_type || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (product.category === 'Celebration Material' &&
+      (product.sourcing_type === 'partner' || orderType === 'preorder')) {
+    throw new AppError(
+      `"${product.name}" is pre-order only, so it has no inventory stock. Manage its order limit in Product Management.`,
+      400
+    );
+  }
+};
+
 const MaterialService = {
   getAll: async () => {
     const { data, error } = await MaterialModel.findAll();
@@ -137,6 +165,9 @@ const MaterialService = {
   create: async (body) => {
     if (!['celebration', 'product'].includes(body.material_type)) {
       throw new AppError("material_type must be 'celebration' or 'product'.", 400);
+    }
+    if (body.material_type === 'celebration') {
+      await assertProductNeedsStock(body.product_id);
     }
     const { data, error } = await MaterialModel.create(body);
     if (error) throw error;
@@ -168,6 +199,9 @@ const MaterialService = {
     // "move" to the other tab and mix the data.
     // eslint-disable-next-line no-unused-vars
     const { material_type, ...safeBody } = body;
+    if (!UUID_RE.test(String(id))) {
+      throw new AppError('Material not found.', 404);
+    }
     const { data, error } = await MaterialModel.update(id, safeBody);
     if (error) throw new AppError(`Failed to update material: ${error.message}`, 500);
     return data;
@@ -186,8 +220,14 @@ const MaterialService = {
     }
 
     // 2. Hanapin ang current material
+    if (!UUID_RE.test(String(id))) throw new AppError('Material not found', 404);
     const { data: current, error: findErr } = await MaterialModel.findById(id);
     if (findErr || !current) throw new AppError('Material not found', 404);
+
+    // Pre-order only / partner products cannot be restocked.
+    if (current.material_type === 'celebration') {
+      await assertProductNeedsStock(current.product_id);
+    }
 
     // 3. Compute ang bagong stock
     const newTotalStock = Number(current.stock_quantity || 0) + addedQty;

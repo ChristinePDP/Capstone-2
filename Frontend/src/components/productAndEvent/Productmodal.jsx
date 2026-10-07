@@ -3,6 +3,11 @@ import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
 
 const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Celebration Material'];
 
+// Only Celebration Material has a "Source" (Partner shop vs Own stock).
+// Partner = bought from a partner shop per pre-order, so only the order limit
+// is tracked (no stock). Own = the owner's own stock.
+const CELEBRATION_CATEGORY = 'Celebration Material';
+
 const BLANK_PRODUCT = {
   name: '',
   category: PRODUCT_CATEGORIES[0],
@@ -13,6 +18,8 @@ const BLANK_PRODUCT = {
   dailyLimit: 0,
   allowFileUpload: false, 
   eventTags: [],
+  sourcingType: 'partner',
+  partnerCost: '',
 };
 
 const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select', 'Multi-image'];
@@ -146,6 +153,8 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   ref
 ) {
   const hasImage = !!(previewUrl || form.image);
+  // Partner-sourced items are pre-order only (no stock on hand).
+  const isPartnerSource = form.category === CELEBRATION_CATEGORY && form.sourcingType === 'partner';
 
   return (
     <div ref={ref} className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4 min-w-0 ${className}`}>
@@ -191,7 +200,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
               <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
                 {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </Select>
-              <Select label="Order Type" value={form.orderType} onChange={e => onChange('orderType', e.target.value)}>
+              <Select label="Order Type" value={isPartnerSource ? 'Pre-order' : form.orderType} disabled={isPartnerSource} title={isPartnerSource ? 'Partner Shop items are pre-order only' : undefined} onChange={e => onChange('orderType', e.target.value)}>
                 <option value="Pick-up Today">Pick-up Today</option>
                 <option value="Pre-order">Pre-order</option>
                 <option value="Both">Both</option>
@@ -256,6 +265,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     dailyLimit: product.daily_limit || 0,
     allowFileUpload: product.allow_file_upload || false,
     eventTags: product.event_tags || [],
+    sourcingType: product.sourcing_type || 'own',
+    partnerCost: product.partner_cost ?? '',
   } : BLANK_PRODUCT;
 
   const [form, setForm] = useState(initialFormState);
@@ -277,6 +288,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
   const fileInputRef = useRef(null);
   const isEditing = !!product?.id;
+  const isCelebration = form.category === CELEBRATION_CATEGORY;
+  const isPartner = isCelebration && form.sourcingType === 'partner';
 
   const detailsCardRef = useRef(null);
 
@@ -293,6 +306,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         dailyLimit,
         allowFileUpload: product.allow_file_upload || false,
         eventTags: product.event_tags || [],
+        sourcingType: product.sourcing_type || 'own',
+        partnerCost: product.partner_cost ?? '',
       } : BLANK_PRODUCT);
       setDailyLimitEnabled(dailyLimit > 0);
       
@@ -369,6 +384,15 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         newErrors.price = 'Please set a valid positive price.';
     }
 
+    if (isPartner && (form.partnerCost === '' || isNaN(Number(form.partnerCost)) || Number(form.partnerCost) < 0)) {
+        newErrors.partnerCost = 'Enter the partner cost.';
+    }
+
+    // Block saving a partner item that would sell at a loss.
+    if (isPartner && !newErrors.partnerCost && !newErrors.price && Number(form.price) < Number(form.partnerCost)) {
+        newErrors.price = 'Selling price cannot be lower than the partner cost.';
+    }
+
     if (Object.keys(newErrors).length > 0) {
         setErrors(newErrors);
         return;
@@ -422,7 +446,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         const payload = {
             name: form.name,
             category: form.category,
-            order_type: form.orderType, 
+            order_type: isPartner ? 'Pre-order' : form.orderType, 
             price: derivedBasePrice, 
             inclusion: form.inclusion,
             image_url: finalImageUrl, 
@@ -433,6 +457,10 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             price_groups: [],
             price_matrix: [],
             event_tags: form.eventTags || [],
+            // Source fields: Celebration Material only. For other
+            // categories they are reset so no stale value is kept.
+            sourcing_type: isCelebration ? form.sourcingType : null,
+            partner_cost: isPartner ? Number(form.partnerCost) : null,
         };
 
         const saveUrl = isEditing
@@ -508,8 +536,67 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             errors={errors}
           />
 
+          {/* Pricing card. Celebration Material: Source first, then cost -> selling price -> profit */}
           <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
-            <Input label="Price" required type="number" min="0" error={errors.price} value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="0" />
+            {isCelebration && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-4 border-b border-[#EAE4E0]">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A]">Source</p>
+                  <p className="text-[11px] text-[#8A7264] mt-0.5">
+                    {isPartner
+                      ? 'Pre-order only. Bought from a partner shop per order, tracked by order limit with no inventory stock.'
+                      : 'Stocked by the owner. Pick-up Today / Both items are tracked in inventory with restock and low-stock alerts.'}
+                  </p>
+                </div>
+                <div className="inline-flex shrink-0 p-1 rounded-xl bg-[#F5EFEB] border border-[#DED4CC] w-fit">
+                  {[
+                    { value: 'partner', label: 'Partner Shop' },
+                    { value: 'own', label: 'Own Stock' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => handleChange('sourcingType', opt.value)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        form.sourcingType === opt.value
+                          ? 'bg-[#3B1F0A] text-white shadow-sm'
+                          : 'text-[#8A7264] hover:text-[#3B1F0A]'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isPartner ? (() => {
+              const cost = Number(form.partnerCost);
+              const sell = Number(form.price);
+              const hasBoth = form.partnerCost !== '' && form.price !== '' && !isNaN(cost) && !isNaN(sell);
+              const profit = sell - cost;
+              const margin = hasBoth && sell > 0 ? (profit / sell) * 100 : null;
+              const negative = hasBoth && profit < 0;
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
+                    <Input label="1. Partner Cost (you pay)" required type="number" min="0" error={errors.partnerCost} value={form.partnerCost} onChange={e => handleChange('partnerCost', e.target.value)} placeholder="e.g. 20" />
+                  </div>
+                  <div className="rounded-2xl border border-[#DED4CC] bg-[#FCFAF9] p-3">
+                    <Input label="2. Selling Price (customer pays)" required type="number" min="0" error={errors.price} value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="e.g. 35" />
+                  </div>
+                  <div className={`rounded-2xl border p-3 flex flex-col justify-center ${negative ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50/70'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${negative ? 'text-red-700' : 'text-emerald-700'}`}>Profit per piece</p>
+                    <p className={`text-lg font-bold ${negative ? 'text-red-700' : 'text-emerald-800'}`}>{hasBoth ? `₱${profit.toFixed(2)}` : '—'}</p>
+                    <p className={`text-[10px] ${negative ? 'text-red-600' : 'text-emerald-700'}`}>
+                      {negative ? 'Selling below cost. Raise the price to save.' : margin !== null ? `${margin.toFixed(0)}% margin` : 'Enter cost and price'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })() : (
+              <Input label="Price" required type="number" min="0" error={errors.price} value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="0" />
+            )}
           </div>
         </div>
 

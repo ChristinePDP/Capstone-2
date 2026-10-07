@@ -74,6 +74,8 @@ const REASONS = {
   material: ['Popped/Butas', 'Damaged', 'Misprinted', 'Lost', 'Other']
 };
 
+const TYPE_LABELS = { ingredient: 'Ingredient', product: 'Product', material: 'Product Material' };
+
 const formatLocal = (isoString) => {
   if (!isoString) return '—';
   try {
@@ -96,6 +98,13 @@ export default function WasteTab() {
     materials = [],
     loading,
   } = useApp() || {};
+
+  // Product materials lang ang may stock sa shop; ang celebration materials
+  // ay galing sa ibang shop kaya hindi kasama sa waste log.
+  const productMaterials = useMemo(
+    () => materials.filter(m => (m.materialType ?? m.material_type) === 'product'),
+    [materials]
+  );
 
   const { show: showToast } = useToast();
   const [containerRef, isCompact] = useIsCompact();
@@ -173,17 +182,41 @@ export default function WasteTab() {
     return filteredLogs.slice(start, start + PER_PAGE);
   }, [filteredLogs, page]);
 
-  const handleOpenLogModal = (type) => {
-    setLogType(type);
-    setReason(REASONS[type][0]);
-    setNotes('');
+  const WASTE_TYPE_OPTIONS = [
+    { value: 'ingredient', label: 'Ingredient' },
+    { value: 'product', label: 'Finished Product' },
+    { value: 'material', label: 'Product Material' },
+  ];
+
+  // Nire-reset ang item/qty ng lahat ng type para walang maiwang pinili
+  // mula sa ibang kategorya (iwas pagkakahalo ng ingredient/product/material).
+  const resetItemFields = () => {
     setIngName(''); setIngQty(''); setIngUnit('kg');
     setProductName(''); setProductQty(''); setProductUnit('pcs');
     setMatName(''); setMatQty(''); setMatUnit('pcs');
+  };
+
+  const handleOpenLogModal = (type = 'ingredient') => {
+    // Kapag nasa void/selection mode, kanselahin muna bago mag-log ng waste.
+    if (selectionMode) exitSelectionMode();
+    setLogType(type);
+    setReason(REASONS[type][0]);
+    setNotes('');
+    resetItemFields();
     setIsSaving(false);
     setFormErrors({});
     setServerError(null);
     setModalOpen(true);
+  };
+
+  // Kapag pinalitan ang Waste Type sa loob ng modal: bagong listahan ng item
+  // at bagong listahan ng reason ayon sa napiling type.
+  const handleTypeChange = (type) => {
+    setLogType(type);
+    setReason(REASONS[type][0]);
+    resetItemFields();
+    setFormErrors({});
+    setServerError(null);
   };
 
   // ── Inline validation (EventManager style) ────────────────────────────────
@@ -217,8 +250,8 @@ export default function WasteTab() {
       finalUnit = productUnit;
       computedCost = (match?.estimatedCost || 45) * rawQty;
     } else if (logType === 'material') {
-      const match = materials.find(m => m.name === matName);
-      if (!matName) errs.item = 'Please select a material.';
+      const match = productMaterials.find(m => m.name === matName);
+      if (!matName) errs.item = 'Please select a product material.';
       selectedItemStock = match ? match.stock : 0;
       finalItem = matName;
       qtyText = matQty;
@@ -365,39 +398,19 @@ export default function WasteTab() {
           {/* ACTION BUTTONS (Only Void is RED) */}
           <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => handleOpenLogModal('ingredient')}
-              className="flex-1 sm:flex-none justify-center text-xs"
+              variant="dark"
+              onClick={() => handleOpenLogModal()}
+              className="flex-1 sm:flex-none justify-center"
             >
-              <Plus size={13} className="mr-1" /> Spoiled Ingredient
+              <Plus size={14} /> Log Waste
             </Button>
             <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => handleOpenLogModal('product')}
-              className="flex-1 sm:flex-none justify-center text-xs"
+              variant="danger"
+              onClick={selectionMode ? exitSelectionMode : enterSelectionMode}
+              className={`w-full sm:w-auto justify-center ${selectionMode ? 'ring-2 ring-red-400' : ''}`}
             >
-              <Plus size={13} className="mr-1" /> Unsold Product
+              <ListChecks size={14} /> Select to Void
             </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => handleOpenLogModal('material')}
-              className="flex-1 sm:flex-none justify-center text-xs"
-            >
-              <Plus size={13} className="mr-1" /> Damaged Material
-            </Button>
-            {!selectionMode && (
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={enterSelectionMode}
-                className="w-full sm:w-auto justify-center text-xs"
-              >
-                <ListChecks size={13} className="mr-1" /> Select to Void
-              </Button>
-            )}
           </div>
         </div>
 
@@ -422,7 +435,7 @@ export default function WasteTab() {
                   <option value="All">All Categories</option>
                   <option value="ingredient"> Ingredient</option>
                   <option value="product">Finished Product</option>
-                  <option value="material">Celebration Material</option>
+                  <option value="material">Product Material</option>
                 </select>
               </div>
 
@@ -497,8 +510,8 @@ export default function WasteTab() {
                         <p className="text-[11px] text-gray-400">{formatLocal(log.dt)}</p>
                       </div>
                     </div>
-                    <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="capitalize shrink-0 text-[10px]">
-                      {log.type}
+                    <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="shrink-0 text-[10px]">
+                      {TYPE_LABELS[log.type] || log.type}
                     </Badge>
                   </div>
 
@@ -532,7 +545,7 @@ export default function WasteTab() {
           /* TABLE WITH RED HIGHLIGHT ON SELECTION */
           <div className="overflow-x-auto">
             <Table columns={[
-              ...(selectionMode ? [{
+              ...(selectionMode && filteredLogs.length > 0 ? [{
                 label: (
                   <input
                     type="checkbox"
@@ -550,6 +563,13 @@ export default function WasteTab() {
               { label: 'Reason' },
               { label: 'Notes' },
             ]}>
+              {!filteredLogs.length && !loading && (
+                <tr>
+                  <td colSpan={7} className="text-center text-gray-400 py-10 text-sm">
+                    No waste records found.
+                  </td>
+                </tr>
+              )}
               {pagedLogs.map(log => {
                 const isSelected = selectionMode && selectedIds.has(log.id);
                 return (
@@ -566,8 +586,8 @@ export default function WasteTab() {
                     )}
                     <Td className="text-xs text-gray-500 whitespace-nowrap">{formatLocal(log.dt)}</Td>
                     <Td>
-                      <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="capitalize">
-                        {log.type}
+                      <Badge variant={log.type === 'ingredient' ? 'warning' : log.type === 'product' ? 'info' : 'default'} className="whitespace-nowrap">
+                        {TYPE_LABELS[log.type] || log.type}
                       </Badge>
                     </Td>
                     <Td className="font-bold text-brand-900">{log.item}</Td>
@@ -586,7 +606,7 @@ export default function WasteTab() {
           </div>
           )}
 
-          {!filteredLogs.length && !loading && (
+          {isCompact && !filteredLogs.length && !loading && (
             <div className="text-center text-gray-400 py-10 text-sm">
               No waste records found.
             </div>
@@ -612,11 +632,11 @@ export default function WasteTab() {
       <Modal 
         isOpen={modalOpen} 
         onClose={() => !isSaving && setModalOpen(false)} 
-        title={`Log ${logType === 'ingredient' ? 'Spoiled Ingredient' : logType === 'product' ? 'Unsold Product' : 'Damaged Material'}`}
+        title="Log Waste"
         footer={
           <div className="flex gap-2 justify-end w-full sm:w-auto">
             <Button variant="secondary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button className=" bg-amber-900 flex-1 sm:flex-none" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Saving...' : 'Confirm Log'}</Button>
+            <Button variant="primary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Saving...' : 'Confirm Log'}</Button>
           </div>
         }
       >
@@ -627,6 +647,17 @@ export default function WasteTab() {
               {serverError}
             </div>
           )}
+
+          <FormSelect
+            label="Waste Type"
+            required
+            value={logType}
+            onChange={e => handleTypeChange(e.target.value)}
+          >
+            {WASTE_TYPE_OPTIONS.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </FormSelect>
 
           {logType === 'ingredient' && (
             <div className="space-y-6">
@@ -668,18 +699,18 @@ export default function WasteTab() {
           {logType === 'material' && (
             <div className="space-y-6">
               <FormSelect
-                label="Select Material"
+                label="Select Product Material"
                 required
                 error={formErrors.item}
                 value={matName}
                 onChange={e => {
-                  const matched = materials.find(m => m.name === e.target.value);
+                  const matched = productMaterials.find(m => m.name === e.target.value);
                   setMatName(e.target.value);
                   if (matched) setMatUnit(matched.unit);
                 }}
               >
-                <option value="">— Select a material —</option>
-                {materials.map(m => (
+                <option value="">— Select a product material —</option>
+                {productMaterials.map(m => (
                   <option key={m.id} value={m.name}>{m.name} (In stock: {m.stock} {m.unit})</option>
                 ))}
               </FormSelect>

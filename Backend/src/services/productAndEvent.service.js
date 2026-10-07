@@ -210,6 +210,33 @@ export const getAllProducts = async (filters = {}) => {
   }
 };
 
+// Source (partner/own) at partner_cost: para sa 'Celebration Material' LANG.
+// Sa ibang category, laging null para walang naiiwang maling value.
+const buildSourcingFields = (productData, { isUpdate = false } = {}) => {
+  // Sa update, kung walang category na pinadala, huwag galawin ang source.
+  if (isUpdate && productData.category === undefined) return {};
+
+  if (productData.category !== 'Celebration Material') {
+    return { sourcing_type: null, partner_cost: null };
+  }
+
+  const sourcingType = productData.sourcing_type === 'own' ? 'own' : 'partner';
+  if (sourcingType === 'own') {
+    return { sourcing_type: 'own', partner_cost: null };
+  }
+
+  const cost = Number(productData.partner_cost);
+  if (!Number.isFinite(cost) || cost < 0) {
+    throw new Error('Partner cost is required for partner-sourced celebration materials.');
+  }
+  // Never allow a partner item to be sold below its cost.
+  if (productData.price !== undefined && Number(productData.price) < cost) {
+    throw new Error('Selling price cannot be lower than the partner cost.');
+  }
+
+  return { sourcing_type: 'partner', partner_cost: cost };
+};
+
 export const createDatabaseProduct = async (productData) => {
   let validTags = [];
   try {
@@ -244,7 +271,8 @@ export const createDatabaseProduct = async (productData) => {
     // products (hal. cake, cupcake, tarp) na dapat ma-deduct sa kani-kanilang
     // sariling stock kapag na-order ang package na ito. Tingnan ang
     // pos.service.js / onlineOrdering.service.js para sa deduction logic.
-    package_items: Array.isArray(productData.package_items) ? productData.package_items : []
+    package_items: Array.isArray(productData.package_items) ? productData.package_items : [],
+    ...buildSourcingFields(productData)
   };
 
   try {
@@ -281,7 +309,8 @@ export const updateDatabaseProduct = async (id, productData) => {
     price_matrix: productData.price_matrix,
     event_tags: productData.event_tags ? productData.event_tags.filter(tag => validTags.includes(tag)) : [],
     // BAGO: tingnan ang paliwanag sa createDatabaseProduct sa itaas.
-    package_items: productData.package_items
+    package_items: productData.package_items,
+    ...buildSourcingFields(productData, { isUpdate: true })
   };
 
   Object.keys(productToUpdate).forEach((key) => {
