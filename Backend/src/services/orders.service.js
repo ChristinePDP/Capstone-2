@@ -4,7 +4,7 @@ import { OrdersModel } from '../model/orders.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { MaterialModel } from '../model/material.model.js';
-import { supabase, usingServiceRole } from '../config/supabase.js';
+import { supabase } from '../config/supabase.js';
 
 // Pinapayagang statuses lang — ito yung ginagamit talaga ng
 // AllOrdersPage.jsx (ORDER_STATUSES filter pills + nextStatus map),
@@ -123,31 +123,23 @@ const OrdersService = {
       throw error;
     }
 
-    if (!usingServiceRole) {
-      const error = new Error('Payment proof storage is not configured for private access');
-      error.status = 503;
-      throw error;
-    }
-
-    const { data, error } = await supabase.storage
+    const { data } = supabase.storage
       .from(PAYMENT_PROOF_BUCKET)
-      .createSignedUrl(path, 5 * 60);
+      .getPublicUrl(path);
+    const publicUrl = data?.publicUrl;
 
-    if (error || !data?.signedUrl) {
-      console.error('[PAYMENT PROOF] Failed to create signed URL', {
+    if (!publicUrl) {
+      console.error('[PAYMENT PROOF] Failed to create public URL', {
         orderId: id,
         bucket: PAYMENT_PROOF_BUCKET,
         path,
-        message: error?.message,
-        status: error?.status,
-        statusCode: error?.statusCode,
       });
-      const storageError = new Error(error?.message || 'Payment proof object not found');
+      const storageError = new Error('Payment proof URL could not be created');
       storageError.status = 404;
       throw storageError;
     }
 
-    const response = await fetch(data.signedUrl);
+    const response = await fetch(publicUrl);
     if (!response.ok) {
       const storageError = new Error(`Payment proof fetch failed with status ${response.status}`);
       storageError.status = response.status === 404 ? 404 : 502;

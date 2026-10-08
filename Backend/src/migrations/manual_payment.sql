@@ -59,16 +59,16 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Create this bucket in Storage if it does not already exist.
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('payment-assets', 'payment-assets', false)
+VALUES ('payment-assets', 'payment-assets', true)
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE storage.buckets
-SET public = false
+SET public = true
 WHERE id = 'payment-assets';
 
--- The customer submits proof through the application backend. The bucket
--- remains private; admins view proofs through the authenticated backend
--- endpoint, which reads objects with SUPABASE_SERVICE_ROLE_KEY.
+-- Customers can upload payment proof through the application backend.
+-- This bucket is public by request, so any person who obtains an object URL
+-- can view the image. Supabase public buckets do not support admin-only reads.
 DROP POLICY IF EXISTS "Customers can upload payment proof" ON storage.objects;
 CREATE POLICY "Customers can upload payment proof"
   ON storage.objects
