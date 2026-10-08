@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   User, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  Calendar as CalendarIcon, Clock, Check, Lock, Receipt, AlertTriangle, Trash2
+  Calendar as CalendarIcon, Clock, Check, Lock, Receipt, AlertTriangle
 } from 'lucide-react';
 import CartSlipImages from '../shared/CartSlipImages';
 import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
@@ -167,7 +167,6 @@ export default function OrderSummaryModal({
   uploadProgress,
   onPlaceOrder,
   onValidate,
-  onRemoveItem,
   errors = {},
 }) {
   const isBuyNow = orderType === 'Buy Now';
@@ -658,14 +657,6 @@ export default function OrderSummaryModal({
                   {expandedItemIndexes.has(i) && item.details && (
                     <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => onRemoveItem?.(i)}
-                    className="mt-2 self-start inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold text-red-500 hover:bg-red-50"
-                    aria-label={`Remove ${item.name}`}
-                  >
-                    <Trash2 size={12} /> Remove
-                  </button>
                 </div>
               </div>
             ))}

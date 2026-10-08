@@ -1,13 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Trash2
+  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Pencil
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, isSlotPast, TIME_SLOTS } from './orderSum';
 import MultiImageField from '../shared/MultiImageField';
-import CartSlipImages from '../shared/CartSlipImages';
-import CartReferenceImage from '../shared/CartReferenceImage';
+import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages } from '../shared/orderSlipUploads';
 import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
@@ -65,7 +64,8 @@ function stockIssueMessage(issue, type) {
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
-export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onRemoveItem, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
+export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
+  const [editingSlipIndex, setEditingSlipIndex] = useState(null);
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
@@ -73,8 +73,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
   const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
-  const [openSwipeIndex, setOpenSwipeIndex] = useState(null);
-  const swipeStartX = useRef(null);
   const submissionLockRef = useRef(false);
 
   // FIX (toast): iisang LOCAL na toast bar na ito (walang bagong/hiwalay
@@ -128,21 +126,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       else next.add(index);
       return next;
     });
-  };
-
-  const handleCartPointerDown = (event) => {
-    swipeStartX.current = event.clientX;
-  };
-
-  const handleCartPointerMove = (index, event) => {
-    if (swipeStartX.current === null) return;
-    const delta = event.clientX - swipeStartX.current;
-    if (delta < -40) setOpenSwipeIndex(index);
-    else if (delta > 40) setOpenSwipeIndex(null);
-  };
-
-  const handleCartPointerUp = () => {
-    swipeStartX.current = null;
   };
 
   // Prevent the background POS screen from scrolling while the Order
@@ -785,24 +768,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             ) : (
               cart.map((item, idx) => (
                 <div key={idx} className="relative overflow-hidden rounded-xl border-b border-[#F1EBE6] last:border-0">
-                  <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center lg:hidden">
-                    <button
-                      type="button"
-                      onClick={() => { onRemoveItem?.(idx); setOpenSwipeIndex(null); }}
-                      className="h-full w-full flex flex-col items-center justify-center gap-1 text-white"
-                      aria-label={`Remove ${item.name}`}
-                    >
-                      <Trash2 size={18} />
-                      <span className="text-[9px] font-bold uppercase tracking-wide">Delete</span>
-                    </button>
-                  </div>
                   <div
                     className="relative flex justify-between items-start gap-3 pb-4 last:pb-0 bg-white transition-transform duration-200 ease-out touch-pan-y"
-                    style={{ transform: openSwipeIndex === idx ? 'translateX(-80px)' : 'translateX(0)' }}
-                    onPointerDown={handleCartPointerDown}
-                    onPointerMove={(event) => handleCartPointerMove(idx, event)}
-                    onPointerUp={handleCartPointerUp}
-                    onPointerCancel={handleCartPointerUp}
                   >
                   <div className="flex-1 min-w-0">
                     <button
@@ -842,33 +809,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                       )
                     )}
 
-                    {expandedCartIndexes.has(idx) && <CartSlipImages
-                      item={item}
-                      className="mt-1.5"
-                      readOnly={!onUpdateItem}
-                      onChange={(next) => onUpdateItem?.(idx, { order_slip_details: next })}
-                    />}
-
-                    {expandedCartIndexes.has(idx) && <CartReferenceImage
-                      item={item}
-                      className="mt-0.5"
-                      readOnly={!onUpdateItem}
-                      onChange={(file) => onUpdateItem?.(idx, { inspiration_image: file })}
-                    />}
+                    {expandedCartIndexes.has(idx) && (item.order_slip_fields?.length > 0 || item.allow_file_upload || item.products?.some(p => p.order_slip_fields?.length || p.allow_file_upload) || item.package_components?.some(p => p.order_slip_fields?.length || p.allow_file_upload)) && onUpdateItem && (
+                      <button type="button" onClick={() => setEditingSlipIndex(idx)} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#DED4CC] px-3 py-1.5 text-[11px] font-semibold text-[#5A453C] hover:bg-[#F5EFEB]"><Pencil size={12}/>Edit order slip</button>
+                    )}
 
                     <div className="flex items-center gap-2 mt-2">
                       <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
                       <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
                       <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
-                      <button
-                        type="button"
-                        onClick={() => onRemoveItem?.(idx)}
-                        className="ml-2 w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 lg:flex"
-                        aria-label={`Remove ${item.name}`}
-                        title="Remove item"
-                      >
-                        <Trash2 size={14} />
-                      </button>
                     </div>
                   </div>
                   <span className="font-semibold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
@@ -939,10 +887,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         <OrderSummaryModal
           show={showSummaryModal}
           onBack={() => { setShowSummaryModal(false); setFormErrors({}); }}
-          onRemoveItem={(index) => {
-            onRemoveItem?.(index);
-            if (cart.length <= 1) setShowSummaryModal(false);
-          }}
           cart={cart}
           orderType={orderType}
           form={form}
@@ -962,6 +906,13 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           onValidate={validateOrderForm}
           errors={formErrors}
         />
+        {editingSlipIndex !== null && cart[editingSlipIndex] && (
+          <CartOrderSlipEditor
+            item={cart[editingSlipIndex]}
+            onClose={() => setEditingSlipIndex(null)}
+            onSave={(slip, inspiration) => onUpdateItem?.(editingSlipIndex, { order_slip_details: slip, inspiration_image: inspiration })}
+          />
+        )}
 
         {ereceiptData && createPortal(
           <PosEReceipt

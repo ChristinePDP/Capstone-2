@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Trash2, Loader2, ZoomIn, X } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Loader2, ZoomIn, X } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
@@ -339,18 +339,6 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       const next = new Set(prev);
       if (next.has(index)) next.delete(index);
       else next.add(index);
-      return next;
-    });
-  };
-
-  const removeSummaryItem = (index) => {
-    setCart(prev => prev.filter((_, itemIndex) => itemIndex !== index));
-    setExpandedSummaryIndexes(prev => {
-      const next = new Set();
-      prev.forEach(value => {
-        if (value < index) next.add(value);
-        else if (value > index) next.add(value - 1);
-      });
       return next;
     });
   };
@@ -1394,17 +1382,6 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           {expandedSummaryIndexes.has(i) && item.details && (
                             <p className="text-[10px] sm:text-xs text-[#8A7264] leading-snug">Note: {item.details}</p>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              removeSummaryItem(i);
-                              if (cart.length <= 1) setShowSummaryModal(false);
-                            }}
-                            className="mt-2 self-start inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold text-red-500 hover:bg-red-50"
-                            aria-label={`Remove ${item.name}`}
-                          >
-                            <Trash2 size={12} /> Remove
-                          </button>
                         </div>
                       </div>
                     );

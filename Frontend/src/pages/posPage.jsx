@@ -243,10 +243,6 @@ export default function PosPage() {
     setCart([]);
   };
 
-  const handleRemoveItem = (index) => {
-    setCart(prev => prev.filter((_, i) => i !== index));
-  };
-
   // Para sa PosCart: palitan/idagdag/burahin ang mga larawan (Multi-image
   // order slip fields) ng isang cart line.
   const handleUpdateItem = (index, patch) => {
@@ -278,7 +274,6 @@ export default function PosPage() {
         orderType={orderType}
         setOrderType={setOrderType}
         onUpdateQty={handleUpdateQty}
-        onRemoveItem={handleRemoveItem}
         onUpdateItem={handleUpdateItem}
         onClearCart={handleClearCart}
         isCartOpen={isCartOpen}

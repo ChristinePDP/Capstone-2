@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
-import CartSlipImages from '../shared/CartSlipImages';
+import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
 import { isSlipAnswerEmpty, pruneEmptySlipAnswers, slipSignature } from '../shared/orderSlipUploads';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
@@ -137,11 +137,11 @@ function BundleMenuImage({ products = [], customImageUrl }) {
 // ─────────────────────────────────────────────────────────────
 function CartItemRow({
   item, index, changeQty, onRemove, expanded, onToggleExpand,
-  imageSrc, attachedImageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onReplaceImage, onUpdateSlip,
+  imageSrc, onPreviewImage, variant, openSwipeIndex, setOpenSwipeIndex, onUpdateSlip,
 }) {
   const isMobile = variant === 'mobile';
+  const [editingSlip, setEditingSlip] = useState(false);
   const swipeStartX = useRef(null);
-  const replaceInputRef = useRef(null);
 
   const handlePointerDown = (e) => { swipeStartX.current = e.clientX; };
   const handlePointerMove = (e) => {
@@ -165,10 +165,6 @@ function CartItemRow({
     ? slipKeys.map(prodId => (item.products || item.package_components)?.find(p => String(p.id) === String(prodId))?.name || 'Item').join(', ')
     : null;
   const isCustomized = !isMulti && slipKeys.length > 0;
-
-  const imageCount = isMulti && isPlainObject(item.inspiration_image)
-    ? Object.values(item.inspiration_image).filter(Boolean).length
-    : (item.inspiration_image ? 1 : 0);
 
   const qtyBtnSize = isMobile ? 'w-8 h-8' : 'w-6 h-6';
   const qtyIconSize = isMobile ? 14 : 11;
@@ -210,56 +206,9 @@ function CartItemRow({
             isCustomized && <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
           )}
 
-          {imageCount > 0 && (
-            <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5 flex items-center gap-2">
-              <span>{isMulti ? `Image Attached (${imageCount})` : 'Image Attached'}</span>
-              {attachedImageSrc && (
-                <button type="button" onClick={() => onPreviewImage(attachedImageSrc)} className="underline underline-offset-2 font-normal normal-case text-[#5A453C]">
-                  View
-                </button>
-              )}
-              {!isMulti && onReplaceImage && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => replaceInputRef.current?.click()}
-                    aria-label="Change picture"
-                    title="Change picture"
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-[#DED4CC] text-[#5A453C] hover:bg-[#F5EFEB] transition-colors"
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onReplaceImage(index, null)}
-                    aria-label="Remove picture"
-                    title="Remove picture"
-                    className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-[#DED4CC] text-red-500 hover:bg-red-50 transition-colors"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                  <input
-                    ref={replaceInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) onReplaceImage(index, file);
-                      e.target.value = '';
-                    }}
-                  />
-                </>
-              )}
-            </p>
+          {(item.order_slip_fields?.length > 0 || item.allow_file_upload || item.products?.some(p => p.order_slip_fields?.length || p.allow_file_upload) || item.package_components?.some(p => p.order_slip_fields?.length || p.allow_file_upload)) && onUpdateSlip && (
+            <button type="button" onClick={() => setEditingSlip(true)} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#DED4CC] px-3 py-1.5 text-[11px] font-semibold text-[#5A453C] hover:bg-[#F5EFEB]"><Pencil size={12}/>Edit order slip</button>
           )}
-
-          <CartSlipImages
-            item={item}
-            className="mt-2"
-            readOnly={!onUpdateSlip}
-            onChange={(next) => onUpdateSlip?.(index, next)}
-          />
 
           <div className="flex items-center justify-between mt-2.5">
             <div className="flex items-center gap-2">
@@ -279,6 +228,7 @@ function CartItemRow({
           </div>
         </div>
       )}
+      {editingSlip && <CartOrderSlipEditor item={item} onClose={() => setEditingSlip(false)} onSave={(slip, inspiration) => onUpdateSlip(index, slip, inspiration)} />}
     </div>
   );
 
@@ -1691,14 +1641,10 @@ export default function Menu({ cart, setCart }) {
 
   const removeItem = (index) => setCart(prev => prev.filter((_, i) => i !== index));
 
-  const replaceCartItemImage = (index, file) => setCart(prev => prev.map(
-    (item, i) => (i === index ? { ...item, inspiration_image: file } : item)
-  ));
-
   // Multi-image order slip fields: palitan / idagdag / burahin ang mga larawan
   // ng isang cart line (nire-replace ang buong order_slip_details ng line na iyon).
-  const updateCartItemSlip = (index, nextSlip) => setCart(prev => prev.map(
-    (item, i) => (i === index ? { ...item, order_slip_details: nextSlip } : item)
+  const updateCartItemSlip = (index, nextSlip, inspiration) => setCart(prev => prev.map(
+    (item, i) => (i === index ? { ...item, order_slip_details: nextSlip, inspiration_image: inspiration } : item)
   ));
 
   const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
@@ -1712,24 +1658,6 @@ export default function Menu({ cart, setCart }) {
   const [openSwipeIndex, setOpenSwipeIndex] = useState(null);
   const [cartImagePreviewSrc, setCartImagePreviewSrc] = useState(null);
 
-  const [cartImageBlobUrls, setCartImageBlobUrls] = useState({});
-  useEffect(() => {
-    const urls = {};
-    cart.forEach((item, i) => {
-      let file = null;
-      if (item.inspiration_image instanceof File) {
-        file = item.inspiration_image;
-      } else if (item.inspiration_image && typeof item.inspiration_image === 'object') {
-        file = Object.values(item.inspiration_image).find(v => v instanceof File);
-      }
-      if (file) urls[i] = URL.createObjectURL(file);
-    });
-    setCartImageBlobUrls(urls);
-    return () => {
-      Object.values(urls).forEach(u => URL.revokeObjectURL(u));
-    };
-  }, [cart]);
-
   const normalizeCartSrc = (src) => {
     if (!src || typeof src !== 'string') return null;
     if (!src.startsWith('http') && !src.startsWith('blob:') && !src.startsWith('data:')) {
@@ -1740,18 +1668,6 @@ export default function Menu({ cart, setCart }) {
 
   const resolveCartImageSrc = (item) =>
     normalizeCartSrc(item.custom_image_url || item.image_url || item.image);
-
-  const resolveAttachedImageSrc = (item, i) => {
-    let src = cartImageBlobUrls[i];
-    if (!src) {
-      if (typeof item.inspiration_image === 'string') {
-        src = item.inspiration_image;
-      } else if (item.inspiration_image && typeof item.inspiration_image === 'object') {
-        src = Object.values(item.inspiration_image).find(v => typeof v === 'string');
-      }
-    }
-    return normalizeCartSrc(src);
-  };
 
   const changeQty = (index, delta) => setCart(prev => {
     const newCart = [...prev];
@@ -2079,10 +1995,8 @@ export default function Menu({ cart, setCart }) {
                     expanded={expandedCartIndexes.has(i)}
                     onToggleExpand={toggleCartItemExpanded}
                     imageSrc={resolveCartImageSrc(item)}
-                    attachedImageSrc={resolveAttachedImageSrc(item, i)}
                     onPreviewImage={setCartImagePreviewSrc}
                     variant="desktop"
-                    onReplaceImage={replaceCartItemImage}
                     onUpdateSlip={updateCartItemSlip}
                   />
                 ))}
@@ -2143,10 +2057,8 @@ export default function Menu({ cart, setCart }) {
                   expanded={expandedCartIndexes.has(i)}
                   onToggleExpand={toggleCartItemExpanded}
                   imageSrc={resolveCartImageSrc(item)}
-                  attachedImageSrc={resolveAttachedImageSrc(item, i)}
                   onPreviewImage={setCartImagePreviewSrc}
                   variant="mobile"
-                  onReplaceImage={replaceCartItemImage}
                   onUpdateSlip={updateCartItemSlip}
                   openSwipeIndex={openSwipeIndex}
                   setOpenSwipeIndex={setOpenSwipeIndex}
