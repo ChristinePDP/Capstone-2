@@ -385,10 +385,12 @@ export default function OrderSummaryModal({
                   <span className="text-red-500 font-normal normal-case ml-1">· Required</span>
                 )}
               </h4>
+              {/* Mobile: Order Type bilang maliit na badge sa tabi ng heading (walang sariling row) */}
+              <span className="md:hidden ml-auto shrink-0 text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{orderType}</span>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <div className="flex flex-col gap-0.5">
+              <div className="hidden md:flex flex-col gap-0.5">
                 <span className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Order Type</span>
                 <span className="text-xs text-[#3B1F0A] font-semibold">{orderType}</span>
               </div>
@@ -494,11 +496,6 @@ export default function OrderSummaryModal({
                   </button>
 
                   <FieldError name="pickupTime" />
-                  {noSlotsLeftToday && !errors.pickupTime && (
-                    <p className="text-[10px] text-[#8A7264] mt-1 leading-snug">
-                      No more pick-up slots today. This will be recorded as a walk-in (picked up now).
-                    </p>
-                  )}
 
                   {showTimeDropdown && timeDropdownPos && createPortal(
                     <div ref={timeDropdownPortalRef} style={timeDropdownPos} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden w-[220px]">
@@ -559,6 +556,12 @@ export default function OrderSummaryModal({
                 </div>
               </div>
 
+              {noSlotsLeftToday && !errors.pickupTime && (
+                <p className="text-[10px] text-[#8A7264] leading-snug px-1">
+                  No more pick-up slots today. This will be recorded as a walk-in (picked up now).
+                </p>
+              )}
+
               {/* FIX (Special Instructions, POS): dating naka-duplicate ito
                   bilang default field sa BAWAT produkto (Product Modal),
                   kaya paulit-ulit lumalabas sa order slip kapag maraming
@@ -566,10 +569,11 @@ export default function OrderSummaryModal({
                   ORDER, hindi na per-product — katulad ng dati nitong
                   puwesto: sa ilalim ng Date/Time. */}
               <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Special Instructions</label>
+                <label htmlFor="pos-special-instructions" className="sr-only md:not-sr-only text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Special Instructions</label>
                 <textarea
+                  id="pos-special-instructions"
                   rows={2}
-                  placeholder="Anything else we should know? (optional)"
+                  placeholder="Special instructions (optional)"
                   value={form.instructions || ''}
                   onChange={e => setForm({ ...form, instructions: e.target.value })}
                   className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"

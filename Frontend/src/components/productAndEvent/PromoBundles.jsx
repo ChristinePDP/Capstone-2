@@ -125,6 +125,98 @@ function Select({ label, children, className = '', ...props }) {
   );
 }
 
+// Searchable dropdown para sa "Add a product" — may search box para hindi
+// mahirapan kapag marami na ang products. options: [{ value, label }]
+function ProductPicker({ label, value, onChange, options, placeholder = 'Select a product...', disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const wrapRef = useRef(null);
+  const listRef = useRef(null);
+
+  const selected = options.find(o => String(o.value) === String(value));
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  const close = () => { setOpen(false); setQuery(''); setActive(0); };
+  const choose = (o) => { onChange(String(o.value)); close(); };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) close(); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) setOpen(true);
+      else setActive(i => Math.min(i + 1, Math.max(filtered.length - 1, 0)));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      if (open) { e.preventDefault(); if (filtered[active]) choose(filtered[active]); }
+    } else if (e.key === 'Escape') {
+      if (open) { e.preventDefault(); e.stopPropagation(); close(); }
+    } else if (e.key === 'Tab') {
+      close();
+    }
+  };
+
+  return (
+    <div ref={wrapRef} className="w-full min-w-0 relative">
+      {label && <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">{label}</label>}
+      <div className="relative">
+        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A7264] pointer-events-none" />
+        <input
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+          disabled={disabled}
+          value={open ? query : (selected?.label || '')}
+          placeholder={open ? 'Search products...' : placeholder}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          onChange={e => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+          onKeyDown={handleKeyDown}
+          className="w-full border border-[#DED4CC] rounded-xl pl-9 pr-9 py-2.5 text-xs outline-none focus:border-[#5A453C] bg-white transition-colors disabled:bg-[#F5EFEB] disabled:cursor-not-allowed truncate"
+        />
+        <ChevronDown size={14} className={`absolute right-3.5 top-1/2 -translate-y-1/2 text-[#8A7264] pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`} />
+      </div>
+      {open && !disabled && (
+        <ul ref={listRef} role="listbox" className="absolute left-0 right-0 top-full mt-1 z-30 max-h-60 overflow-y-auto overscroll-contain bg-white border border-[#DED4CC] rounded-xl shadow-lg py-1">
+          {filtered.length === 0 ? (
+            <li className="px-3.5 py-2.5 text-xs italic text-[#8A7264]">No products found.</li>
+          ) : filtered.map((o, i) => (
+            <li
+              key={o.value}
+              role="option"
+              aria-selected={String(o.value) === String(value)}
+              data-active={i === active ? 'true' : undefined}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => choose(o)}
+              onMouseEnter={() => setActive(i)}
+              className={`px-3.5 py-2 text-xs cursor-pointer ${i === active ? 'bg-[#F5EFEB] text-[#3B1F0A]' : 'text-[#5A453C]'} ${String(o.value) === String(value) ? 'font-bold' : ''}`}
+            >
+              {o.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Input({ label, required, error, className = '', ...props }) {
   return (
     <div className="w-full min-w-0 relative">
@@ -163,16 +255,16 @@ function Modal({ isOpen, onClose, title, footer, children }) {
   useLockBodyScroll(isOpen);
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-[#FCFAF9] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
-        <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-bold font-serif text-[#3B1F0A]">{title}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-3 sm:p-4">
+      <div className="bg-[#FCFAF9] rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
+        <div className="flex items-center justify-between px-4 sm:px-7 py-3 sm:py-5 border-b border-[#EAE4E0] bg-white shrink-0">
+          <h2 className="text-lg sm:text-xl font-bold font-serif text-[#3B1F0A]">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
             <X size={18} />
           </button>
         </div>
-        <div className="px-6 sm:px-8 py-6 overflow-y-auto scrollbar-thin">{children}</div>
-        {footer && <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
+        <div className="flex-1 min-h-0 px-3 sm:px-8 py-3 sm:py-6 overflow-y-auto overscroll-contain scrollbar-thin">{children}</div>
+        {footer && <div className="px-3 sm:px-7 py-3 sm:py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
       </div>
     </div>
   );
@@ -950,9 +1042,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
           : (isEditing ? 'Edit Promo Bundle' : 'Add Promo Bundle')
       }
       footer={
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={handleCancel} disabled={saving}>Cancel</Button>
-          <Button variant="dark" onClick={handleSubmit} disabled={saving}>
+        <div className="flex justify-end gap-2 sm:gap-3">
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={handleCancel} disabled={saving}>Cancel</Button>
+          <Button variant="dark" className="flex-1 sm:flex-none" onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
             {form.category === 'Package'
               ? (isEditing ? 'Save Changes' : 'Create Package')
@@ -961,7 +1053,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
         </div>
       }
     >
-      <div className="space-y-6">
+      <div className="space-y-3 sm:space-y-6">
         {formError && (
           <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
             {formError}
@@ -969,15 +1061,16 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
         )}
 
         {/* 1. Overview & Image Section */}
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4">
+        <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full flex flex-col gap-3 sm:gap-4">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">
               {form.category === 'Package' ? 'Package Overview' : 'Bundle Overview'}
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 items-start">
-              
-              <div data-invalid={imageError ? 'true' : undefined} className="relative shrink-0 flex flex-col gap-2 w-36">
-                <div className={`rounded-2xl overflow-hidden border bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm transition-colors ${imageError ? 'border-red-500' : 'border-[#DED4CC]'}`}>
+            <div className="grid grid-cols-[7rem_minmax(0,1fr)] sm:grid-cols-[9rem_repeat(3,minmax(0,1fr))] gap-x-3 sm:gap-x-4 gap-y-3 sm:gap-y-4 items-start">
+
+              {/* Image: nasa kaliwa, katabi ng Name + Choose File */}
+              <div data-invalid={imageError ? 'true' : undefined} className="relative shrink-0 row-span-2">
+                <div className={`rounded-2xl overflow-hidden border bg-[#F5EFEB] flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36 shadow-sm transition-colors ${imageError ? 'border-red-500' : 'border-[#DED4CC]'}`}>
                   {form.custom_image_url ? (
                     <img
                         src={form.custom_image_url}
@@ -1007,6 +1100,20 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                     <X size={13} />
                   </button>
                 )}
+              </div>
+
+              {/* Name */}
+              <div className="relative min-w-0 sm:col-span-3">
+                <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1.5 ${fieldErrors.bundle_name ? 'text-red-500' : 'text-[#8A7264]'}`}>
+                  {form.category === 'Package' ? 'Package Name' : 'Bundle Name'} <span className="text-red-500">*</span>
+                </label>
+                <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} aria-invalid={!!fieldErrors.bundle_name} data-invalid={fieldErrors.bundle_name ? 'true' : undefined} className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white transition-colors ${fieldErrors.bundle_name ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`} />
+                {fieldErrors.bundle_name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.bundle_name}</span>}
+              </div>
+
+              {/* Choose File: sa ilalim ng Name, pantay sa baba ng image */}
+              <div className="min-w-0 self-end sm:self-start flex flex-col gap-1 sm:gap-0">
+                <span className="hidden sm:block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Image File</span>
                 <label className="cursor-pointer w-full">
                   <span className={`flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs px-4 py-2.5 bg-white border hover:bg-[#F5EFEB] transition-colors w-full text-center ${imageError ? 'border-red-500 text-red-500' : 'border-[#DED4CC] text-[#5A453C]'}`}>
                     {uploadingImage ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Choose File
@@ -1018,15 +1125,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 )}
               </div>
 
-              <div className="flex-1 min-w-0 flex flex-col gap-4 w-full">
-                <div className="relative">
-                  <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1.5 ${fieldErrors.bundle_name ? 'text-red-500' : 'text-[#8A7264]'}`}>
-                    {form.category === 'Package' ? 'Package Name' : 'Bundle Name'} <span className="text-red-500">*</span>
-                  </label>
-                  <input value={form.bundle_name} onChange={e => setForm(prev => ({ ...prev, bundle_name: e.target.value }))} placeholder={form.category === 'Package' ? 'e.g. Debut Package A' : 'e.g. Christmas Sweet Deal'} aria-invalid={!!fieldErrors.bundle_name} data-invalid={fieldErrors.bundle_name ? 'true' : undefined} className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white transition-colors ${fieldErrors.bundle_name ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`} />
-                  {fieldErrors.bundle_name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.bundle_name}</span>}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Natitirang fields: full width sa ilalim ng image */}
+              <div className="col-span-2 flex flex-col gap-3 sm:gap-4 min-w-0 sm:contents">
+                <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:contents">
                   {categorySelect}
                   <Select label="Order Type" value={form.orderType} onChange={e => setForm(prev => ({ ...prev, orderType: e.target.value }))}>
                     {ORDER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1034,7 +1135,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 </div>
 
                 {form.category === 'Package' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 sm:col-span-4">
                     <Input label="Price" required error={fieldErrors.price} type="number" min="0" value={form.price} onChange={e => setForm(prev => ({ ...prev, price: e.target.value }))} placeholder="0" />
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Package Price</label>
@@ -1058,19 +1159,19 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                   </div>
                 ) : (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="relative">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:col-span-4">
+                      <div className="relative min-w-0">
                         <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1.5 ${fieldErrors.discount_percent ? 'text-red-500' : 'text-[#8A7264]'}`}>Discount % <span className="text-red-500">*</span></label>
                         <input type="number" min="0" max="100" value={form.discount_percent} onChange={e => setForm(prev => ({ ...prev, discount_percent: e.target.value }))} aria-invalid={!!fieldErrors.discount_percent} data-invalid={fieldErrors.discount_percent ? 'true' : undefined} className={`w-full px-3.5 py-2.5 text-xs border rounded-xl outline-none bg-white transition-colors ${fieldErrors.discount_percent ? 'border-red-500 focus:border-red-500' : 'border-[#DED4CC] focus:border-[#5A453C]'}`} />
                         {fieldErrors.discount_percent && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{fieldErrors.discount_percent}</span>}
                       </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Bundle Price</label>
-                        <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Computed Price</label>
+                        <div className="px-3 sm:px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold min-h-[38px] flex flex-wrap items-center gap-x-1.5">
                           {originalTotal > 0 ? (
                             <>
-                              <span className="line-through text-[#8A7264] font-normal mr-1.5">₱{originalTotal.toLocaleString()}</span>
-                              ₱{computedPrice.toLocaleString()}
+                              <span className="line-through text-[#8A7264] font-normal">₱{originalTotal.toLocaleString()}</span>
+                              <span>₱{computedPrice.toLocaleString()}</span>
                             </>
                           ) : (
                             <span className="font-normal text-[#8A7264]">Add products first</span>
@@ -1079,12 +1180,10 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                       </div>
                     </div>
 
-                    <div className="mt-1">
-                      <label className="flex items-center gap-2 cursor-pointer w-fit">
-                        <input type="checkbox" checked={form.is_active} onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))} className="accent-[#3B1F0A] w-4 h-4 rounded" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#3B1F0A] select-none">Active (visible in online ordering)</span>
-                      </label>
-                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer w-fit sm:col-span-4">
+                      <input type="checkbox" checked={form.is_active} onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))} className="accent-[#3B1F0A] w-4 h-4 rounded" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#3B1F0A] select-none">Active (visible in online ordering)</span>
+                    </label>
                   </>
                 )}
               </div>
@@ -1095,7 +1194,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
         {/* 2. Product Selection Section */}
         {form.category === 'Package' ? (
           <>
-          <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-3xl p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
+          <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
             <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${fieldErrors.products ? 'text-red-500' : 'text-[#3B1F0A]'}`}>Package Contents <span className="text-red-500">*</span></p>
             <p className={`text-xs mb-4 ${fieldErrors.products ? 'text-red-500 font-medium' : 'text-[#8A7264]'}`} role={fieldErrors.products ? 'alert' : undefined}>
               {fieldErrors.products
@@ -1103,17 +1202,19 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 : `Pick ${MIN_PACKAGE_PRODUCTS} to ${MAX_PACKAGE_PRODUCTS} products to include in this package (${form.packageItems.length}/${MAX_PACKAGE_PRODUCTS} added).`}
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
-              <Select label="Add a product" value={pendingPackageProductId} onChange={e => setPendingPackageProductId(e.target.value)} disabled={atMaxPackageProducts} className="sm:flex-[2]">
-                <option value="">{atMaxPackageProducts ? `Max of ${MAX_PACKAGE_PRODUCTS} products reached` : 'Select a product...'}</option>
-                {availablePackageProducts.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </Select>
-              <div className="w-full sm:w-24 shrink-0">
+            <div className="flex flex-wrap sm:flex-nowrap gap-2.5 mb-1 items-end">
+              <ProductPicker
+                label="Add a product"
+                value={pendingPackageProductId}
+                onChange={setPendingPackageProductId}
+                disabled={atMaxPackageProducts}
+                placeholder={atMaxPackageProducts ? `Max of ${MAX_PACKAGE_PRODUCTS} products reached` : 'Select a product...'}
+                options={availablePackageProducts.map(p => ({ value: p.id, label: p.name }))}
+              />
+              <div className="w-24 shrink-0">
                 <Input label="Qty" type="number" min="1" value={pendingPackageQty} onChange={e => setPendingPackageQty(e.target.value)} />
               </div>
-              <Button variant="secondary" type="button" onClick={addPackageItem} disabled={!pendingPackageProductId || atMaxPackageProducts} className="w-full sm:w-auto">
+              <Button variant="secondary" type="button" onClick={addPackageItem} disabled={!pendingPackageProductId || atMaxPackageProducts} className="flex-1 sm:flex-none">
                 <Plus size={14} /> Add
               </Button>
             </div>
@@ -1126,7 +1227,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
               ) : (
                 <div className="flex flex-col gap-2">
                   {form.packageItems.map(item => (
-                    <div key={item.productId} className="flex items-center gap-2.5 p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
+                    <div key={item.productId} className="flex items-center gap-2 sm:gap-2.5 p-2.5 sm:p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
                       <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{item.name}</span>
                       <input
                         type="number"
@@ -1147,7 +1248,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
 
           </>
         ) : (
-        <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-3xl p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
+        <div data-invalid={fieldErrors.products ? 'true' : undefined} className={`border bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full transition-colors ${fieldErrors.products ? 'border-red-500' : 'border-[#EAE4E0]'}`}>
           <p className={`text-xs font-bold uppercase tracking-wider mb-2 ${fieldErrors.products ? 'text-red-500' : 'text-[#3B1F0A]'}`}>Bundle Products <span className="text-red-500">*</span></p>
           <p className={`text-xs mb-4 ${fieldErrors.products ? 'text-red-500 font-medium' : 'text-[#8A7264]'}`} role={fieldErrors.products ? 'alert' : undefined}>
             {fieldErrors.products
@@ -1156,14 +1257,17 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
           </p>
 
           <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
-            <Select label="Add a product" value={pendingBundleProductId} onChange={e => setPendingBundleProductId(e.target.value)} disabled={atMaxProducts} className="sm:flex-[2]">
-              <option value="">{atMaxProducts ? `Max of ${MAX_BUNDLE_PRODUCTS} products reached` : 'Select a product...'}</option>
-              {availableBundleProducts.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}
-                </option>
-              ))}
-            </Select>
+            <ProductPicker
+              label="Add a product"
+              value={pendingBundleProductId}
+              onChange={setPendingBundleProductId}
+              disabled={atMaxProducts}
+              placeholder={atMaxProducts ? `Max of ${MAX_BUNDLE_PRODUCTS} products reached` : 'Select a product...'}
+              options={availableBundleProducts.map(p => ({
+                value: p.id,
+                label: `${p.name} — ${p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}`,
+              }))}
+            />
             <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="w-full sm:w-auto">
               <Plus size={14} /> Add
             </Button>
@@ -1180,7 +1284,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                   const item = form.product_items.find(i => i.productId === p.id);
                   const currentPrice = getVariantPrice(p, item?.options || {});
                   return (
-                    <div key={p.id} className="flex flex-col gap-2 p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
+                    <div key={p.id} className="flex flex-col gap-2 p-2.5 sm:p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
                       <div className="flex items-center gap-2.5">
                         <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{p.name}</span>
                         <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">₱{currentPrice.toLocaleString()}</span>
@@ -1215,11 +1319,11 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
 
         {/* 3. Availability UI Section — Bundle only; Packages don't have this. */}
         {form.category !== 'Package' && (
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+        <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
           <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2">
             When can this be purchased? (Choose one)
           </p>
-          <div className="flex gap-2 bg-[#F5EFEB] p-1.5 rounded-xl mb-4 border border-[#DED4CC]">
+          <div className="flex gap-1 sm:gap-2 bg-[#F5EFEB] p-1 sm:p-1.5 rounded-xl mb-3 sm:mb-4 border border-[#DED4CC]">
             {[
               { id: 'always', label: 'Always Available' },
               { id: 'event', label: 'Linked to Event' },
@@ -1229,7 +1333,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 key={mode.id}
                 type="button"
                 onClick={() => setForm(prev => ({ ...prev, availabilityMode: mode.id }))}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                className={`flex-1 px-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all ${
                   form.availabilityMode === mode.id
                     ? 'bg-white text-[#3B1F0A] shadow-sm border border-[#DED4CC]'
                     : 'text-[#8A7264] hover:text-[#5A453C]'
@@ -1240,7 +1344,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
             ))}
           </div>
 
-          <div className="bg-[#FCFAF9] p-4 rounded-xl border border-[#DED4CC]">
+          <div className="bg-[#FCFAF9] p-3 sm:p-4 rounded-xl border border-[#DED4CC]">
             {form.availabilityMode === 'always' && (
               <p className="text-xs text-[#5A453C] font-medium text-center">
                 This will be visible and available for purchase on the menu at any time.
@@ -1267,7 +1371,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
             )}
 
             {form.availabilityMode === 'dates' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-[#8A7264] mb-1">Start Date</p>
                   <div className="flex gap-2">

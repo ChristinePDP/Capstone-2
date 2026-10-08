@@ -1242,9 +1242,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     )}
 
                     {isStockTracked && (
-                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !onlyOtherTypeOpen && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
-                        <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : onlyOtherTypeOpen ? `Available: ${otherType} Only` : isSoldOut ? (orderType === 'Pre-Order' ? 'Unavailable' : 'Sold Out') : `${currentStock} Available`}
+                      <div className={`absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !onlyOtherTypeOpen && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">
+                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : onlyOtherTypeOpen ? `Available: ${otherType === 'Buy Now' ? 'Pick-up Today' : 'Pre-Order'} Only` : isSoldOut ? (orderType === 'Pre-Order' ? 'Unavailable' : 'Sold Out') : `${currentStock} Available`}
                         </span>
                       </div>
                     )}

@@ -57,7 +57,7 @@ export default function Header({ onMenuClick }) {
   }, []);
 
   return (
-    <header className="bg-white border-b border-brand-200 px-3 md:px-6 h-14 flex items-center justify-between sticky top-0 z-30 gap-2">
+    <header className="bg-white border-b border-brand-200 px-3 md:px-6 h-14 flex items-center justify-between sticky top-0 z-30 md:static gap-2">
       <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
         <HamburgerMenu onMenuClick={onMenuClick} />
         <h1 className="text-[16px] md:text-[20px] font-bold text-brand-800 tracking-wide truncate">{title}</h1>

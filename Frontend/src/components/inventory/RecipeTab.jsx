@@ -237,6 +237,29 @@ function SearchableSelect({ value, options, placeholder = 'Select', searchPlaceh
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
 
+const formatPeso = (n) => `₱${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Estimated cost ng isang batch = sum ng (qty x cost per unit) ng bawat
+// ingredient at material. `lines`: [{ qty, unit, item }] kung saan ang `item`
+// ay may `costPerUnit` at `unit` (base unit ng inventory item). Ang qty ay
+// kino-convert muna sa base unit ng item bago i-multiply sa cost per unit.
+// `missing` = ilang line ang walang makitang item o walang cost, para malaman
+// ng owner na kulang ang computation.
+function sumCost(lines) {
+  let total = 0;
+  let missing = 0;
+  lines.forEach(({ qty, unit, item }) => {
+    const q = Number(qty);
+    if (!Number.isFinite(q) || q <= 0) return;
+    const unitCost = Number(item?.costPerUnit ?? item?.cost_per_unit ?? 0);
+    if (!item || !(unitCost > 0)) { missing += 1; return; }
+    const baseUnit = normalizeUnit(item.unit);
+    const converted = convertToBase(q, normalizeUnit(unit || item.unit), baseUnit);
+    total += (Number.isFinite(converted) ? converted : q) * unitCost;
+  });
+  return { total, missing };
+}
+
 // A Production Formula is for a product that actually needs raw ingredients
 // to be made — a Celebration Material "product" (e.g. a tarpaulin or balloon
 // that's sold as-is) doesn't need a formula, so it's excluded from the
@@ -296,6 +319,7 @@ export default function RecipeTab() {
       name: item.name,
       unit: normalizeUnit(item.unit),
       sourceType: 'raw',
+      costPerUnit: Number(item.costPerUnit ?? item.cost_per_unit ?? 0),
       label: `${item.name} (Raw${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
     }));
 
@@ -308,6 +332,7 @@ export default function RecipeTab() {
         name: item.name,
         unit: normalizeUnit(item.unit),
         sourceType: 'material',
+        costPerUnit: Number(item.costPerUnit ?? item.cost_per_unit ?? 0),
         label: `${item.name} (Material${item.unit ? ` · ${normalizeUnit(item.unit)}` : ''})`,
       }));
 
@@ -339,6 +364,37 @@ export default function RecipeTab() {
     () => inventoryOptions.filter(option => option.sourceType === 'material'),
     [inventoryOptions]
   );
+
+  // ── Estimated production cost ───────────────────────────────────────────
+  // Live-computed mula sa kasalukuyang cost per unit ng bawat ingredient at
+  // material, kaya sumusunod ito kapag nagbago ang presyo sa restock. Ito ang
+  // basis ng owner sa pagtatakda ng selling price ng product.
+  const costLookup = useMemo(() => {
+    const map = new Map();
+    ingredients.forEach(item => map.set(`raw:${normalizeText(item.name)}`, item));
+    materials.forEach(item => map.set(`material:${normalizeText(item.name)}`, item));
+    return map;
+  }, [ingredients, materials]);
+
+  const getRecipeCost = useCallback((recipe) => {
+    const lines = (recipe.ingredients || []).map(i => ({
+      qty: i.qty,
+      unit: i.unit,
+      item: costLookup.get(`${String(i.itemType || 'raw').toLowerCase()}:${normalizeText(i.name)}`),
+    }));
+    const { total, missing } = sumCost(lines);
+    const batchYield = Number(recipe.yield) || 0;
+    return { total, missing, perItem: batchYield > 0 ? total / batchYield : 0 };
+  }, [costLookup]);
+
+  const modalCost = useMemo(() => {
+    const lines = [...rows, ...addonRows]
+      .filter(row => row.itemId && Number(row.qty) > 0)
+      .map(row => ({ qty: row.qty, unit: row.unit, item: inventoryById[row.itemId] }));
+    const { total, missing } = sumCost(lines);
+    const batchYield = Number(yld) || 0;
+    return { total, missing, perItem: batchYield > 0 ? total / batchYield : 0 };
+  }, [rows, addonRows, inventoryById, yld]);
 
   // A recipe only makes sense for a product that needs to be produced from
   // raw ingredients — Celebration Material products (sold as-is) don't need
@@ -421,14 +477,14 @@ export default function RecipeTab() {
     else if (usedProductIds.has(String(productId))) next.product = 'This product already has a formula.';
 
     const numericYield = Number(yld);
-    if (!String(yld ?? '').trim()) next.yield = 'Yield is required.';
+    if (!String(yld ?? '').trim()) next.yield = 'Items per batch is required.';
     else if (!Number.isFinite(numericYield) || numericYield <= 0) next.yield = 'Must be greater than zero.';
     else {
-      const overflow = getQtyError(String(yld), { max: MAX_QTY, label: 'Yield' });
+      const overflow = getQtyError(String(yld), { max: MAX_QTY, label: 'Items per batch' });
       if (overflow) next.yield = overflow;
     }
 
-    if (!yldUnit || !yldUnit.trim()) next.yieldUnit = 'Yield unit is required.';
+    if (!yldUnit || !yldUnit.trim()) next.yieldUnit = 'Unit is required.';
 
     const isUsed = row => row.itemId || row.qty || row.unit;
     if (!rows.some(isUsed)) next['r:0:item'] = 'Add at least one ingredient.';
@@ -696,15 +752,24 @@ export default function RecipeTab() {
           <>
           {isCompact ? (
           /* Compact (cards) View */
-          <div className="space-y-4">
+          <div className="space-y-3">
             {paged.map(r => (
-              <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-bold text-brand-900 text-base">{r.product}</h4>
+              <div key={r.id} className="p-3 sm:p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-brand-900 text-base break-words">{r.product}</h4>
                     <p className="text-[11px] text-brand-400 mt-0.5">Yield: {r.yield} {r.yieldUnit}</p>
+                    {(() => {
+                      const cost = getRecipeCost(r);
+                      return (
+                        <p className="text-[11px] text-brand-600 font-semibold mt-1">
+                          Est. cost per batch: {cost.total > 0 ? formatPeso(cost.total) : '—'}
+                          {cost.total > 0 && <span className="font-normal text-brand-400"> · ≈ {formatPeso(cost.perItem)} per item</span>}
+                        </p>
+                      );
+                    })()}
                   </div>
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-1.5 shrink-0">
                     <button onClick={() => openEdit(r)} className="p-1.5 text-brand-500 bg-brand-50 rounded-lg"><Edit2 size={13} /></button>
                     <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-500 bg-red-50 rounded-lg"><Trash2 size={13} /></button>
                   </div>
@@ -714,11 +779,18 @@ export default function RecipeTab() {
           </div>
           ) : (
           /* Table View */
-          <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Actions', align: 'right' }]}>
-              {paged.map(r => (
+          <Table columns={[{ label: 'Item Info' }, { label: 'Items per Batch' }, { label: 'Est. Cost per Batch' }, { label: 'Actions', align: 'right' }]}>
+              {paged.map(r => {
+                const cost = getRecipeCost(r);
+                return (
                 <Tr key={r.id}>
                   <Td><p className="font-bold text-brand-900 text-sm">{r.product}</p></Td>
                   <Td><p className="font-semibold text-brand-700">{r.yield} {r.yieldUnit}</p></Td>
+                  <Td>
+                    <p className="font-semibold text-brand-700">{cost.total > 0 ? formatPeso(cost.total) : '—'}</p>
+                    {cost.total > 0 && <p className="text-[11px] text-brand-400">≈ {formatPeso(cost.perItem)} per item</p>}
+                    {cost.missing > 0 && <p className="text-[10px] text-amber-600">{cost.missing} {cost.missing === 1 ? 'item has' : 'items have'} no cost yet</p>}
+                  </Td>
                   <Td align="right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
@@ -726,7 +798,8 @@ export default function RecipeTab() {
                     </div>
                   </Td>
                 </Tr>
-              ))}
+                );
+              })}
           </Table>
           )}
 
@@ -754,15 +827,15 @@ export default function RecipeTab() {
         subtitle="Set the recipe and product materials needed per batch."
         size="lg"
         footer={
-          <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" disabled={isSaving} onClick={handleSave}>
+          <div className="flex gap-2 sm:gap-3 sm:justify-end">
+            <Button variant="secondary" className="flex-1 sm:flex-none justify-center" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="primary" className="flex-1 sm:flex-none justify-center" disabled={isSaving} onClick={handleSave}>
               {isSaving ? 'Saving...' : editRecipe ? 'Save Changes' : 'Save Formula'}
             </Button>
           </div>
         }
       >
-        <div className="space-y-5">
+        <div className="space-y-3 sm:space-y-5">
           {/* Server/save error — nasa loob ng modal mismo */}
           {serverError && (
             <div role="alert" className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
@@ -771,13 +844,14 @@ export default function RecipeTab() {
           )}
 
           {/* SECTION 1: BASIC FORMULA DETAILS */}
-          <div className="p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
+          <div className="p-3 sm:p-4 rounded-xl border border-brand-100 bg-brand-50/30 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b border-brand-100">
               <Tag size={13} className="text-brand-500" />
               <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">1. Formula Details</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-3 gap-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-5 sm:gap-y-6">
+              <div className="col-span-2 sm:col-span-1 min-w-0">
               <FormSelect
                 label="Product Name"
                 required
@@ -788,10 +862,11 @@ export default function RecipeTab() {
                 <option value="">Select product</option>
                 {productOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
               </FormSelect>
+              </div>
               <FormInput
-                label="Actual Yield per Batch"
+                label="Items per Batch"
                 required
-                error={formErrors.yield || (yld ? getQtyError(String(yld), { max: MAX_QTY, label: 'Yield' }) : '')}
+                error={formErrors.yield || (yld ? getQtyError(String(yld), { max: MAX_QTY, label: 'Items per batch' }) : '')}
                 type="text"
                 inputMode="decimal"
                 value={yld}
@@ -799,7 +874,7 @@ export default function RecipeTab() {
                 placeholder="e.g. 12"
               />
               <FormInput
-                label="Yield Unit"
+                label="Unit"
                 required
                 error={formErrors.yieldUnit}
                 value={yldUnit}
@@ -810,13 +885,13 @@ export default function RecipeTab() {
           </div>
 
           {/* SECTION 2: RECIPE (raw ingredients only) */}
-          <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
+          <div className="p-3 sm:p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-brand-100">
               <div className="flex items-center gap-1.5">
                 <Package size={13} className="text-brand-500" />
                 <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">2. Recipe</span>
               </div>
-              <span className="text-[11px] text-brand-400 font-semibold">{rows.length} {rows.length === 1 ? 'item' : 'items'} added</span>
+              <span className="text-[11px] text-brand-400 font-semibold whitespace-nowrap">{rows.length} {rows.length === 1 ? 'item' : 'items'} added</span>
             </div>
 
             <div className="space-y-2.5">
@@ -833,14 +908,14 @@ export default function RecipeTab() {
           </div>
 
           {/* SECTION 3: PRODUCT MATERIALS (materials only, e.g. boxes / packaging needed to produce the product) */}
-          <div className="p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-brand-100">
-              <div className="flex items-center gap-1.5">
-                <Package size={13} className="text-brand-500" />
+          <div className="p-3 sm:p-4 rounded-xl border border-brand-200 bg-white shadow-sm space-y-3">
+            <div className="flex items-start justify-between gap-2 pb-2 border-b border-brand-100">
+              <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                <Package size={13} className="text-brand-500 shrink-0" />
                 <span className="text-[11px] font-bold uppercase tracking-wider text-brand-800">3. Product Materials</span>
-                <span className="text-[10px] font-semibold text-brand-300">(optional — boxes, packaging, etc.)</span>
+                <span className="text-[10px] font-semibold text-brand-300 basis-full sm:basis-auto pl-[19px] sm:pl-0">(optional — boxes, packaging, etc.)</span>
               </div>
-              <span className="text-[11px] text-brand-400 font-semibold">{addonRows.length} {addonRows.length === 1 ? 'item' : 'items'} added</span>
+              <span className="text-[11px] text-brand-400 font-semibold whitespace-nowrap shrink-0">{addonRows.length} {addonRows.length === 1 ? 'item' : 'items'} added</span>
             </div>
 
             <div className="space-y-2.5">
@@ -859,6 +934,25 @@ export default function RecipeTab() {
                   No product materials yet — boxes, packaging, or other materials needed to produce this product go here, deducted from stock the same way when a batch is produced.
                 </p>
               )}
+            </div>
+          </div>
+
+          {/* ESTIMATED PRODUCTION COST — basis sa pagtatakda ng selling price */}
+          <div className="p-3 sm:p-4 rounded-xl border border-brand-200 bg-brand-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-brand-800">Estimated Production Cost</p>
+              <p className="text-[11px] text-brand-400 mt-0.5">
+                Based on the current cost per unit of each ingredient and material. Use this as your basis for the selling price.
+              </p>
+              {modalCost.missing > 0 && (
+                <p className="text-[11px] text-amber-600 font-medium mt-0.5">
+                  {modalCost.missing} {modalCost.missing === 1 ? 'item has' : 'items have'} no cost yet, so this total may be too low.
+                </p>
+              )}
+            </div>
+            <div className="sm:text-right shrink-0">
+              <p className="text-lg font-bold text-brand-900">{formatPeso(modalCost.total)} <span className="text-[11px] font-semibold text-brand-400">per batch</span></p>
+              {modalCost.perItem > 0 && <p className="text-xs font-semibold text-brand-600">≈ {formatPeso(modalCost.perItem)} per item</p>}
             </div>
           </div>
         </div>

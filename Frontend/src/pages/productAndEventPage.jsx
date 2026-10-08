@@ -44,14 +44,13 @@ export default function ProductAndEventPage() {
   const clearPendingAdd = () => setPendingAdd(null);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 min-w-0">
 
-      <div className="w-full overflow-x-auto scrollbar-hide">
-        {/* Sa mobile: w-full para sakop ang buong screen. Sa desktop: md:w-max para sumiksik sa kaliwa. */}
-        <div className="flex gap-1 bg-brand-100 rounded-xl p-1 w-full md:w-max border border-brand-200">
+      {/* Parehong tab design ng Inventory page: full width sa mobile, compact sa desktop */}
+      <div className="grid grid-cols-2 sm:flex gap-1 bg-brand-100 rounded-xl p-1 w-full sm:w-fit border border-brand-200">
           <button
             onClick={() => goToTab('products')}
-            className={`flex-1 md:flex-none px-3 sm:px-6 py-2.5 rounded-lg text-[12px] sm:text-sm font-bold transition-all whitespace-nowrap text-center ${
+            className={`px-2 sm:px-6 py-2.5 rounded-lg text-[13px] sm:text-sm font-bold transition-all whitespace-nowrap text-center outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
               activeTab === 'products'
                 ? 'bg-white text-brand-900 shadow-sm'
                 : 'text-brand-500 hover:text-brand-800'
@@ -61,7 +60,7 @@ export default function ProductAndEventPage() {
           </button>
           <button
             onClick={() => goToTab('events')}
-            className={`flex-1 md:flex-none px-3 sm:px-6 py-2.5 rounded-lg text-[12px] sm:text-sm font-bold transition-all whitespace-nowrap text-center ${
+            className={`px-2 sm:px-6 py-2.5 rounded-lg text-[13px] sm:text-sm font-bold transition-all whitespace-nowrap text-center outline-none focus-visible:ring-2 focus-visible:ring-brand-300 ${
               activeTab === 'events'
                 ? 'bg-white text-brand-900 shadow-sm'
                 : 'text-brand-500 hover:text-brand-800'
@@ -69,10 +68,9 @@ export default function ProductAndEventPage() {
           >
             Event Manager
           </button>
-        </div>
       </div>
 
-      <div className="pt-2">
+      <div className="pt-1 sm:pt-2 min-w-0">
         {/* "Promo Bundle" ay isa na lang na entry sa loob ng tab strip ng
             Product Catalog / Promo Bundles (tingnan ang CategoryTabs sa
             productManagement.jsx at PromoBundles.jsx) — dito lang pinipili
@@ -82,25 +80,25 @@ export default function ProductAndEventPage() {
             {/* Nakapirming heading + buttons: hindi na ito bahagi ng
                 ProductManagementPage/PromoBundles kaya hindi na ito
                 nagbabago o nawawala kada lipat ng sub-tab. */}
-            <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-[#3B1F0A]">Product Catalog</h1>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-6 gap-3 sm:gap-4">
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold text-[#3B1F0A]">Product Catalog</h1>
                 <p className="text-xs sm:text-sm text-[#8A7264] mt-1">
                   Manage products, pricing, promo bundles, and daily order limits
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="grid grid-cols-2 sm:flex items-center gap-2 sm:gap-3">
                 <button
                   onClick={handleAddProduct}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs sm:text-sm px-5 py-2.5 bg-[#3B1F0A] text-white hover:bg-[#2A1608] shadow-md transition-colors"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs sm:text-sm px-3 sm:px-5 py-2.5 bg-[#3B1F0A] text-white hover:bg-[#2A1608] shadow-md transition-colors whitespace-nowrap"
                 >
                   <Plus size={16} /> Add Product
                 </button>
                 <button
                   onClick={handleAddBundle}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs sm:text-sm px-5 py-2.5 bg-[#3B1F0A] text-white hover:bg-[#2A1608] shadow-md transition-colors"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs sm:text-sm px-3 sm:px-5 py-2.5 bg-[#3B1F0A] text-white hover:bg-[#2A1608] shadow-md transition-colors whitespace-nowrap"
                 >
-                  <Plus size={16} /> Add Package/Bundle
+                  <Plus size={16} /> <span className="sm:hidden">Package/Bundle</span><span className="hidden sm:inline">Add Package/Bundle</span>
                 </button>
               </div>
             </div>

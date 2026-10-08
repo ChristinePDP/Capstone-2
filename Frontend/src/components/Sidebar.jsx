@@ -236,8 +236,10 @@ export function Layout({ children, onLogout }) {
     setSidebarOpen(false);
   }
 
+  // overflow-x-clip (hindi hidden): pinipigilan pa rin ang horizontal overflow pero hindi
+  // nagiging scroll container, kaya gumagana ang sticky Header.
   return (
-    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-brand-50">
+    <div className="flex min-h-screen w-full max-w-full overflow-x-clip bg-brand-50">
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -252,7 +254,7 @@ export function Layout({ children, onLogout }) {
         }
       >
         <Header onMenuClick={() => setSidebarOpen(true)} onLogoutClick={() => setLogoutOpen(true)} />
-        <main className="flex-1 min-w-0 p-3 md:p-5 overflow-x-hidden overflow-y-auto">{children}</main>
+        <main className="flex-1 min-w-0 p-3 md:p-5 overflow-x-clip">{children}</main>
       </div>
 
       {/* ── Logout Confirmation Modal ── */}

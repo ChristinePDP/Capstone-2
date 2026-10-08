@@ -355,7 +355,7 @@ function PreOrderProduction({ tabBar }) {
         {isLoading && <CardSkeleton count={3} />}
 
         {!isLoading && paged.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {paged.map(order => (
               <div
                 key={order.id}
@@ -746,8 +746,8 @@ function BatchProduction({ tabBar }) {
 
   return (
     <Card>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
-        <div>
+      <div className="flex flex-row items-start sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
+        <div className="min-w-0 flex-1">
           <h3 className="font-bold text-brand-800">Production</h3>
           <p className="text-xs text-brand-400 mt-0.5">Enter the number of batches to produce for products that aren't pre-orders, like pastries.</p>
         </div>
@@ -757,7 +757,7 @@ function BatchProduction({ tabBar }) {
             onClick={() => setShoppingOpen(true)}
             title={`Shopping list — ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
             aria-label={`Open shopping list, ${allShortfalls.length} ${allShortfalls.length === 1 ? 'item' : 'items'} to restock`}
-            className="relative inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors shrink-0 self-start sm:self-auto"
+            className="relative inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors shrink-0"
           >
             <ShoppingCart size={16} />
             <span className="text-xs font-bold hidden sm:inline">Shopping List</span>
@@ -787,7 +787,7 @@ function BatchProduction({ tabBar }) {
         {isLoading && <CardSkeleton count={3} />}
 
         {!isLoading && paged.length > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-4">
             {paged.map(r => {
               const product = findProduct(r);
               const maxUnits = calculateMaxUnits(r);

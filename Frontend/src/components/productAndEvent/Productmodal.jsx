@@ -92,16 +92,17 @@ function Modal({ isOpen = true, onClose, title, children, footer, size = 'md' })
   const sizeClass = size === 'xl' ? 'max-w-5xl' : size === 'lg' ? 'max-w-3xl' : 'max-w-lg';
   
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className={`bg-[#FCFAF9] rounded-3xl shadow-2xl w-full ${sizeClass} max-h-[92vh] flex flex-col overflow-hidden border border-[#EAE4E0]`}>
-        <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-serif font-bold text-[#3B1F0A]">{title}</h2>
-          <button onClick={onClose} className="w-9 h-9 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-3 sm:p-4">
+      {/* Modal pa rin sa lahat ng screen: may margin sa paligid, mas maliit lang ang margin sa mobile */}
+      <div className={`bg-[#FCFAF9] rounded-2xl sm:rounded-3xl shadow-2xl w-full ${sizeClass} max-h-[calc(100dvh-1.5rem)] sm:max-h-[92vh] flex flex-col overflow-hidden border border-[#EAE4E0]`}>
+        <div className="flex items-center justify-between px-4 sm:px-7 py-3 sm:py-5 border-b border-[#EAE4E0] bg-white shrink-0">
+          <h2 className="text-lg sm:text-xl font-serif font-bold text-[#3B1F0A]">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="w-9 h-9 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
             <X size={18} />
           </button>
         </div>
-        <div className="px-6 sm:px-8 py-6 overflow-y-auto scrollbar-thin">{children}</div>
-        {footer && <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
+        <div className="flex-1 min-h-0 px-3 sm:px-8 py-3 sm:py-6 overflow-y-auto overscroll-contain scrollbar-thin">{children}</div>
+        {footer && <div className="px-3 sm:px-7 py-3 sm:py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
       </div>
     </div>
   );
@@ -157,13 +158,14 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   const isPartnerSource = form.category === CELEBRATION_CATEGORY && form.sourcingType === 'partner';
 
   return (
-    <div ref={ref} className={`border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full flex flex-col gap-4 min-w-0 ${className}`}>
+    <div ref={ref} className={`border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full flex flex-col gap-3 sm:gap-4 min-w-0 ${className}`}>
       {/* 1. Product Image + Product Name/Category/Order Type/Choose File */}
       <div>
         <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Product Image</p>
-        <div className="flex flex-col sm:flex-row gap-4 items-start">
-          <div className="relative shrink-0">
-            <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-36 h-36 shadow-sm">
+        <div className="grid grid-cols-[7rem_minmax(0,1fr)] sm:grid-cols-[9rem_repeat(3,minmax(0,1fr))] gap-x-3 sm:gap-x-4 gap-y-3 items-start">
+          {/* Image: maliit sa tabi ng pangalan sa mobile, malaki sa desktop */}
+          <div className="relative shrink-0 row-span-2">
+            <div className="rounded-2xl overflow-hidden border border-[#DED4CC] bg-[#F5EFEB] flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36 shadow-sm">
               {hasImage ? (
                 <img
                     src={previewUrl || form.image}
@@ -188,24 +190,28 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
             <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={onFileSelect} />
           </div>
 
-          <div className="flex-1 min-w-0 flex flex-col gap-3">
+          <div className="min-w-0 sm:col-span-3">
             <Input label="Product Name" required error={errors.name} value={form.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Special Birthday Cake" />
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="w-full min-w-0">
-                <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Image File</label>
-                <Button variant="secondary" size="md" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={14} /> Choose File
-                </Button>
-              </div>
-              <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
-                {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </Select>
-              <Select label="Order Type" value={isPartnerSource ? 'Pre-order' : form.orderType} disabled={isPartnerSource} title={isPartnerSource ? 'Partner Shop items are pre-order only' : undefined} onChange={e => onChange('orderType', e.target.value)}>
-                <option value="Pick-up Today">Pick-up Today</option>
-                <option value="Pre-order">Pre-order</option>
-                <option value="Both">Both</option>
-              </Select>
-            </div>
+          </div>
+
+          {/* Choose File: nasa tabi mismo ng image, sa ilalim ng Product Name, pantay sa baba ng image */}
+          <div className="w-full min-w-0 self-end sm:self-start">
+            <label className="hidden sm:block text-[10px] font-bold text-[#8A7264] mb-1.5 uppercase tracking-wider">Image File</label>
+            <Button variant="secondary" size="md" aria-label="Choose image file" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
+              <Upload size={14} /> Choose File
+            </Button>
+          </div>
+
+          {/* Category + Order Type: full width sa ilalim */}
+          <div className="col-span-2 grid grid-cols-2 gap-3 min-w-0 sm:contents">
+            <Select label="Category" value={form.category} onChange={e => onChange('category', e.target.value)}>
+              {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <Select label="Order Type" value={isPartnerSource ? 'Pre-order' : form.orderType} disabled={isPartnerSource} title={isPartnerSource ? 'Partner Shop items are pre-order only' : undefined} onChange={e => onChange('orderType', e.target.value)}>
+              <option value="Pick-up Today">Pick-up Today</option>
+              <option value="Pre-order">Pre-order</option>
+              <option value="Both">Both</option>
+            </Select>
           </div>
         </div>
       </div>
@@ -214,7 +220,7 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
       <Textarea label="Inclusion / Description" value={form.inclusion} onChange={e => onChange('inclusion', e.target.value)} placeholder="e.g. 7x5 Themed Cake w/ Toppers" rows={2} />
 
       {/* 4. Events Tags */}
-      <div className="pt-2">
+      <div className="pt-1 sm:pt-2">
         <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-2 block">Events / Occasions Tags (Optional)</p>
         
         {availableTags.length === 0 ? (
@@ -510,20 +516,20 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   return (
     <Modal isOpen={isOpen} onClose={onClose || (() => window.history.back())} title={isEditing ? `Edit Product` : 'Add Product'} size="lg"
       footer={
-        <div className="flex items-center justify-between w-full">
-          {isEditing ? <Button variant="danger" onClick={handleDeleteClick} disabled={isSubmitting}>Delete Product</Button> : <div></div>}
-          <div className="flex gap-3 ml-auto">
-            <Button variant="secondary" onClick={onClose || (() => window.history.back())} disabled={isSubmitting}>Close</Button>
-            <Button variant="dark" onClick={handleSave} disabled={isSubmitting}>
-                {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Saving Data...</> : "Save Changes"}
+        <div className="flex items-center gap-2 sm:gap-3 w-full">
+          {isEditing && <Button variant="danger" className="flex-1 sm:flex-none px-2 sm:px-4" onClick={handleDeleteClick} disabled={isSubmitting}>Delete<span className="hidden sm:inline">&nbsp;Product</span></Button>}
+          <div className="flex flex-[2] sm:flex-none gap-2 sm:gap-3 sm:ml-auto">
+            <Button variant="secondary" className="flex-1 sm:flex-none px-2 sm:px-4" onClick={onClose || (() => window.history.back())} disabled={isSubmitting}>Close</Button>
+            <Button variant="dark" className="flex-[1.4] sm:flex-none px-2 sm:px-4" onClick={handleSave} disabled={isSubmitting}>
+                {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <>Save<span className="hidden sm:inline">&nbsp;Changes</span></>}
             </Button>
           </div>
         </div>
       }
     >
-      <div className="w-full flex flex-col gap-6 lg:gap-8">
+      <div className="w-full flex flex-col gap-3 sm:gap-6 lg:gap-8">
         
-        <div className="flex flex-col gap-6 lg:gap-8">
+        <div className="flex flex-col gap-3 sm:gap-6 lg:gap-8">
           <ProductDetailsForm
             ref={detailsCardRef}
             form={form}
@@ -537,7 +543,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           />
 
           {/* Pricing card. Celebration Material: Source first, then cost -> selling price -> profit */}
-          <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+          <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
             {isCelebration && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-4 border-b border-[#EAE4E0]">
                 <div className="min-w-0">
@@ -578,14 +584,14 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
               const margin = hasBoth && sell > 0 ? (profit / sell) * 100 : null;
               const negative = hasBoth && profit < 0;
               return (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 items-stretch">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-2.5 sm:p-3">
                     <Input label="1. Partner Cost (you pay)" required type="number" min="0" error={errors.partnerCost} value={form.partnerCost} onChange={e => handleChange('partnerCost', e.target.value)} placeholder="e.g. 20" />
                   </div>
-                  <div className="rounded-2xl border border-[#DED4CC] bg-[#FCFAF9] p-3">
+                  <div className="rounded-2xl border border-[#DED4CC] bg-[#FCFAF9] p-2.5 sm:p-3">
                     <Input label="2. Selling Price (customer pays)" required type="number" min="0" error={errors.price} value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="e.g. 35" />
                   </div>
-                  <div className={`rounded-2xl border p-3 flex flex-col justify-center ${negative ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50/70'}`}>
+                  <div className={`col-span-2 sm:col-span-1 rounded-2xl border p-3 flex flex-col justify-center ${negative ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50/70'}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${negative ? 'text-red-700' : 'text-emerald-700'}`}>Profit per piece</p>
                     <p className={`text-lg font-bold ${negative ? 'text-red-700' : 'text-emerald-800'}`}>{hasBoth ? `₱${profit.toFixed(2)}` : '—'}</p>
                     <p className={`text-[10px] ${negative ? 'text-red-600' : 'text-emerald-700'}`}>
@@ -600,10 +606,10 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </div>
         </div>
 
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+        <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
             <p className="text-xs font-bold uppercase tracking-wider text-[#3B1F0A]">Order Slip Fields</p>
-            <div className="flex items-center gap-2.5 bg-[#F5EFEB] px-3.5 py-2 rounded-xl w-fit">
+            <div className="flex items-center gap-2.5 bg-[#F5EFEB] px-3.5 py-2 rounded-xl w-full sm:w-fit">
                 <input type="checkbox" id="uploadToggle" className="w-4 h-4 accent-[#3B1F0A] rounded cursor-pointer" checked={form.allowFileUpload} onChange={e => handleChange('allowFileUpload', e.target.checked)} />
                 <label htmlFor="uploadToggle" className="text-xs font-bold text-[#5A453C] cursor-pointer select-none">Allow Customer to Upload Reference Image</label>
             </div>
@@ -614,13 +620,13 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
           <div className="flex flex-col gap-2.5">
             {fields.filter(f => f.label.toLowerCase() !== 'special instructions').map(field => (
-              <div key={field.id} className="flex flex-col sm:flex-row items-center gap-2.5 w-full bg-[#FCFAF9] p-3 rounded-2xl border border-[#DED4CC]">
-                <input value={field.label} onChange={e => updateField(field.id, 'label', e.target.value)} placeholder="Field Label (e.g. Cake Message)" className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
-                <select value={field.type} onChange={e => updateField(field.id, 'type', e.target.value)} className="w-full sm:flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white">
+              <div key={field.id} className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-2.5 w-full bg-[#FCFAF9] p-2.5 sm:p-3 rounded-2xl border border-[#DED4CC]">
+                <input value={field.label} onChange={e => updateField(field.id, 'label', e.target.value)} placeholder="Field Label (e.g. Cake Message)" className="w-full sm:w-auto sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
+                <select value={field.type} onChange={e => updateField(field.id, 'type', e.target.value)} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white">
                   {FIELD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 {field.type === 'Multi-image' ? (
-                  <div className="w-full sm:flex-[1.5] min-w-0 flex items-center gap-2 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 bg-white">
+                  <div className="flex-[1.5] min-w-0 flex items-center gap-2 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 bg-white">
                     <label htmlFor={`maxImages-${field.id}`} className="font-semibold text-[#8A7264] whitespace-nowrap">Max photos:</label>
                     <input
                       id={`maxImages-${field.id}`}
@@ -633,9 +639,9 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                     />
                   </div>
                 ) : (
-                  <input value={field.options} onChange={e => updateField(field.id, 'options', e.target.value)} placeholder={NEEDS_OPTIONS.includes(field.type) ? 'Comma-separated choices' : '—'} disabled={!NEEDS_OPTIONS.includes(field.type)} className="w-full sm:flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] disabled:bg-[#F5EFEB] bg-white" />
+                  <input value={field.options} onChange={e => updateField(field.id, 'options', e.target.value)} placeholder={NEEDS_OPTIONS.includes(field.type) ? 'Comma-separated choices' : '—'} disabled={!NEEDS_OPTIONS.includes(field.type)} className="flex-[1.5] min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] disabled:bg-[#F5EFEB] bg-white" />
                 )}
-                <button type="button" onClick={() => removeField(field.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors self-end sm:self-auto"><Trash2 size={14} /></button>
+                <button type="button" onClick={() => removeField(field.id)} className="text-red-500 p-2 shrink-0 flex items-center justify-center hover:bg-red-50 rounded-xl transition-colors"><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
@@ -645,7 +651,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </button>
         </div>
 
-        <div className="border border-[#EAE4E0] bg-white rounded-3xl p-5 shadow-sm w-full">
+        <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
           <div className="flex items-center gap-3 mb-2">
             <input
               type="checkbox"
@@ -665,12 +671,12 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             Set maximum order capacities per day or assign custom date exceptions.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-6 items-start">
-            <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-5 lg:gap-6 items-start">
+            <div className="min-w-0 bg-[#FCFAF9] p-3 sm:p-4 rounded-2xl border border-[#DED4CC]">
               <Input label="Default Daily Capacity (Slots)" type="number" min="0" disabled={!dailyLimitEnabled} value={form.dailyLimit} onChange={e => handleChange('dailyLimit', e.target.value)} placeholder="0" />
             </div>
 
-            <div className="min-w-0 bg-[#FCFAF9] p-4 rounded-2xl border border-[#DED4CC]">
+            <div className="min-w-0 bg-[#FCFAF9] p-3 sm:p-4 rounded-2xl border border-[#DED4CC]">
               <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264] mb-1.5">Date Exceptions</p>
               <div className="flex flex-row items-center gap-2 mb-3 w-full">
                 <input type="date" value={exceptionDate} onChange={e => setExceptionDate(e.target.value)} className="flex-1 min-w-0 text-xs border border-[#DED4CC] rounded-xl px-3 py-2 outline-none focus:border-[#5A453C] bg-white" />
