@@ -397,6 +397,17 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
   const formulaWarning = invalidComponentNames.length > 0
     ? `Contains item with no production formula (${invalidComponentNames.join(', ')}) - Cannot appear in POS/Online Ordering`
     : 'Contains item with no production formula - Cannot appear in POS/Online Ordering';
+  const missingPreOrderLimitNames = bundle.category === 'Package' && bundle.order_type === 'Pre-order'
+    ? (bundle.package_items || [])
+        .filter(item => item.availability && Number(item.availability.pre_order_available_stock ?? 0) <= 0)
+        .map(item => Number(item.availability?.daily_limit) > 0
+          ? `${item.product?.name || item.name} (pre-order limit reached)`
+          : `${item.product?.name || item.name} (no pre-order limit set)`)
+        .filter(Boolean)
+    : [];
+  const preOrderWarning = missingPreOrderLimitNames.length
+    ? `Unavailable for pre-order: ${missingPreOrderLimitNames.join(', ')}.`
+    : '';
 
   const productDescription = products.length > 0 
     ? products.map(p => {
@@ -446,8 +457,16 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
           </div>
         )}
 
-        {missingComponentFormula && (
+        {preOrderWarning && (
           <div className="absolute left-2 right-2 bottom-2">
+            <span title={preOrderWarning} className="block rounded-lg bg-amber-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm">
+              Unavailable: {missingPreOrderLimitNames.join(', ')}
+            </span>
+          </div>
+        )}
+
+        {missingComponentFormula && (
+          <div className={`absolute left-2 right-2 ${preOrderWarning ? 'bottom-14' : 'bottom-2'}`}>
             <span
               title={formulaWarning}
               className="flex items-start gap-1 rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm"

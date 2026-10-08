@@ -293,6 +293,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   const [error, setError] = useState(null);
 
   const [bundles, setBundles] = useState([]);
+  const [posAvailabilityById, setPosAvailabilityById] = useState({});
   const [bundlesLoading, setBundlesLoading] = useState(true);
   const [deleteBundleTarget, setDeleteBundleTarget] = useState(null);
 
@@ -335,6 +336,15 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       console.error('Fetch Bundles Error:', err);
     } finally {
       setBundlesLoading(false);
+    }
+    try {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+      const response = await apiClient.get(`${API_BASE}/pos/products`);
+      const availabilityProducts = response.data?.data || [];
+      setPosAvailabilityById(Object.fromEntries(availabilityProducts.map(product => [String(product.id), product])));
+    } catch (err) {
+      console.error('Fetch Package Availability Error:', err);
+      setPosAvailabilityById({});
     }
   };
 
@@ -388,6 +398,13 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     : category === 'Package'
       ? bundles.filter(b => b.category === 'Package' && bundleSearchOk(b))
       : [];
+  const bundlesWithAvailability = filteredBundles.map(bundle => ({
+    ...bundle,
+    package_items: (bundle.package_items || []).map(item => ({
+      ...item,
+      availability: posAvailabilityById[String(item.product_id)],
+    })),
+  }));
 
   // Package at Bundle ay parehong na-e-edit na sa Promo Bundles form (doon
   // na ang Package Contents UI); ginagamit lang dito ang BundleCard grid
@@ -574,7 +591,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
           ))}
           {/* Isinasama ang mga Promo Bundle sa "All" view — sa hulihan ng
               listahan, pagkatapos ng lahat ng regular na product. */}
-          {filteredBundles.map(b => (
+          {bundlesWithAvailability.map(b => (
             <BundleCard key={`bundle-${b.id}`} bundle={b} onEdit={handleEditBundle} onDelete={handleDeleteBundle} />
           ))}
           {!filtered.length && !filteredBundles.length && (
