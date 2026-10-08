@@ -79,6 +79,44 @@ const formatPickup = (value) => {
     : d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
+// Para sa products na "Both" (Pick-up Today + Pre-Order): puwedeng piliin kung
+// (a) 'fresh' = gumawa ng bago (bawas ingredients, walang galaw sa product stock), o
+// (b) 'stock' = kunin sa nakaimbak na product stock (bawas product stock, walang
+//     bawas sa ingredients). Default: 'fresh' (dating behavior).
+const sourceKey = (orderId, itemKey) => `${orderId}|${itemKey}`;
+
+const evaluateOrder = (order, sources = {}) => {
+  const shortMap = {};
+  const stockIssues = [];
+  const missing = [];
+
+  order.items.forEach(it => {
+    const fromStock = it.canUseStock && sources[sourceKey(order.id, it.key)] === 'stock';
+    if (fromStock) {
+      if (it.stockQty < it.qty) {
+        stockIssues.push({ productName: it.productName, needed: it.qty, available: it.stockQty });
+      }
+      return; // walang ingredients na ibabawas, kaya hindi kailangan ng formula
+    }
+    if (!it.recipe) missing.push(it);
+    it.needs.forEach(n => {
+      if (n.short <= 0) return;
+      const k = `${normalizeText(n.name)}|${n.unit}`;
+      shortMap[k] = shortMap[k]
+        ? { ...shortMap[k], short: roundQty(shortMap[k].short + n.short) }
+        : { name: n.name, unit: n.unit, short: n.short };
+    });
+  });
+
+  const shortages = Object.values(shortMap);
+  return {
+    shortages,
+    missing,
+    stockIssues,
+    needsAttention: shortages.length > 0 || missing.length > 0 || stockIssues.length > 0,
+  };
+};
+
 function PreOrderProduction({ tabBar }) {
   const context = useApp() || {};
   const isLoading = !!context.loading;
@@ -98,6 +136,7 @@ function PreOrderProduction({ tabBar }) {
   const [expenseRows, setExpenseRows] = useState([{ label: '', amount: '' }]);
   const [expenseErrors, setExpenseErrors] = useState({});
   const [isProducing, setIsProducing] = useState(false);
+  const [sources, setSources] = useState({}); // { 'orderId|itemKey': 'fresh' | 'stock' }
 
   const productsById = useMemo(
     () => Object.fromEntries(products.map(p => [p.id, p])),
@@ -119,6 +158,9 @@ function PreOrderProduction({ tabBar }) {
             const productName = item.product_name || item.productName || productsById[productId]?.name || 'Unknown product';
             const qty = getItemQuantity(item);
             const recipe = findRecipeByProductId(recipes, productId, productName);
+            const product = productsById[productId];
+            const canUseStock = isBatchProduct(product); // order type = Both
+            const stockQty = Number(product?.stock_quantity ?? product?.stock ?? 0);
 
             let needs = [];
             if (recipe) {
@@ -143,7 +185,7 @@ function PreOrderProduction({ tabBar }) {
               });
             }
 
-            return { key: productId || productName, productId, productName, qty, recipe, needs };
+            return { key: productId || productName, productId, productName, qty, recipe, needs, canUseStock, stockQty };
           })
           // Pareho ang product sa iisang order (hal. 2 linya ng Cupcakes) → pagsamahin.
           .reduce((acc, it) => {
@@ -159,17 +201,6 @@ function PreOrderProduction({ tabBar }) {
             return acc;
           }, []);
 
-        // Kulang lang ang kailangan ipakita — pinagsama kung pareho ang ingredient sa ilang items.
-        const shortMap = {};
-        items.forEach(it => it.needs.forEach(n => {
-          if (n.short <= 0) return;
-          const k = `${normalizeText(n.name)}|${n.unit}`;
-          shortMap[k] = shortMap[k]
-            ? { ...shortMap[k], short: roundQty(shortMap[k].short + n.short) }
-            : { name: n.name, unit: n.unit, short: n.short };
-        }));
-        const shortages = Object.values(shortMap);
-        const missing = items.filter(it => !it.recipe);
         const customer = order.customers?.name || order.customer_name || order.customerName || 'Walk-in';
         const pickup = order.pickup_date ?? order.pickupDate ?? null;
 
@@ -179,9 +210,6 @@ function PreOrderProduction({ tabBar }) {
           customer,
           pickup,
           items,
-          shortages,
-          missing,
-          needsAttention: shortages.length > 0 || missing.length > 0,
         };
       })
       .filter(o => o.items.length > 0)
@@ -197,6 +225,16 @@ function PreOrderProduction({ tabBar }) {
         return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
       });
   }, [orders, recipes, ingredients, materials, productsById]);
+
+  // Kasama ang shortages/needsAttention na nakadepende sa napiling source ng bawat item.
+  const evaluated = useMemo(
+    () => preOrders.map(o => ({ ...o, ...evaluateOrder(o, sources) })),
+    [preOrders, sources]
+  );
+
+  const usesStock = (order, it) => !!it.canUseStock && sources[sourceKey(order.id, it.key)] === 'stock';
+  const setSource = (order, it, value) =>
+    setSources(prev => ({ ...prev, [sourceKey(order.id, it.key)]: value }));
 
   const openProduce = (order) => {
     setProduceTarget(order);
@@ -245,6 +283,8 @@ function PreOrderProduction({ tabBar }) {
           product_name: it.productName,
           recipe_id: it.recipe?.id,
           quantity: it.qty,
+          // true = kunin sa product stock (Both lang); false = gumawa ng bago
+          use_stock: usesStock(produceTarget, it),
         };
       }),
       expenses: cleaned,
@@ -265,7 +305,7 @@ function PreOrderProduction({ tabBar }) {
   };
 
   const q = search.trim().toLowerCase();
-  const filtered = preOrders.filter(o =>
+  const filtered = evaluated.filter(o =>
     !q
     || String(o.number).toLowerCase().includes(q)
     || o.customer.toLowerCase().includes(q)
@@ -275,7 +315,7 @@ function PreOrderProduction({ tabBar }) {
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const readyCount = preOrders.filter(o => !o.needsAttention).length;
+  const readyCount = evaluated.filter(o => !o.needsAttention).length;
 
   return (
     <Card>
@@ -304,8 +344,8 @@ function PreOrderProduction({ tabBar }) {
             {readyCount > 0 && (
               <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{readyCount} ready to produce</span>
             )}
-            {preOrders.length - readyCount > 0 && (
-              <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100">{preOrders.length - readyCount} need attention</span>
+            {evaluated.length - readyCount > 0 && (
+              <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100">{evaluated.length - readyCount} need attention</span>
             )}
           </div>
         </div>
@@ -336,12 +376,41 @@ function PreOrderProduction({ tabBar }) {
 
                   <ul className="space-y-0.5">
                     {order.items.map(it => (
-                      <li key={it.key} className="flex items-start justify-between gap-1.5 text-xs text-brand-800">
-                        <span className="min-w-0 break-words">{it.productName}</span>
-                        <span className="font-bold shrink-0">×{it.qty}</span>
+                      <li key={it.key} className="text-xs text-brand-800">
+                        <div className="flex items-start justify-between gap-1.5">
+                          <span className="min-w-0 break-words">{it.productName}</span>
+                          <span className="font-bold shrink-0">×{it.qty}</span>
+                        </div>
+                        {it.canUseStock && (
+                          <div
+                            className="mt-1 flex rounded-md overflow-hidden border border-brand-200 text-[10px] font-bold"
+                            title="This product is also sold as Pick-up Today. Choose where this order comes from."
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSource(order, it, 'fresh')}
+                              className={`flex-1 py-1 transition-colors ${!usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
+                            >
+                              Produce new
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSource(order, it, 'stock')}
+                              className={`flex-1 py-1 border-l border-brand-200 transition-colors ${usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
+                            >
+                              From stock ({it.stockQty})
+                            </button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
+
+                  {order.stockIssues.length > 0 && (
+                    <p className="pt-2 border-t border-red-100 text-[11px] text-red-700">
+                      <span className="font-bold">Not enough stock:</span> {order.stockIssues.map(s => `${s.productName} (need ${s.needed}, have ${s.available})`).join(', ')}. Switch to "Produce new" or restock.
+                    </p>
+                  )}
 
                   {order.missing.length > 0 && (
                     <p className="pt-2 border-t border-red-100 text-[11px] text-amber-700">
@@ -433,8 +502,13 @@ function PreOrderProduction({ tabBar }) {
             <div className="p-3 rounded-xl border border-brand-100 bg-brand-50/40 text-sm">
               <p className="font-bold text-brand-900">{produceTarget.number} <span className="font-normal text-brand-400 text-xs">· {produceTarget.customer}</span></p>
               <p className="text-brand-700 mt-1">
-                {produceTarget.items.map(it => `${it.productName} ×${it.qty}`).join(' · ')}
+                {produceTarget.items.map(it => `${it.productName} ×${it.qty}${usesStock(produceTarget, it) ? ' (from stock)' : ''}`).join(' · ')}
               </p>
+              {produceTarget.items.some(it => usesStock(produceTarget, it)) && (
+                <p className="text-[11px] text-brand-500 mt-1.5">
+                  Items marked “from stock” will be deducted from product stock. Their ingredients will not be deducted.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2.5">

@@ -112,6 +112,12 @@ export const fetchMenuProducts = async (filters = {}) => {
     const reserved = reservedMap[p.id] || 0;
     const available = Math.max(0, baseStock - reserved);
 
+    // PRE-ORDER RULE: ang Pre-Order ay GALING LANG sa pre-order limit (daily_limit),
+    // hindi sa stock_quantity. Kapag walang pre-order limit (null / blangko / 0),
+    // SARADO ang Pre-Order — kahit may stock_quantity. Pick-up Today na lang
+    // ang available (kung may stock).
+    const hasPreOrderLimit = limitField === 'daily_limit';
+
     return {
       ...p,
       stock: baseStock,
@@ -121,9 +127,7 @@ export const fetchMenuProducts = async (filters = {}) => {
       stock_basis_field: limitField, // 'daily_limit' o 'stock_quantity' — para malaman ng frontend/consumer kung saan galing ang bilang
       available_stock: available,
       buy_now_available_stock: Math.max(0, physicalStock - reserved),
-      pre_order_available_stock: limitField === 'daily_limit'
-        ? available
-        : Math.max(0, physicalStock - reserved)
+      pre_order_available_stock: hasPreOrderLimit ? available : 0
     };
   });
 

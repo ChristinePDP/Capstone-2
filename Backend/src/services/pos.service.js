@@ -149,9 +149,12 @@ export const getPosProducts = async (filters = {}) => {
       const physicalStock = celebrationMaterial
         ? Number(celebrationMaterial.stock_quantity) || 0
         : Number(p.stock_quantity) || 0;
+      // PRE-ORDER RULE (parehas sa onlineOrdering service): ang Pre-Order ay GALING
+      // LANG sa pre-order limit (daily_limit), hindi sa stock_quantity. Walang
+      // pre-order limit (null / blangko / 0) = SARADO ang Pre-Order, kahit may stock.
       const preOrderCapacity = limitField === 'daily_limit'
         ? Number(p.daily_limit) || 0
-        : physicalStock;
+        : 0;
       return {
         ...p,
         stock: physicalStock,
@@ -167,6 +170,17 @@ export const getPosProducts = async (filters = {}) => {
   } catch (error) {
     throw new Error(`Fetch POS Products Error: ${error.message}`);
   }
+};
+
+// Ang "ngayon" ng shop ay laging Asia/Manila, hindi oras ng device ng cashier
+// o ng server. Ginagamit para sa pickup date/time ng Buy Now.
+const getManilaNow = () => {
+  const now = new Date();
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(now); // YYYY-MM-DD
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(now); // HH:MM
+  return { date, time };
 };
 
 export const createPosOrder = async (payload) => {
@@ -215,6 +229,7 @@ export const createPosOrder = async (payload) => {
   // muna ito — sasettle-han lang ito pagka-confirm ng pickup (QR scan) o
   // sa Orders.jsx admin page.
   const isBuyNow = payload.orderType === 'Buy Now';
+  const manilaNow = getManilaNow();
   const hasOutstandingBalance = Number(payload.payment?.balance || 0) > 0;
   const shouldCompleteImmediately = isBuyNow && !hasOutstandingBalance;
   const orderStatus = shouldCompleteImmediately ? 'Completed' : 'Confirmed';
@@ -241,11 +256,15 @@ export const createPosOrder = async (payload) => {
     payment_type: dbPaymentType, 
     amount_paid: payload.payment?.amountDueNow || 0,
     balance: payload.payment?.balance || 0,
-    pickup_date: payload.pickup?.date || null,
-    // `payload.pickup.time` is now guaranteed to be a clean "HH:MM" start time
-    // (resolved on the frontend from the selected slot), so it inserts cleanly
-    // into the `time` column instead of being mis-parsed as a range/offset.
-    pickup_time: payload.pickup?.time || null,
+    // FIX: Buy Now = kukunin ngayon, kaya ang SERVER (Asia/Manila) ang
+    // nagde-decide ng pickup_date — hindi na pinagkakatiwalaan ang petsa
+    // galing sa frontend (pwedeng stale ang form o mali ang oras ng device).
+    // Pre-Order: galing pa rin sa pinili ng cashier.
+    pickup_date: isBuyNow ? manilaNow.date : (payload.pickup?.date || null),
+    // `payload.pickup.time` is a clean "HH:MM" start time (from the selected
+    // slot). Walk-in Buy Now (walang piniling slot) = oras ng mismong order,
+    // para hindi blangko at hindi kailangang pumasok sa 8AM-5PM na slots.
+    pickup_time: payload.pickup?.time || (isBuyNow ? manilaNow.time : null),
     pickup_time_end: payload.pickup?.timeEnd || null,
 
     // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment

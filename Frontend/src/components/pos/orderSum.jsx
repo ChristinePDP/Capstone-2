@@ -122,6 +122,22 @@ export function getSlotLabel(value) {
   return TIME_SLOTS.find(s => s.value === value)?.label || '';
 }
 
+// Para sa Buy Now (Pick-up Today): lipas na ang slot kapag ang oras ng
+// pagtatapos nito ay hindi na lampas sa kasalukuyang oras. Pre-Order ay
+// hindi kailanman "past" dito kasi ibang araw ang pinipili.
+// Iisang source ito ng rule — ginagamit ng dropdown AT ng validation
+// sa posCart.jsx, para hindi magkaiba ang lohika ng dalawa.
+export function isSlotPast(slot, orderType, timeStr = getLiveNow().timeStr) {
+  if (orderType !== 'Buy Now' || !slot) return false;
+  return slot.end <= timeStr;
+}
+
+// Kapag false, wala nang natirang pick-up slot ngayong araw (hal. 10 PM na).
+export function hasOpenSlotsToday(orderType) {
+  const { timeStr } = getLiveNow();
+  return TIME_SLOTS.some(slot => !isSlotPast(slot, orderType, timeStr));
+}
+
 // ─────────────────────────────────────────────────────────────
 // OrderSummaryModal — dating "Order Summary" modal ng posCart.jsx.
 // Dinala rito ang buong modal (kasama ang calendar + time-slot
@@ -309,11 +325,18 @@ export default function OrderSummaryModal({
     };
   }, [show]);
 
-  const isSlotDisabled = (slot) => {
-    if (orderType !== 'Buy Now') return false;
-    const { timeStr } = getLiveNow();
-    return slot.end <= timeStr;
-  };
+  // FIX: dati, kinukuwenta lang ang "Past" slots tuwing nagre-render ang
+  // modal — kapag naka-bukas ang modal nang matagal, hindi nag-a-update.
+  // Nagre-re-render ito ngayon kada 30 segundo habang bukas ang modal.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    if (!show) return;
+    const id = setInterval(() => setClockTick(t => t + 1), 30000);
+    return () => clearInterval(id);
+  }, [show]);
+
+  const isSlotDisabled = (slot) => isSlotPast(slot, orderType);
+  const noSlotsLeftToday = isBuyNow && !hasOpenSlotsToday(orderType);
 
   if (!show) return null;
 
@@ -462,7 +485,7 @@ export default function OrderSummaryModal({
                   >
                     <span className="flex items-center gap-1.5 truncate">
                       <Clock size={12} className="text-[#8A7264] shrink-0" />
-                      <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : 'Time *'}</span>
+                      <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : (isBuyNow ? 'Walk-in (Now)' : 'Time *')}</span>
                     </span>
                     <ChevronDown
                       size={13}
@@ -471,10 +494,34 @@ export default function OrderSummaryModal({
                   </button>
 
                   <FieldError name="pickupTime" />
+                  {noSlotsLeftToday && !errors.pickupTime && (
+                    <p className="text-[10px] text-[#8A7264] mt-1 leading-snug">
+                      No more pick-up slots today. This will be recorded as a walk-in (picked up now).
+                    </p>
+                  )}
 
                   {showTimeDropdown && timeDropdownPos && createPortal(
                     <div ref={timeDropdownPortalRef} style={timeDropdownPos} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden w-[220px]">
                       <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                        {isBuyNow && (
+                          <li>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setForm(f => ({ ...f, pickupTime: '' }));
+                                setShowTimeDropdown(false);
+                              }}
+                              className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                                !form.pickupTime
+                                  ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
+                                  : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
+                              }`}
+                            >
+                              <span>Walk-in (Now)</span>
+                              {!form.pickupTime && <Check size={13} className="text-[#5A453C] shrink-0" />}
+                            </button>
+                          </li>
+                        )}
                         {TIME_SLOTS.map(slot => {
                           const disabled = isSlotDisabled(slot);
                           const selected = form.pickupTime === slot.value;

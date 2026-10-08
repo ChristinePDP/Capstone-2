@@ -227,6 +227,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setClockTick(t => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
   const [errors, setErrors] = useState({});
   const proofHydratedRef = useRef(false);
 
@@ -477,17 +482,37 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, PRE_ORDER_MIN_LEAD_DAYS);
 
+  // Shop hours para sa Pick-up Today. Labas dito = hindi pwede mag-order for today.
+  const SHOP_OPEN_TIME = '08:00';
   const SHOP_CLOSE_TIME = '17:00';
+
+  const isShopClosedToday = () => {
+    if (pickupType !== 'now') return false;
+    const { timeStr } = getLiveNow();
+    return timeStr < SHOP_OPEN_TIME || timeStr >= SHOP_CLOSE_TIME;
+  };
+  const shopClosedMessage = 'Shop is closed for Pick-up Today (open 8:00 AM - 5:00 PM). Please select Pre-Order.';
+  const shopClosedNow = isShopClosedToday();
+
+  // Kapag sarado, tanggalin ang napiling time (galing sa naka-save na draft)
+  // para hindi mukhang valid pa ang 3:00 PM - 5:00 PM.
+  useEffect(() => {
+    if (shopClosedNow) {
+      setShowTimeDropdown(false);
+      setForm(f => (f.pickupTime ? { ...f, pickupTime: '' } : f));
+    }
+  }, [shopClosedNow]);
 
   const isSlotDisabled = (slot) => {
     if (pickupType !== 'now') return false;
+    if (isShopClosedToday()) return true;
     const { timeStr } = getLiveNow();
     return slot.end <= timeStr;
   };
 
   const handleProceedToOrder = () => {
-    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
-      return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+    if (isShopClosedToday()) {
+      return setToastMessage(shopClosedMessage);
     }
 
     if (stockIssues.length > 0) {
@@ -536,8 +561,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   };
 
   const handleContinueToPayment = () => {
-    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
-      return setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+    if (isShopClosedToday()) {
+      return setToastMessage(shopClosedMessage);
     }
 
     const needsPickupDate = pickupType === 'later';
@@ -561,9 +586,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   };
 
   const handlePlaceOrder = async () => {
-    if (pickupType === 'now' && getLiveNow().timeStr > SHOP_CLOSE_TIME) {
+    if (isShopClosedToday()) {
       setShowSummaryModal(false);
-      setToastMessage('Shop is already closed for today. Please select Pre-Order.');
+      setToastMessage(shopClosedMessage);
       return;
     }
 
@@ -887,11 +912,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 <button
                                   type="button"
                                   onClick={() => setShowTimeDropdown(s => !s)}
-                                  className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors bg-white flex items-center justify-between text-left ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                  disabled={shopClosedNow}
+                                  className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors flex items-center justify-between text-left ${shopClosedNow ? 'bg-[#F5EFEB] opacity-70 cursor-not-allowed' : 'bg-white'} ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                                 >
                                   <span className="flex items-center gap-2 truncate">
                                     <Clock size={13} className="text-[#8A7264] shrink-0" />
-                                    <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : 'Pick-up Time *'}</span>
+                                    <span className="truncate">{shopClosedNow ? 'Open 8:00 AM - 5:00 PM' : form.pickupTime ? getSlotLabel(form.pickupTime) : 'Pick-up Time *'}</span>
                                   </span>
                                   <ChevronDown
                                     size={14}
@@ -935,7 +961,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                             >
                                               <span>{slot.label}</span>
                                               {disabled ? (
-                                                <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
+                                                <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">{shopClosedNow ? 'Closed' : 'Past'}</span>
                                               ) : selected ? (
                                                 <Check size={13} className="text-[#5A453C] shrink-0" />
                                               ) : null}
@@ -948,7 +974,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                   document.body
                                 )}
                               </div>
-                              {errors.pickupTime && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.pickupTime}</span>}
+                              {shopClosedNow ? (
+                                <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">Closed for Pick-up Today. Please choose Pre-Order.</span>
+                              ) : errors.pickupTime && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.pickupTime}</span>}
                           </div>
                       </div>
 
@@ -975,7 +1003,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <button
                         type="button"
                         onClick={handleContinueToPayment}
-                        className="mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full bg-[#3B1F0A] px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-[#2A1608]"
+                        disabled={shopClosedNow}
+                        className={`mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full px-4 py-2.5 text-[13px] font-semibold text-white transition-colors ${shopClosedNow ? 'bg-[#9C8B80] opacity-60 cursor-not-allowed' : 'bg-[#3B1F0A] hover:bg-[#2A1608]'}`}
                       >
                         Continue to Payment
                       </button>
@@ -1166,7 +1195,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
             <div className="min-w-0">
             <button
               onClick={handleProceedToOrder}
-              disabled={isProcessing || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
+              disabled={shopClosedNow || isProcessing || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
               className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isProcessing ? 'Processing Payment...' : 'Proceed to Order'}
@@ -1413,7 +1442,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 </button>
                 <button
                   onClick={handlePlaceOrder}
-                  disabled={isProcessing}
+                  disabled={isProcessing || shopClosedNow}
                   className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
                 >
                   {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Processing...') : 'Place Order'}

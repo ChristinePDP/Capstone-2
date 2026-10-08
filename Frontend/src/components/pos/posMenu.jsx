@@ -1225,6 +1225,13 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                 (orderType === 'Buy Now' && p.order_type === 'Pre-order') ||
                 (orderType === 'Pre-Order' && p.order_type === 'Pick-up Today');
 
+              // "Both": hindi puwede sa napiling order type pero bukas pa ang isa
+              //   • walang stock -> Pre-Order na lang (kung may pre-order limit)
+              //   • walang pre-order limit -> Buy Now (Pick-up Today) na lang
+              const otherType = orderType === 'Buy Now' ? 'Pre-Order' : 'Buy Now';
+              const onlyOtherTypeOpen = isSoldOut && p.order_type === 'Both'
+                && (!isQuantityTracked(p, otherType) || getQuantityLimit(p, otherType) > 0);
+
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
                   <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
@@ -1235,9 +1242,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     )}
 
                     {isStockTracked && (
-                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
+                      <div className={`absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm ${isSoldOut && !onlyOtherTypeOpen && !(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'bg-red-500/90 text-white' : 'bg-white/90 text-[#3B1F0A]'}`}>
                         <span className="text-[10px] font-bold uppercase tracking-wider">
-                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : isSoldOut ? (orderType === 'Pre-Order' ? 'Unavailable' : 'Sold Out') : `${currentStock} Available`}
+                          {(orderType === 'Buy Now' && p.order_type === 'Pre-order') ? 'Pre-order Only' : onlyOtherTypeOpen ? `Available: ${otherType} Only` : isSoldOut ? (orderType === 'Pre-Order' ? 'Unavailable' : 'Sold Out') : `${currentStock} Available`}
                         </span>
                       </div>
                     )}
@@ -1300,7 +1307,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     >
                       {isMismatchedType 
                         ? (p.order_type === 'Pre-order' ? 'Pre-order Only' : 'Buy Now Only')
-                        : isSoldOut 
+                        : onlyOtherTypeOpen
+                          ? `${otherType} Only`
+                          : isSoldOut 
                           ? (orderType === 'Pre-Order' ? 'Limit Reached' : 'Out of Stock') 
                           : 'Add to Cart'}
                     </button>

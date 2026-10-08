@@ -1224,6 +1224,53 @@ function getQuantityLimit(item, orderType) {
   return (typedField ? item[typedField] : undefined) ?? item.available_stock ?? basis ?? 0;
 }
 
+// Para sa product type na "Both": dalawang magkahiwalay ang limit —
+//   • Pick-up Today = stock quantity (physical stock)
+//   • Pre-Order     = pre-order limit (daily limit slots)
+// Kapag walang stock, hindi puwedeng i-pick (Pick-up Today) PERO bukas pa rin
+// ang Pre-Order hangga't may natitirang pre-order limit.
+function isBothType(item) {
+  return item?.order_type === 'Both';
+}
+
+// Strict types (hindi "Both"). Pinapatawad ang pagkakaiba sa spelling/spacing/case
+// (hal. "Pick-up Today", "pickup today", "Buy Now", "Pre-order", "preorder").
+function normalizeOrderTypeToken(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function isPickUpOnlyType(item) {
+  const t = normalizeOrderTypeToken(item?.order_type);
+  return (t.includes('pickup') || t.includes('buynow')) && !t.includes('preorder') && t !== 'both';
+}
+
+function isPreOrderOnlyType(item) {
+  const t = normalizeOrderTypeToken(item?.order_type);
+  return t.includes('preorder') && !t.includes('pickup') && !t.includes('buynow') && t !== 'both';
+}
+
+function canPickUpToday(item) {
+  if (!isQuantityTracked(item)) return true;
+  return Number(getQuantityLimit(item, 'Buy Now')) > 0;
+}
+
+function canPreOrder(item) {
+  if (!isQuantityTracked(item)) return true;
+  return Number(getQuantityLimit(item, 'Pre-Order')) > 0;
+}
+
+// Sold out lang ang "Both" na item kung PARES na sarado: walang stock AT
+// ubos na ang pre-order limit. Ang ibang types ay dating general limit pa rin.
+function isItemSoldOut(item) {
+  if (!isQuantityTracked(item)) return false;
+  if (isBothType(item)) return !canPickUpToday(item) && !canPreOrder(item);
+  // Strict types: sundin ang limit ng sarili nilang order type
+  // (Pre-order lang -> pre-order limit; walang limit = hindi available).
+  if (isPreOrderOnlyType(item)) return !canPreOrder(item);
+  if (isPickUpOnlyType(item)) return !canPickUpToday(item);
+  return Number(getQuantityLimit(item)) <= 0;
+}
+
 // ─────────────────────────────────────────────────────────────
 // ORDER TYPE (Pick-up Today / Pre-Order) — ang switch ay nasa CART na (gaya ng
 // POS cart), hindi na sa Checkout. Dito ginagawa ang stock guard para sa
@@ -1280,21 +1327,29 @@ function stockIssueMessage(issue, orderType) {
     : `${issue.name} is not available in that quantity for ${label}.`;
 }
 
-function OrderTypeSwitch({ value, forcedType, onChange }) {
+// `blockedReasons`: { 'Buy Now': msg | null, 'Pre-Order': msg | null } — may laman kapag
+// hindi kaya ng stock/limit ng kasalukuyang cart ang order type na iyon.
+function OrderTypeSwitch({ value, forcedType, onChange, blockedReasons = {} }) {
+  // Ang kasalukuyang napiling type ay hindi na kaya ng cart (hal. nagbago ang limit)
+  const currentIssue = blockedReasons[value];
+
   return (
     <div>
       <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
         {['Buy Now', 'Pre-Order'].map(type => {
           const locked = Boolean(forcedType) && forcedType !== type;
+          const blocked = type !== value && Boolean(blockedReasons[type]);
           return (
             <button
               key={type}
               type="button"
+              // Hindi disabled kapag blocked lang — para lumabas pa rin ang toast
+              // mula sa handleOrderTypeChange kung bakit hindi puwedeng lumipat.
               disabled={locked}
               onClick={() => onChange(type)}
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 value === type ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-              } ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${(locked || blocked) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {ORDER_TYPE_LABELS[type]}
             </button>
@@ -1305,6 +1360,9 @@ function OrderTypeSwitch({ value, forcedType, onChange }) {
         <p className="mt-1.5 text-[11px] text-[#8A7264]">
           An item in your cart is {ORDER_TYPE_LABELS[forcedType]} only.
         </p>
+      )}
+      {currentIssue && (
+        <p className="mt-1.5 text-[11px] font-semibold text-red-600">{currentIssue}</p>
       )}
     </div>
   );
@@ -1375,6 +1433,27 @@ export default function Menu({ cart, setCart }) {
   const [selectedOrderType, setSelectedOrderType] = useState(readStoredOrderType);
   const forcedOrderType = getForcedOrderType(cart);
   const effectiveOrderType = forcedOrderType ?? selectedOrderType;
+
+  // Kung alin sa dalawang order type ang hindi kaya ng kasalukuyang cart (stock / pre-order limit)
+  const orderTypeBlockedReasons = useMemo(() => {
+    const reasons = {};
+    ['Buy Now', 'Pre-Order'].forEach(type => {
+      const issue = findStockIssue(cart, type);
+      reasons[type] = issue ? stockIssueMessage(issue, type) : null;
+    });
+    return reasons;
+  }, [cart]);
+
+  // Huling guard bago mag-checkout (nahuhuli rin ang cart na luma na ang limit)
+  const handleProceedToCheckout = () => {
+    const issue = findStockIssue(cart, effectiveOrderType);
+    if (issue) {
+      showToast(stockIssueMessage(issue, effectiveOrderType));
+      return false;
+    }
+    navigate('/onlineOrdering/checkout');
+    return true;
+  };
 
   // Kapag may forced type, sundan ito (para hindi bumalik sa lumang piniling type
   // pagka-alis ng forced item); kapag walang laman ang cart, balik sa Pick-up Today.
@@ -1576,8 +1655,26 @@ export default function Menu({ cart, setCart }) {
         ? prev.map((c, n) => (n === idx ? { ...c, qty: c.qty + item.qty } : c))
         : [...prev, item];
       const prevType = getForcedOrderType(prev) ?? selectedOrderType;
-      const nextType = getForcedOrderType(nextCart) ?? selectedOrderType;
-      const issue = findStockIssue(nextCart, nextType, nextType === prevType ? item.id : undefined);
+      const forcedNextType = getForcedOrderType(nextCart);
+      let nextType = forcedNextType ?? selectedOrderType;
+      let issue = findStockIssue(nextCart, nextType, nextType === prevType ? item.id : undefined);
+
+      // "Both" na item na hindi puwede sa napiling order type pero puwede sa isa pa:
+      //   • walang stock -> Pre-Order (kung may pre-order limit)
+      //   • walang pre-order limit -> Pick-up Today lang
+      // Lilipat ang order sa isa pang type kung kaya ng BUONG cart.
+      if (issue && !forcedNextType && isBothType(item)) {
+        const altType = nextType === 'Buy Now' ? 'Pre-Order' : 'Buy Now';
+        const itemFitsAlt = altType === 'Pre-Order' ? canPreOrder(item) : canPickUpToday(item);
+        const itemFitsCurrent = nextType === 'Buy Now' ? canPickUpToday(item) : canPreOrder(item);
+        if (!itemFitsCurrent && itemFitsAlt && !findStockIssue(nextCart, altType)) {
+          nextType = altType;
+          issue = null;
+          setSelectedOrderType(altType);
+          showToast(`${item.name} is not available for ${ORDER_TYPE_LABELS[altType === 'Buy Now' ? 'Pre-Order' : 'Buy Now']}, so your order is now ${ORDER_TYPE_LABELS[altType]}.`);
+        }
+      }
+
       if (issue) {
         showToast(`Sorry, ${stockIssueMessage(issue, nextType)}`);
         return prev;
@@ -1724,8 +1821,8 @@ export default function Menu({ cart, setCart }) {
         .filter(p => p.category === cat)
         .slice()
         .sort((a, b) => {
-          const aSoldOut = isQuantityTracked(a) && getQuantityLimit(a) <= 0;
-          const bSoldOut = isQuantityTracked(b) && getQuantityLimit(b) <= 0;
+          const aSoldOut = isItemSoldOut(a);
+          const bSoldOut = isItemSoldOut(b);
           if (aSoldOut === bSoldOut) return 0;
           return aSoldOut ? 1 : -1;
         });
@@ -1754,9 +1851,10 @@ export default function Menu({ cart, setCart }) {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-4">
             {catProducts.map(p => {
-              const isStockTracked = isQuantityTracked(p);
-              const currentStock = getQuantityLimit(p);
-              const isSoldOut = isStockTracked && currentStock <= 0;
+              const isSoldOut = isItemSoldOut(p);
+              // "Both": walang stock -> Pre-Order na lang; ubos ang pre-order limit -> Pick-up Today na lang
+              const isPreOrderOnlyNow = !isSoldOut && isBothType(p) && !canPickUpToday(p);
+              const isPickUpOnlyNow = !isSoldOut && isBothType(p) && !canPreOrder(p);
               const inclusionText = p.type !== 'bundle' ? (p.inclusion || '') : '';
 
               return (
@@ -1770,12 +1868,24 @@ export default function Menu({ cart, setCart }) {
                     )}
 
                     {isSoldOut ? (
-                      <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-red-500/90 text-white">
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Sold Out</span>
+                      <div className="absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-red-500/90 text-white">
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">Sold Out</span>
                       </div>
-                    ) : p.order_type === 'Pre-order' && (
-                      <div className="absolute top-2 left-2 px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Pre-order Only</span>
+                    ) : isPreOrderOnlyType(p) ? (
+                      <div className="absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">Pre-order Only</span>
+                      </div>
+                    ) : isPickUpOnlyType(p) ? (
+                      <div className="absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">Pick-up Today Only</span>
+                      </div>
+                    ) : isPreOrderOnlyNow ? (
+                      <div className="absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">Available: Pre-Order Only</span>
+                      </div>
+                    ) : isPickUpOnlyNow && (
+                      <div className="absolute top-2 left-2 max-w-[calc(100%-1rem)] px-2.5 py-1 rounded-md shadow-sm border border-white/20 z-10 backdrop-blur-sm bg-white/90 text-[#3B1F0A]">
+                        <span className="block text-[9px] sm:text-[10px] leading-tight font-bold uppercase tracking-wide">Available: Pick-up Today Only</span>
                       </div>
                     )}
 
@@ -1863,8 +1973,8 @@ export default function Menu({ cart, setCart }) {
   return (
     <div className="bg-[#FCFAF9] lg:min-h-screen flex flex-col relative">
       {toast && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-[#3B1F0A] text-white text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-lg max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
-          <span className="w-2 h-2 rounded-full bg-red-400 shrink-0" />
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-white text-[#3B1F0A] border border-red-200 text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-xl ring-1 ring-black/5 max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
+          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
           <span className="leading-snug">{toast.message}</span>
         </div>
       )}
@@ -1956,7 +2066,7 @@ export default function Menu({ cart, setCart }) {
           ) : (
             <>
               <div className="px-6 pt-4 shrink-0">
-                <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} />
+                <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
               </div>
               <div className="px-6 py-4 flex-1 overflow-y-auto flex flex-col gap-4">
                 {cart.map((item, i) => (
@@ -1983,7 +2093,7 @@ export default function Menu({ cart, setCart }) {
                   <span className="text-sm font-semibold text-[#5A453C]">Subtotal</span>
                   <span className="font-serif text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
                 </div>
-                <button onClick={() => navigate('/onlineOrdering/checkout')} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-full text-sm font-semibold hover:bg-[#2A1608] transition-colors">Proceed to Checkout</button>
+                <button onClick={handleProceedToCheckout} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-full text-sm font-semibold hover:bg-[#2A1608] transition-colors">Proceed to Checkout</button>
               </div>
             </>
           )}
@@ -1999,7 +2109,7 @@ export default function Menu({ cart, setCart }) {
                 <span className="absolute -top-1.5 -right-2.5 bg-[#3B1F0A] text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">{cartCount}</span>
               </div>
             </button>
-            <button onClick={() => navigate('/onlineOrdering/checkout')} className="flex-1 bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-between px-5">
+            <button onClick={handleProceedToCheckout} className="flex-1 bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-between px-5">
               <span>Checkout</span>
               <span>₱{cartTotal.toLocaleString()}</span>
             </button>
@@ -2019,7 +2129,7 @@ export default function Menu({ cart, setCart }) {
             </div>
 
             <div className="px-5 pt-4 shrink-0">
-              <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} />
+              <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
             </div>
 
             <div className="overflow-y-auto p-5 flex flex-col gap-4">
@@ -2049,7 +2159,7 @@ export default function Menu({ cart, setCart }) {
                 <span className="text-sm font-semibold text-[#5A453C]">Subtotal</span>
                 <span className="font-serif text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
               </div>
-              <button onClick={() => { setIsMobileCartOpen(false); navigate('/onlineOrdering/checkout'); }} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-[#2A1608] active:scale-[0.98] transition-all">Proceed to Checkout</button>
+              <button onClick={() => { if (handleProceedToCheckout()) setIsMobileCartOpen(false); }} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-[#2A1608] active:scale-[0.98] transition-all">Proceed to Checkout</button>
             </div>
           </div>
         </div>

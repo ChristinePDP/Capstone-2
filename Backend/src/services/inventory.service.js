@@ -462,13 +462,17 @@ const ProductionService = {
   //
   // 1. Per item: kapareho ng batch production (production_logs, bawas
   //    ingredients, OUT logs) PERO hindi dinadagdagan ang products stock.
+  //    Para sa 'Both' products, kung `use_stock: true` ang item → sa halip na
+  //    gumawa ng bago, ibabawas ang quantity sa products.stock_quantity at
+  //    HINDI ginagalaw ang ingredients.
   // 2. Ang extra/theme expenses ay nilolog bilang expenses (IN + cost).
   producePreOrder: async (body = {}) => {
     const items = Array.isArray(body.items) ? body.items : [];
     if (!body.order_id || items.length === 0) {
       throw new AppError('Walang laman ang order na ipo-produce.', 400);
     }
-    if (items.some(it => !it.recipe_id)) {
+    // Ang item na kukunin sa product stock (use_stock) ay hindi na nangangailangan ng formula.
+    if (items.some(it => it.use_stock !== true && !it.recipe_id)) {
       throw new AppError('May item na walang Production Formula — gumawa muna ng formula.', 400);
     }
     if (items.some(it => !(Number(it.quantity) > 0))) {
@@ -492,8 +496,43 @@ const ProductionService = {
     // mabawasan ang ingredients tapos mag-e-error pala sa expenses.
     const expenses = cleanPreOrderExpenses(body.expenses);
 
+    // ── Items na kukunin sa product stock (order type 'Both' lang) ──
+    // I-validate ang LAHAT bago gumalaw ang kahit anong stock. Pinagsasama ang
+    // pareho ng product sa iisang order.
+    const stockItems = items.filter(it => it.use_stock === true);
+    const freshItems = items.filter(it => it.use_stock !== true);
+    const stockNeeds = new Map(); // product_id -> { qty, name }
+    for (const it of stockItems) {
+      const prev = stockNeeds.get(it.product_id);
+      stockNeeds.set(it.product_id, {
+        qty: (prev?.qty || 0) + Number(it.quantity),
+        name: it.product_name,
+      });
+    }
+    const stockPlans = [];
+    for (const [productId, need] of stockNeeds) {
+      if (!UUID_RE.test(String(productId))) throw new AppError('Invalid product id.', 400);
+      const { data: product, error: prodErr } = await supabase
+        .from('products')
+        .select('id, name, order_type, stock_quantity')
+        .eq('id', productId)
+        .maybeSingle();
+      if (prodErr) throw new AppError(`Failed to check product: ${prodErr.message}`, 500);
+      if (!product) throw new AppError(`Product "${need.name}" not found.`, 404);
+
+      const orderType = String(product.order_type || '').toLowerCase().replace(/[^a-z]/g, '');
+      if (orderType !== 'both') {
+        throw new AppError(`"${product.name}" is not a Pick-up Today + Pre-Order product, so it can't be taken from stock.`, 400);
+      }
+      const current = Number(product.stock_quantity || 0);
+      if (current < need.qty) {
+        throw new AppError(`Not enough stock for "${product.name}": need ${need.qty}, only ${current} available.`, 409);
+      }
+      stockPlans.push({ id: product.id, name: product.name, current, qty: need.qty });
+    }
+
     const logs = [];
-    for (const it of items) {
+    for (const it of freshItems) {
       // PRORATED: ang ingredients ay ayon sa aktwal na ino-order, hindi sa
       // buong batch. Per piraso = recipe qty ÷ yield; ang ibabawas ay
       // per piraso × quantity. Kaya 1 cake order, kahit 2 ang yield, ay
@@ -516,6 +555,25 @@ const ProductionService = {
       logs.push(log);
     }
 
+    // Ibawas sa product stock ang mga 'use_stock' items. Conditional update
+    // (eq stock_quantity = nabasa) para hindi magkamali kung may kasabay na benta.
+    const stockDeductions = [];
+    for (const plan of stockPlans) {
+      const { data: updated, error: updErr } = await supabase
+        .from('products')
+        .update({ stock_quantity: plan.current - plan.qty })
+        .eq('id', plan.id)
+        .eq('stock_quantity', plan.current)
+        .select('id');
+      if (updErr || !updated || updated.length === 0) {
+        throw new AppError(
+          `Stock of "${plan.name}" changed while saving. Please try again.`,
+          409
+        );
+      }
+      stockDeductions.push({ product_id: plan.id, product_name: plan.name, deducted: plan.qty, remaining: plan.current - plan.qty });
+    }
+
     const savedExpenses = await ProductionService.recordPreOrderExpenses({
       order_number: body.order_number,
       expenses,
@@ -535,7 +593,7 @@ const ProductionService = {
       );
     }
 
-    return { logs, expenses: savedExpenses };
+    return { logs, expenses: savedExpenses, stockDeductions };
   },
 
   // ── PRE-ORDER: EXTRA / THEME EXPENSES ───────────────────────────

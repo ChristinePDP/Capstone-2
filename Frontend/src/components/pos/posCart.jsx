@@ -4,7 +4,7 @@ import {
   ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Trash2
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
-import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, TIME_SLOTS } from './orderSum';
+import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, isSlotPast, TIME_SLOTS } from './orderSum';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
 import CartReferenceImage from '../shared/CartReferenceImage';
@@ -39,6 +39,29 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
   }
   if (orderType === 'Pre-Order') return item.pre_order_available_stock ?? item.available_stock ?? 0;
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
+}
+
+// Unang line ng cart na lumalagpas sa limit ng isang order type (total qty kada
+// product id). Ginagamit sa order type toggle at sa huling check bago mag-place order.
+function findStockIssue(cartItems = [], type) {
+  const qtyById = {};
+  cartItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
+  const seen = new Set();
+  for (const item of cartItems) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    if (!isQuantityTracked(item, type)) continue;
+    const limit = Number(getQuantityLimit(item, type));
+    if (Number.isNaN(limit)) continue;
+    if (qtyById[item.id] > limit) return { name: item.name, limit, qty: qtyById[item.id] };
+  }
+  return null;
+}
+
+function stockIssueMessage(issue, type) {
+  return issue.limit <= 0
+    ? `${issue.name} is not available for ${type}.`
+    : `${issue.name} is not available in that quantity for ${type}.`;
 }
 
 // In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
@@ -86,6 +109,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   
   const isPreOrderOnly = hasPreOrder && !hasBuyNow;
   const isBuyNowOnly = hasBuyNow && !hasPreOrder;
+
+  // Alin sa dalawang order type ang hindi kaya ng kasalukuyang cart (stock / pre-order limit)
+  const buyNowIssue = cart.length > 0 ? findStockIssue(cart, 'Buy Now') : null;
+  const preOrderIssue = cart.length > 0 ? findStockIssue(cart, 'Pre-Order') : null;
+  const currentTypeIssue = orderType === 'Buy Now' ? buyNowIssue : preOrderIssue;
 
   const prevCartLength = useRef(cart.length);
 
@@ -203,6 +231,21 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     }
   }, [orderType]);
 
+  // FIX (stale pickupDate): dati, isang beses lang kinukuha ang petsa ng
+  // Buy Now (pag-mount / pagpalit ng orderType). Kapag naiwang bukas ang POS
+  // lagpas hatinggabi, kahapon pa rin ang laman ng form. Chine-check na ito
+  // kada 30 segundo, at muli sa mismong pag-submit (handlePlaceOrder).
+  useEffect(() => {
+    if (orderType !== 'Buy Now') return;
+    const sync = () => {
+      const { dateStr } = getLiveNow();
+      setForm(f => (f.pickupDate === dateStr ? f : { ...f, pickupDate: dateStr }));
+    };
+    sync();
+    const id = setInterval(sync, 30000);
+    return () => clearInterval(id);
+  }, [orderType]);
+
   // Review Order simply opens the Order Summary modal now — the Customer
   // Details fields (Name, Contact, Pick-up Date/Time) live inside that
   // modal (orderSum.jsx) as an editable form.
@@ -238,6 +281,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
       errors.altPhone = 'Must be exactly 11 digits.';
     }
+    // Pwedeng 9:25 PM nang piliin ang slot pero 9:35 PM na nang pinindot ang
+    // Place Order — i-recheck dito para hindi makalusot ang lipas na slot.
+    if (orderType === 'Buy Now' && form.pickupTime) {
+      const chosen = TIME_SLOTS.find(s => s.value === form.pickupTime);
+      if (isSlotPast(chosen, orderType)) {
+        errors.pickupTime = 'That time slot has already passed. Please choose another.';
+      }
+    }
     return errors;
   };
 
@@ -268,6 +319,15 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const handlePlaceOrder = async () => {
     if (submissionLockRef.current || isProcessing) return;
     submissionLockRef.current = true;
+
+    // Huling stock / pre-order limit check ayon sa napiling order type
+    // (nahuhuli rin ang cart na luma na ang limit).
+    const stockIssue = findStockIssue(cart, orderType);
+    if (stockIssue) {
+      submissionLockRef.current = false;
+      showToast(stockIssueMessage(stockIssue, orderType), 'error');
+      return;
+    }
 
     // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
     const missingImages = cart.flatMap(item =>
@@ -431,6 +491,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     } : {};
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
+    // FIX: laging bagong petsa ang gamit ng Buy Now sa mismong pag-submit,
+    // hindi ang posibleng lumang laman ng form.
+    const livePickupDate = orderType === 'Buy Now' ? getLiveNow().dateStr : form.pickupDate;
+    // Walk-in (Buy Now na walang piniling slot): kinukuha agad ng customer.
+    // Ang pickup_time ay inilalagay ng server (pos.service.js) = oras ng order.
+    const isWalkIn = orderType === 'Buy Now' && !form.pickupTime;
 
     const payload = {
       orderType: orderType,
@@ -445,11 +511,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         additionalCharge: chargeAmountCalc
       },
       pickup: {
-        date: form.pickupDate,
+        date: livePickupDate,
+        // Walk-in: blangko ang time dito — ang server (Asia/Manila) ang naglalagay ng oras ng order.
         time: selectedSlot?.start || '',
         timeEnd: selectedSlot?.end || '',
         timeSlot: form.pickupTime,
-        timeLabel: selectedSlot?.label || ''
+        timeLabel: isWalkIn ? 'Walk-in' : (selectedSlot?.label || '')
       },
       // FIX: order-level Special Instructions (one field, buong order) —
       // katulad ng payload.specialInstructions na ginagamit na ng Online
@@ -500,7 +567,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           cart: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
           totalAmount: result.data.grand_total ?? grandTotalCalc,
           paymentType: result.data.payment_type === 'deposit' ? 'half' : 'full',
-          pickupDate: form.pickupDate ? formatDateLong(form.pickupDate) : '',
+          pickupDate: livePickupDate ? formatDateLong(livePickupDate) : '',
           pickupTime: getSlotLabel(form.pickupTime),
           confirmToken: result.data.receiptToken,
         });
@@ -609,11 +676,15 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             <button
               onClick={() => {
                 if (isPreOrderOnly) return; 
+                if (orderType !== 'Buy Now' && buyNowIssue) {
+                  showToast(`Can't switch to Buy Now. ${stockIssueMessage(buyNowIssue, 'Buy Now')}`, 'error');
+                  return;
+                }
                 setOrderType('Buy Now');
               }}
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Buy Now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-              } ${isPreOrderOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${(isPreOrderOnly || (orderType !== 'Buy Now' && buyNowIssue)) ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={isPreOrderOnly}
             >
               Buy Now
@@ -621,16 +692,23 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             <button
               onClick={() => {
                 if (isBuyNowOnly) return; 
+                if (orderType !== 'Pre-Order' && preOrderIssue) {
+                  showToast(`Can't switch to Pre-Order. ${stockIssueMessage(preOrderIssue, 'Pre-Order')}`, 'error');
+                  return;
+                }
                 setOrderType('Pre-Order');
               }}
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Pre-Order' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-              } ${isBuyNowOnly ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${(isBuyNowOnly || (orderType !== 'Pre-Order' && preOrderIssue)) ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={isBuyNowOnly}
             >
               Pre-Order
             </button>
           </div>
+          {currentTypeIssue && (
+            <p className="mt-1.5 text-[11px] font-semibold text-red-600">{stockIssueMessage(currentTypeIssue, orderType)}</p>
+          )}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin">
