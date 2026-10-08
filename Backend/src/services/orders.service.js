@@ -101,7 +101,7 @@ const OrdersService = {
     return order;
   },
 
-  async getPaymentProof(id) {
+  async getPaymentProofUrl(id) {
     if (!id) {
       const error = new Error('Order id is required');
       error.status = 400;
@@ -130,15 +130,23 @@ const OrdersService = {
 
     const { data, error } = await supabase.storage
       .from(PAYMENT_PROOF_BUCKET)
-      .download(path);
+      .createSignedUrl(path, 5 * 60);
 
-    if (error || !data) {
+    if (error || !data?.signedUrl) {
+      console.error('[PAYMENT PROOF] Failed to create signed URL', {
+        orderId: id,
+        bucket: PAYMENT_PROOF_BUCKET,
+        path,
+        message: error?.message,
+        status: error?.status,
+        statusCode: error?.statusCode,
+      });
       const storageError = new Error(error?.message || 'Payment proof object not found');
       storageError.status = 404;
       throw storageError;
     }
 
-    return data;
+    return data.signedUrl;
   },
 
   async getPendingCelebrationMaterialRestock() {

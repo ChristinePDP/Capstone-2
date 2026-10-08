@@ -25,13 +25,9 @@ const OrdersController = {
 
   async getPaymentProof(req, res, next) {
     try {
-      const image = await OrdersService.getPaymentProof(req.params.id);
-      const buffer = Buffer.isBuffer(image)
-        ? image
-        : Buffer.from(await image.arrayBuffer());
-      res.set('Content-Type', image.type || 'application/octet-stream');
+      const signedUrl = await OrdersService.getPaymentProofUrl(req.params.id);
       res.set('Cache-Control', 'private, no-store');
-      return res.status(200).send(buffer);
+      return res.redirect(302, signedUrl);
     } catch (err) {
       next(err);
     }
