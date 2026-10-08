@@ -1,4 +1,5 @@
 // backend/services/orders.service.js
+import crypto from 'crypto';
 import { OrdersModel } from '../model/orders.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
@@ -101,7 +102,7 @@ const OrdersService = {
     return order;
   },
 
-  async getPaymentProofUrl(id) {
+  async getPaymentProof(id) {
     if (!id) {
       const error = new Error('Order id is required');
       error.status = 400;
@@ -146,7 +147,19 @@ const OrdersService = {
       throw storageError;
     }
 
-    return data.signedUrl;
+    const response = await fetch(data.signedUrl);
+    if (!response.ok) {
+      const storageError = new Error(`Payment proof fetch failed with status ${response.status}`);
+      storageError.status = response.status === 404 ? 404 : 502;
+      throw storageError;
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    return {
+      body,
+      contentType: response.headers.get('content-type') || 'application/octet-stream',
+      etag: `"${crypto.createHash('sha256').update(body).digest('hex')}"`,
+    };
   },
 
   async getPendingCelebrationMaterialRestock() {

@@ -25,9 +25,19 @@ const OrdersController = {
 
   async getPaymentProof(req, res, next) {
     try {
-      const signedUrl = await OrdersService.getPaymentProofUrl(req.params.id);
-      res.set('Cache-Control', 'private, no-store');
-      return res.redirect(302, signedUrl);
+      const image = await OrdersService.getPaymentProof(req.params.id);
+      const cacheControl = 'private, max-age=28800, must-revalidate';
+
+      if (req.headers['if-none-match'] === image.etag) {
+        res.set('ETag', image.etag);
+        res.set('Cache-Control', cacheControl);
+        return res.status(304).end();
+      }
+
+      res.set('Content-Type', image.contentType);
+      res.set('Cache-Control', cacheControl);
+      res.set('ETag', image.etag);
+      return res.status(200).send(image.body);
     } catch (err) {
       next(err);
     }
