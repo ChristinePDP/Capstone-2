@@ -214,24 +214,24 @@ function ProductCard({ product, onEdit, onDelete }) {
   return (
     <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0">
       {/* Pinaliit nang konti ang height sa mobile para hindi mukhang humahaba */}
-      <div className="relative h-28 sm:h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center">
+      <div className="@container relative h-28 sm:h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center">
         {imageUrl ? (
           <img src={imageUrl} alt={product.name} className="w-full h-full object-cover" />
         ) : (
           <Package size={28} className="text-[#DED4CC]" />
         )}
-        <div className="absolute top-2 left-2">
-          <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest bg-white text-[#3B1F0A] px-2 py-1 rounded-full shadow-sm">
+        {/* Hindi magpapatungan ang category at ang limit: kapag may sapat na lapad ang card (190px+), magkatabi sila
+            at ang category ay pwedeng mag-wrap sa dalawang linya ("Celebration / Material"); kapag masikip (hal. 2-column sa maliit na phone), patong-patong na. */}
+        <div className="absolute top-2 left-2 right-2 flex flex-col items-start gap-1 @min-[190px]:flex-row @min-[190px]:justify-between @min-[190px]:gap-1.5">
+          <span className="min-w-0 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider leading-tight bg-white text-[#3B1F0A] px-2 py-1 rounded-xl shadow-sm wrap-break-word">
             {product.category}
           </span>
-        </div>
-        {dailyLimit > 0 && (
-          <div className="absolute top-2 right-2">
-            <span className="text-[9px] sm:text-[10px] font-bold bg-[#3B1F0A] text-white px-2 py-1 rounded-full shadow-sm">
+          {dailyLimit > 0 && (
+            <span className="shrink-0 whitespace-nowrap text-[9px] sm:text-[10px] font-bold leading-tight bg-[#3B1F0A] text-white px-2 py-1 rounded-full shadow-sm">
               Limit: {dailyLimit}/day
             </span>
-          </div>
-        )}
+          )}
+        </div>
         {missingFormula && (
           <div className="absolute left-2 right-2 bottom-2">
             <span className="block rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm">
