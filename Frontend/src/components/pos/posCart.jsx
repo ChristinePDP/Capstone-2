@@ -29,6 +29,7 @@ function isQuantityTracked(item, orderType = 'Buy Now') {
 }
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
+  if (orderType === 'Pre-Order' && item.pre_order_unlimited) return Infinity;
   // Bundle/Package: limit galing sa components (kinuwenta sa posMenu.jsx).
   if (item.type === 'bundle' || item.type === 'package') {
     if (orderType === 'Buy Now' && item.order_type === 'Pre-order') return 0;

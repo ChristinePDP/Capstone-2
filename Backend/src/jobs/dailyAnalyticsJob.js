@@ -5,7 +5,6 @@ import {
   PerformanceSummaryService,
 } from '../services/aiAnalytics.service.js';
 import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js';
-import { cleanupExpiredPendingOrders } from '../services/onlineOrdering.service.js';
 
 export const runDailyAnalyticsJob = async () => {
   console.log('--- Daily Analytics Job Started ---');
@@ -38,9 +37,6 @@ export const runDailyAnalyticsJob = async () => {
 
   console.log('Checking for live occasion & generating Event Ads...');
   await generateEventAds();
-
-  console.log('Cleaning up expired pending checkouts...');
-  await cleanupExpiredPendingOrders();
 
   console.log('--- Daily Analytics Job Finished ---');
 };

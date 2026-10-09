@@ -6,7 +6,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
-import { PendingOrdersModel } from '../model/pendingOrders.model.js';
+import { PreOrderCapacityModel } from '../model/preorderCapacity.model.js';
 import { MaterialModel } from '../model/material.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
 import { notifyNewOrder } from './notification.service.js';
@@ -15,11 +15,12 @@ import { getBundleById } from './productAndEvent.service.js';
 // --- STOCK / DAILY LIMIT BASIS ---
 //
 // Ang isang product ay maaaring i-track base sa `daily_limit` (para sa
-// Pre-order — ilang "slots" ang pwedeng i-order kada araw) o base sa
+// Pre-order — ilang units ang pwedeng i-order per pickup date) o base sa
 // `stock_quantity` (para sa Pick-up Today — kung ilan talaga ang
 // naka-ready/produced na stock). Rule (parehong ginagamit sa availability
 // computation at sa pag-deduct pagka-Completed na ang order):
-//   - Kung may laman (di null at > 0) ang `daily_limit`, ITO ang babasahin,
+//   - Kung may laman (di null at > 0) ang `daily_limit`, ITO ang capacity
+//     para sa bawat pickup date,
 //     kahit may laman din ang `stock_quantity` (daily_limit wins kapag
 //     pareho silang may laman).
 //   - Kung wala/0 ang `daily_limit`, babalik sa `stock_quantity`.
@@ -77,28 +78,14 @@ export const fetchMenuProducts = async (filters = {}) => {
       || formulaByProductId.get(product.id)?.has_production_formula === true
   );
   
-  const reservedMap = {};
+  const reservedBuyNowMap = {};
   
-  // 1. Ibawas ang mga nasa 'order_items' table na (Confirmed/Ready - both Pre-Order & Buy Now)
+  // 1. I-reserve sa physical stock ang Buy Now rows lang. Ang Pre-Order
+  //    reservations ay binibilang nang hiwalay kada pickup date sa checkout.
   pendingItems.forEach(item => {
-    reservedMap[item.product_id] = (reservedMap[item.product_id] || 0) + item.quantity;
+    if (item.orders?.order_type === 'Pre-Order') return;
+    reservedBuyNowMap[item.product_id] = (reservedBuyNowMap[item.product_id] || 0) + item.quantity;
   });
-
-  // 2. Kunin lang ang mga RECENT na nasa PayMongo checkout page (last 30 mins)
-  try {
-    const pendingPaymongo = await PendingOrdersModel.getActivePending();
-
-    if (pendingPaymongo) {
-      pendingPaymongo.forEach(row => {
-        const items = row.payload?.items || [];
-        items.forEach(item => {
-          reservedMap[item.productId] = (reservedMap[item.productId] || 0) + item.quantity;
-        });
-      });
-    }
-  } catch (pendingErr) {
-    console.error("Error fetching pending PayMongo orders:", pendingErr);
-  }
 
   const productsWithStock = products.map(p => {
     const celebrationMaterial = materialByProductId.get(p.id);
@@ -109,10 +96,10 @@ export const fetchMenuProducts = async (filters = {}) => {
     const baseStock = limitField === 'daily_limit'
       ? Number(p.daily_limit) || 0
       : physicalStock;
-    const reserved = reservedMap[p.id] || 0;
+    const reserved = reservedBuyNowMap[p.id] || 0;
     const available = Math.max(0, baseStock - reserved);
 
-    // PRE-ORDER RULE: ang Pre-Order ay GALING LANG sa pre-order limit (daily_limit),
+    // PRE-ORDER RULE: ang Pre-Order ay GALING LANG sa per-pickup-date capacity (daily_limit),
     // hindi sa stock_quantity. Kapag walang pre-order limit (null / blangko / 0),
     // SARADO ang Pre-Order — kahit may stock_quantity. Pick-up Today na lang
     // ang available (kung may stock).
@@ -127,7 +114,10 @@ export const fetchMenuProducts = async (filters = {}) => {
       stock_basis_field: limitField, // 'daily_limit' o 'stock_quantity' — para malaman ng frontend/consumer kung saan galing ang bilang
       available_stock: available,
       buy_now_available_stock: Math.max(0, physicalStock - reserved),
-      pre_order_available_stock: hasPreOrderLimit ? available : 0
+      // Walang pickup date ang menu request. Ibalik ang configured daily
+      // capacity rito; pickup-date reservations are checked at checkout.
+      pre_order_available_stock: hasPreOrderLimit && Number(p.daily_limit) > 0 ? Number(p.daily_limit) : 0,
+      pre_order_unlimited: !hasPreOrderLimit || Number(p.daily_limit) <= 0,
     };
   });
 
@@ -218,36 +208,6 @@ export const uploadImageToBucket = async (file, bucketName = 'inspiration-images
   }
 
   throw new Error(`Supabase Storage Error: ${lastError?.message || 'Upload failed'}`);
-};
-
-// --- PENDING ORDERS LOGIC ---
-
-export const createPendingOrder = async ({ payload, amountDueNow }) => {
-  try {
-    return await PendingOrdersModel.create(payload, amountDueNow);
-  } catch (error) {
-    throw new Error(`Pending Order Error: ${error.message}`);
-  }
-};
-
-export const attachCheckoutSessionToPendingOrder = async (pendingOrderId, checkoutSessionId) => {
-  try {
-    await PendingOrdersModel.updateSession(pendingOrderId, checkoutSessionId);
-  } catch (error) {
-    console.error('Failed to attach checkout session to pending order:', error.message);
-  }
-};
-
-export const getPendingOrder = async (pendingOrderId) => {
-  return await PendingOrdersModel.findById(pendingOrderId);
-};
-
-export const markPendingOrderPaid = async (pendingOrderId, paymentId, resultOrder) => {
-  try {
-    await PendingOrdersModel.markAsPaid(pendingOrderId, paymentId, resultOrder);
-  } catch (error) {
-    console.error('Failed to mark pending order as paid:', error.message);
-  }
 };
 
 // --- ACTUAL ORDER CREATION LOGIC ---
@@ -557,6 +517,84 @@ export const resolveOrderItems = async (items = []) => {
   return resolved;
 };
 
+const addQuantitiesByProduct = (target, items = [], date = '') => {
+  if (!target[date]) target[date] = {};
+  for (const item of items) {
+    if (!item.product_id) continue;
+    target[date][item.product_id] = (target[date][item.product_id] || 0) + Number(item.quantity || 0);
+  }
+};
+
+const getPreOrderAvailabilityForResolvedItems = async (
+  resolvedItems,
+  startDate,
+  endDate
+) => {
+  const requestedByProduct = {};
+  for (const item of resolvedItems) {
+    if (!item.product_id) continue;
+    requestedByProduct[item.product_id] = (requestedByProduct[item.product_id] || 0) + Number(item.quantity || 0);
+  }
+  const productIds = Object.keys(requestedByProduct);
+  if (productIds.length === 0) return { unavailableDates: [] };
+
+  const products = await Promise.all(productIds.map(id => ProductModel.findById(id)));
+  const productById = new Map(products.filter(Boolean).map(product => [String(product.id), product]));
+  const reservedByDate = {};
+
+  const existingItems = await OrderItemsModel.getPreOrdersByPickupDateRange(startDate, endDate);
+  existingItems.forEach(item => {
+    const date = item.orders?.pickup_date;
+    if (!date) return;
+    addQuantitiesByProduct(reservedByDate, [item], date);
+  });
+
+  const unavailableDates = [];
+  const from = new Date(`${startDate}T00:00:00Z`);
+  const through = new Date(`${endDate}T00:00:00Z`);
+  for (const day = new Date(from); day <= through; day.setUTCDate(day.getUTCDate() + 1)) {
+    const date = day.toISOString().slice(0, 10);
+    const blockedItems = [];
+    for (const [productId, requestedQty] of Object.entries(requestedByProduct)) {
+      const product = productById.get(String(productId));
+      const limit = Number(product?.daily_limit) || 0;
+      if (limit <= 0) continue; // zero means unlimited pre-orders
+      const reserved = Number(reservedByDate[date]?.[productId] || 0);
+      if (reserved + requestedQty > limit) {
+        blockedItems.push({
+          productId,
+          productName: product?.name || 'Product',
+          reason: 'limit_reached',
+        });
+      }
+    }
+    if (blockedItems.length) unavailableDates.push({ date, blockedItems });
+  }
+
+  return { unavailableDates };
+};
+
+export const getPreOrderDateAvailability = async ({ items = [], startDate, endDate }) => {
+  const resolvedItems = await resolveOrderItems(items);
+  return getPreOrderAvailabilityForResolvedItems(resolvedItems, startDate, endDate);
+};
+
+export const validatePreOrderPickupDate = async (resolvedItems, pickupDate) => {
+  const { unavailableDates } = await getPreOrderAvailabilityForResolvedItems(
+    resolvedItems,
+    pickupDate,
+    pickupDate
+  );
+  if (unavailableDates.length) {
+    const blockedItems = unavailableDates[0].blockedItems.map(item =>
+      `${item.productName} (daily limit reached)`
+    );
+    const error = new Error(`Pre-order is unavailable for ${pickupDate}: ${blockedItems.join(', ')}. Please choose another pickup date.`);
+    error.code = 'PREORDER_CAPACITY';
+    throw error;
+  }
+};
+
 // BAGO: kung "Package" ang isang order item (may naka-link na component
 // products, hal. cake + cupcake + tarp), ang dating validation ay tumitingin
 // lang sa product_id ng PACKAGE mismo — kaya kung may celebration material
@@ -671,18 +709,33 @@ export const resolveInitialOnlineOrderStatus = async (resolvedItems = [], orderT
   return 'Ready';
 };
 
-export const createDatabaseOrder = async (payload, paymongoPaymentId = null, manualPayment = null) => {
+export const createDatabaseOrder = async (payload, manualPayment = null) => {
   // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
   let resolvedItems;
+  const reservationId = payload.orderType === 'Pre-Order'
+    ? randomUUID()
+    : null;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
     await validateProductionFormulaAvailability(resolvedItems);
+    if (payload.orderType === 'Pre-Order') {
+      if (!payload.pickup?.date) throw new Error('Please select a pickup date.');
+      await validatePreOrderPickupDate(resolvedItems, payload.pickup.date);
+    }
     console.log(
       `[ORDER] ${payload.items.length} cart item(s) -> ${resolvedItems.length} order_items row(s):`,
       payload.items.map(i => `${i.name || i.packageId || i.bundleId} [type=${i.type || '-'}]`).join(', ')
     );
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
+    if (payload.orderType === 'Pre-Order') {
+      await PreOrderCapacityModel.reserve(
+        reservationId,
+        payload.pickup.date,
+        resolvedItems,
+        new Date(Date.now() + 30 * 60 * 1000).toISOString()
+      );
+    }
   } catch (itemsError) {
     throw createOrderError('items', itemsError);
   }
@@ -704,6 +757,11 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null, man
       alt_phone: payload.customer.alternativeNumber || ''
     });
   } catch (custError) {
+    if (reservationId) {
+      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
+        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after customer insert failure:', releaseError);
+      }
+    }
     throw createOrderError('customer', custError);
   }
 
@@ -721,7 +779,6 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null, man
     pickup_date: payload.pickup.date,
     pickup_time: payload.pickup.time,
     pickup_time_end: payload.pickup.timeEnd || null,
-    paymongo_payment_id: paymongoPaymentId,
     ...(manualPayment ? {
       payment_verification_status: 'Pending',
       proof_of_payment_path: manualPayment.path,
@@ -733,6 +790,11 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null, man
   try {
     newOrder = await OrdersModel.create([orderToInsert]);
   } catch (orderError) {
+    if (reservationId) {
+      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
+        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after order insert failure:', releaseError);
+      }
+    }
     throw createOrderError('order', orderError);
   }
 
@@ -747,104 +809,21 @@ export const createDatabaseOrder = async (payload, paymongoPaymentId = null, man
   try {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (itemsError) {
+    if (reservationId) {
+      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
+        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after item insert failure:', releaseError);
+      }
+    }
     throw createOrderError('items', itemsError);
+  }
+
+  if (reservationId) {
+    await PreOrderCapacityModel.linkToOrder(reservationId, newOrder.id);
   }
 
   notifyNewOrder(newOrder, payload);
 
   return newOrder;
-};
-
-// --- PAYMENT VERIFICATION + PENDING ORDER FINALIZATION ---
-//
-// Dalawang paraan na ngayon para maging TOTOONG order ang isang pending
-// order pagkatapos mabayaran: (1) ang PayMongo webhook, at (2) ang
-// fallback sa `getPendingOrderStatus` (tinatawag ng Confirm.jsx habang
-// nagpo-poll) na direktang nagtatanong sa PayMongo kung bayad na. Kaya
-// kahit hindi maabot ng webhook ang backend (hal. localhost na walang
-// public URL) o pumalya ito, magagawa pa rin ang order. Parehong
-// `finalizePendingOrder` ang dinadaanan ng dalawa, at may atomic claim
-// para hindi madoble.
-
-// Tinatanong ang PayMongo kung bayad na ba ang isang checkout session.
-// Bumabalik ng { paid, paymentId }. Hindi nagta-throw sa network/API error
-// — { paid: false } lang ang ibinabalik at nagla-log (para hindi masira ang
-// polling; susubukan ulit sa susunod na poll).
-export const verifyCheckoutSessionPaid = async (checkoutSessionId) => {
-  if (!checkoutSessionId || !process.env.PAYMONGO_SECRET_KEY) {
-    return { paid: false, paymentId: null };
-  }
-
-  try {
-    const response = await fetch(`https://api.paymongo.com/v1/checkout_sessions/${checkoutSessionId}`, {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Basic ${Buffer.from(process.env.PAYMONGO_SECRET_KEY + ':').toString('base64')}`,
-      },
-    });
-    const json = await response.json();
-
-    if (!response.ok || !json?.data) {
-      console.error('[SERVICE] PayMongo checkout session lookup failed:', json?.errors || response.status);
-      return { paid: false, paymentId: null };
-    }
-
-    const attrs = json.data.attributes || {};
-    const payments = Array.isArray(attrs.payments) ? attrs.payments : [];
-    const paidPayment = payments.find(p => p?.attributes?.status === 'paid');
-    if (paidPayment) return { paid: true, paymentId: paidPayment.id };
-
-    if (attrs.payment_intent?.attributes?.status === 'succeeded') {
-      return { paid: true, paymentId: payments[0]?.id || checkoutSessionId };
-    }
-
-    return { paid: false, paymentId: null };
-  } catch (err) {
-    console.error('[SERVICE] Error verifying PayMongo checkout session:', err);
-    return { paid: false, paymentId: null };
-  }
-};
-
-// I-promote ang pending order papunta sa TOTOONG order (orders + exploded
-// order_items). Ligtas tawagin nang paulit-ulit / sabay-sabay — iisang
-// caller lang ang makakapag-claim, ang iba ay { created: false }.
-export const finalizePendingOrder = async (pendingOrderId, paymentId) => {
-  const claimed = await PendingOrdersModel.claim(pendingOrderId);
-  if (!claimed) {
-    return { created: false, order: null };
-  }
-
-  let newOrder;
-  try {
-    newOrder = await createDatabaseOrder(claimed.payload, paymentId);
-  } catch (err) {
-    // Walang order na nagawa — ibalik ang claim para makapag-retry ang
-    // susunod na webhook/poll.
-    try {
-      await PendingOrdersModel.releaseClaim(pendingOrderId);
-    } catch (releaseErr) {
-      console.error('[SERVICE] Failed to release pending order claim:', releaseErr);
-    }
-    throw err;
-  }
-
-  // Nagawa na ang order — HUWAG nang ibalik ang claim kahit pumalya ito
-  // (mag-du-duplicate). I-retry lang ang pag-mark bilang paid.
-  let marked = false;
-  for (let attempt = 1; attempt <= 3 && !marked; attempt++) {
-    try {
-      await PendingOrdersModel.markAsPaid(pendingOrderId, paymentId, newOrder);
-      marked = true;
-    } catch (markErr) {
-      console.error(`[SERVICE] markAsPaid attempt ${attempt} failed for pending order ${pendingOrderId}:`, markErr);
-    }
-  }
-  if (!marked) {
-    console.error(`[SERVICE] ORDER ${newOrder.order_number} was created but pending order ${pendingOrderId} could not be marked paid. Fix manually.`);
-  }
-
-  return { created: true, order: newOrder };
 };
 
 // I-deduct ang stock ng IISANG product/material — hiwalay na function
@@ -853,7 +832,7 @@ export const finalizePendingOrder = async (pendingOrderId, paymentId) => {
 // ito ng `deductSingleProductStock` sa pos.service.js — dalawang beses itong
 // na-duplicate (isa dito, isa doon) dahil hiwalay ang dalawang completion
 // flow (online pickup vs. POS walk-in); tingnan ang paliwanag doon.
-const deductSingleProductStock = async (productId, quantity) => {
+const deductSingleProductStock = async (productId, quantity, orderType = 'Buy Now') => {
   if (!productId || Number(quantity) <= 0) return;
 
   const materialResult = await MaterialModel.findByProductId(productId);
@@ -870,15 +849,18 @@ const deductSingleProductStock = async (productId, quantity) => {
   if (product.category === 'Package' && Array.isArray(product.package_items) && product.package_items.length > 0) {
     for (const component of product.package_items) {
       const componentQty = Number(component.quantity || 0) * Number(quantity);
-      await deductSingleProductStock(component.product_id, componentQty);
+      await deductSingleProductStock(component.product_id, componentQty, orderType);
     }
     return;
   }
 
-  // Same priority rule gaya ng availability computation: kung may laman
-  // ang daily_limit, dun babawas (Pre-order "slots"); kung wala, sa
-  // stock_quantity babawas (Pick-up Today na produced stock).
+  // Same stock-basis rule gaya ng availability computation: kung may laman
+  // ang daily_limit, iyon ang per-date Pre-Order capacity; kung wala, sa
+  // stock_quantity babawas para sa Pick-up Today na produced stock.
   const limitField = getStockLimitField(product);
+  // Per-pickup-date Pre-Order capacity stays configured for future dates;
+  // completing one order must not reduce the product's daily_limit globally.
+  if (orderType === 'Pre-Order' && limitField === 'daily_limit') return;
   const currentValue = Number(product[limitField]) || 0;
   const newValue = Math.max(0, currentValue - Number(quantity));
   await ProductModel.update(productId, { [limitField]: newValue });
@@ -924,7 +906,7 @@ export const completeOrderAndDeductStock = async (orderId) => {
 
   // NEW: Settle any outstanding balance now that the order is Completed.
   // "Completed" means the customer already picked up the product — for
-  // deposit orders (50% paid upfront via PayMongo or at the POS), the
+  // deposit orders (50% paid upfront via manual payment or at the POS), the
   // remaining balance is always collected in person at pickup. Before this
   // fix, `amount_paid` stayed frozen at the original deposit forever, so
   // sales reports kept showing the order as only 50% paid (e.g. 2.5k on a
@@ -970,7 +952,7 @@ export const completeOrderAndDeductStock = async (orderId) => {
       console.log(`[SERVICE] 6. Processing Product ID: ${item.product_id} | Qty to deduct: ${item.quantity}`);
 
       try {
-        await deductSingleProductStock(item.product_id, item.quantity);
+        await deductSingleProductStock(item.product_id, item.quantity, existingOrder.order_type);
         console.log(`[SERVICE] 9. SUCCESS! Deducted stock for Product ID: ${item.product_id}`);
       } catch (err) {
          console.error(`[SERVICE] 9. Error fetching/updating stock for ${item.product_id}:`, err);
@@ -994,15 +976,5 @@ export const updateProduct = async (id, payload) => {
     return await ProductModel.update(id, payload);
   } catch (error) {
     throw new Error(`Database update error: ${error.message}`);
-  }
-};
-
-export const cleanupExpiredPendingOrders = async () => {
-  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  try {
-    await PendingOrdersModel.deleteExpired(twoHoursAgo);
-    console.log(`[SERVICE] Successfully cleaned up pending orders older than ${twoHoursAgo}`);
-  } catch (error) {
-    console.error('[SERVICE] Error cleaning up expired pending orders:', error.message);
   }
 };

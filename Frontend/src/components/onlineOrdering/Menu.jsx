@@ -1136,9 +1136,11 @@ function computeComponentStock(components = [], orderType = 'Both', stockField =
     if (entry) entry.need += need;
     else byId.set(String(product.id), { product, need });
   }
-  const tracked = [...byId.values()].filter(({ product: p }) =>
-    hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined));
-  if (tracked.length === 0) return { stock: 999, tracked: false };
+  const tracked = [...byId.values()].filter(({ product: p }) => {
+    if (stockField === 'pre_order_available_stock') return Number(p.daily_limit) > 0;
+    return hasDailyLimitSet(p) || (p.stock_quantity !== null && p.stock_quantity !== undefined);
+  });
+  if (tracked.length === 0) return { stock: 999, tracked: false, unlimited: stockField === 'pre_order_available_stock' };
 
   const stock = Math.min(...tracked.map(({ product: p, need }) => {
     const basis = hasDailyLimitSet(p) ? p.daily_limit : p.stock_quantity;
@@ -1148,7 +1150,7 @@ function computeComponentStock(components = [], orderType = 'Both', stockField =
     const available = typed ?? p.available_stock ?? basis ?? 0;
     return Math.floor(Number(available) / need);
   }));
-  return { stock: Math.max(0, stock), tracked: true };
+  return { stock: Math.max(0, stock), tracked: true, unlimited: false };
 }
 
 function isQuantityTracked(item) {
@@ -1163,6 +1165,7 @@ function isQuantityTracked(item) {
 // Pick-up Today, pre_order_available_stock (daily_limit slots) para sa Pre-Order.
 // Kapag wala, dating general `available_stock` (para sa product cards).
 function getQuantityLimit(item, orderType) {
+  if (orderType === 'Pre-Order' && item.pre_order_unlimited) return Infinity;
   const typedField = orderType === 'Pre-Order'
     ? 'pre_order_available_stock'
     : (orderType === 'Buy Now' ? 'buy_now_available_stock' : null);
@@ -1507,7 +1510,8 @@ export default function Menu({ cart, setCart }) {
              packageOrderType
            );
            const packageBuyNowStock = computeComponentStock(packageStockComponents, 'Both', 'buy_now_available_stock').stock;
-           const packagePreOrderStock = computeComponentStock(packageStockComponents, 'Both', 'pre_order_available_stock').stock;
+           const packagePreOrder = computeComponentStock(packageStockComponents, 'Both', 'pre_order_available_stock');
+           const packagePreOrderStock = packagePreOrder.stock;
 
            return {
               ...b,
@@ -1527,6 +1531,7 @@ export default function Menu({ cart, setCart }) {
               available_stock: Math.max(0, packageStock), 
               buy_now_available_stock: Math.max(0, packageBuyNowStock),
               pre_order_available_stock: Math.max(0, packagePreOrderStock),
+              pre_order_unlimited: packagePreOrder.unlimited,
               is_tracked: isPackageTracked,
               order_slip_fields: [],
               price_groups: [],
@@ -1547,7 +1552,8 @@ export default function Menu({ cart, setCart }) {
           bundleOrderType
         );
         const bundleBuyNowStock = computeComponentStock(bundleStockComponents, 'Both', 'buy_now_available_stock').stock;
-        const bundlePreOrderStock = computeComponentStock(bundleStockComponents, 'Both', 'pre_order_available_stock').stock;
+        const bundlePreOrder = computeComponentStock(bundleStockComponents, 'Both', 'pre_order_available_stock');
+        const bundlePreOrderStock = bundlePreOrder.stock;
 
         return {
           id: `bundle-${b.id}`,
@@ -1566,6 +1572,7 @@ export default function Menu({ cart, setCart }) {
           available_stock: Math.max(0, bundleStock),
           buy_now_available_stock: Math.max(0, bundleBuyNowStock),
           pre_order_available_stock: Math.max(0, bundlePreOrderStock),
+          pre_order_unlimited: bundlePreOrder.unlimited,
           is_tracked: isBundleTracked,
           type: 'bundle',
           bundleId: b.id,

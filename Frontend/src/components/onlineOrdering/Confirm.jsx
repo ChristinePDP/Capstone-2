@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import Footer from '../onlineOrdering/Footer';
@@ -15,90 +15,16 @@ const DUMMY_CART = [
 const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
 const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
 
-// Gaano katagal mag-poll bago sabihin sa customer na tumagal ang confirmation.
-const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 20; // ~40s total
-
-export default function Confirm({ orderId, setCart }) {
+export default function Confirm({ orderId }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const mobileReceiptRef = useRef(null);
 
   const storedData = JSON.parse(sessionStorage.getItem('tempOrderData') || '{}');
   const state = location.state || storedData || {};
 
-  // Kung galing ito sa PayMongo redirect, may pending_id sa URL (galing sa
-  // success_url na binuo ng backend) o naka-store sa sessionStorage bilang
-  // backup. Wala itong ibig sabihin kung POS/admin flow ang gumamit ng
-  // Confirm nang direkta (walang PayMongo involved).
-  const pendingOrderId = searchParams.get('pending_id') || sessionStorage.getItem('pendingOrderId');
   const manualOrder = JSON.parse(sessionStorage.getItem('manualOrderResult') || 'null');
-
-  const [paymentStatus, setPaymentStatus] = useState(manualOrder ? 'manual-pending' : (pendingOrderId ? 'checking' : 'unknown'));
-  const [resolvedOrder, setResolvedOrder] = useState(manualOrder);
-
-  // Mag-poll sa backend hanggang makumpirma ng PayMongo webhook ang bayad at
-  // magawa na ang TOTOONG order sa database. Hindi natin ito nilalagay sa
-  // DB agad dito sa frontend — ang webhook lang ang gumagawa niyan.
-  useEffect(() => {
-    if (!pendingOrderId) return;
-    let cancelled = false;
-    let attempts = 0;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/pending-order/${pendingOrderId}`);
-        const data = await res.json();
-        if (cancelled) return;
-
-        if (data.success && data.status === 'paid') {
-          setResolvedOrder(data.order);
-          setPaymentStatus('paid');
-          sessionStorage.removeItem('pendingOrderId');
-          // NOTE: sinasadyang HINDI ginagalaw ang `tempOrderData` dito — binabasa
-          // 'yan sa BAWAT render para sa item list ng receipt (linya 22, 81);
-          // kung aalisin dito, babalik sa DUMMY_CART fallback pag na-re-render.
-          setCart?.([]); // successful na ang order — i-clear na 'yung TOTOONG cart (auto ring mabubura sa localStorage via parent's useEffect)
-          try {
-            localStorage.removeItem(CHECKOUT_DRAFT_KEY);
-            const proofMarker = localStorage.getItem(PAYMENT_PROOF_KEY);
-            localStorage.removeItem(PAYMENT_PROOF_KEY);
-            if (proofMarker) {
-              await deleteFiles([proofMarker]);
-            }
-          } catch (err) {
-            console.error('Failed to clear successful checkout draft and payment proof:', err);
-          }
-          return;
-        }
-
-        if (data.success && (data.status === 'expired' || data.status === 'cancelled')) {
-          setPaymentStatus('failed');
-          return;
-        }
-
-        attempts += 1;
-        if (attempts < MAX_POLL_ATTEMPTS) {
-          setTimeout(poll, POLL_INTERVAL_MS);
-        } else {
-          setPaymentStatus('timeout');
-        }
-      } catch (err) {
-        console.error('Failed to check payment status', err);
-        if (!cancelled) setPaymentStatus('error');
-      }
-    };
-
-    poll();
-    return () => { cancelled = true; };
-  }, [pendingOrderId]);
-
-  // Ang tunay na order number ay galing lamang sa DB pagkatapos ma-confirm ng
-  // webhook. Bumabalik lang tayo sa `orderId` prop / dummy id sa 'unknown'
-  // case, hal. kung may ibang flow (POS/admin) na direktang nag-render ng
-  // Confirm nang walang PayMongo checkout.
-  const id = resolvedOrder?.order_number || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+  const id = manualOrder?.order_number || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
   const cart = state.cart && state.cart.length ? state.cart : DUMMY_CART;
   
   const totalAmount =
@@ -154,55 +80,6 @@ export default function Confirm({ orderId, setCart }) {
       console.error('Failed to save receipt', err);
     }
   };
-
-  // Habang naghihintay pa ng webhook confirmation mula sa PayMongo, o kung
-  // may problema sa pag-verify, huwag munang ipakita ang buong receipt card.
-  if (paymentStatus === 'checking') {
-    return (
-      <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-        <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px]">
-          <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
-            <div className="w-10 h-10 border-2 border-[#DED4CC] border-t-[#3B1F0A] rounded-full animate-spin mb-4" />
-            <h2 className="text-lg font-serif text-[#3B1F0A] mb-1">Confirming your payment…</h2>
-            <p className="text-xs text-[#8A7264] max-w-[320px] text-center">
-              Your order was submitted and is waiting for owner verification. Please do not close this tab.
-            </p>
-          </div>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
-
-  if (paymentStatus === 'timeout' || paymentStatus === 'error' || paymentStatus === 'failed') {
-    return (
-      <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
-        <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col items-center justify-center px-4 sm:px-8 py-4 lg:pl-[140px] xl:pl-[160px] text-center">
-          <div className="w-full flex flex-col items-center justify-center h-full lg:h-[calc(100vh-112px)] min-h-0">
-            <h2 className="text-lg font-serif text-[#3B1F0A] mb-2">
-              {paymentStatus === 'failed' ? 'Payment not completed' : 'Still confirming your payment'}
-            </h2>
-            <p className="text-xs text-[#8A7264] max-w-[340px] mb-5">
-              {paymentStatus === 'failed'
-                ? 'It looks like your payment was cancelled or failed. We did not save your order — you can go back and try again.'
-                : 'Your payment may have gone through, but confirmation is taking longer than usual. Please try refreshing after a few seconds, or contact us if this persists.'}
-            </p>
-            <button
-              onClick={() => {
-                sessionStorage.removeItem('tempOrderData');
-                sessionStorage.removeItem('manualOrderResult');
-                navigate('/onlineOrdering/home');
-              }}
-              className="text-sm font-bold text-[#8A7264] hover:text-[#4A3B36] transition-colors"
-            >
-              &larr; Back to Home
-            </button>
-          </div>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
 
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">

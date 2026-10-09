@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { QrCode, Search, CheckCircle2, ReceiptText } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { Scanner } from '@yudiel/react-qr-scanner';
-import { Badge, Button, Modal, Input, useToast } from '../ui';
+import { Badge, Button, Modal, Input, ConfirmModal, useToast } from '../ui';
 
 function fmt(n) {
   return '₱' + Number(n).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -32,6 +32,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
   const [manualOrderId, setManualOrderId] = useState('');
   const [resultOpen, setResultOpen]       = useState(() => loadSaved(locKey)?.mode === 'result');
   const [resultOrder, setResultOrder]     = useState(() => loadSaved(locKey)?.order ?? null);
+  const [confirmComplete, setConfirmComplete] = useState(false);
   const lastScanRef = useRef({ value: '', at: 0 });
 
   // Lock background scroll while either modal is open — otherwise, on
@@ -198,7 +199,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
               {canComplete && (
                 <button type="button" aria-label="Mark as completed"
                   className="flex-[1.3] min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl bg-green-700 text-white text-[15px] font-semibold shadow-sm hover:bg-green-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"
-                  onClick={() => { onStatusChange(order.id, 'Completed'); setResultOpen(false); }}>
+                  onClick={() => setConfirmComplete(true)}>
                   <CheckCircle2 size={18} /> Complete
                 </button>
               )}
@@ -206,6 +207,22 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
           </div>
         </Modal>
       )}
+
+      <ConfirmModal
+        isOpen={confirmComplete && Boolean(order)}
+        onClose={() => setConfirmComplete(false)}
+        onConfirm={async () => {
+          try {
+            await onStatusChange(order.id, 'Completed');
+          } catch {
+            // Parent handles the error toast.
+          }
+        }}
+        title="Mark as Completed"
+        message={`Complete order #${orderNumber}?`}
+        confirmLabel="Confirm Complete"
+        variant="primary"
+      />
     </>
   );
 }

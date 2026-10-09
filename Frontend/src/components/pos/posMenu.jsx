@@ -187,14 +187,19 @@ function computeComponentStocks(components = []) {
     else byId.set(String(product.id), { product, need });
   }
   const list = [...byId.values()];
-  if (list.length === 0) return { buyNow: 0, preOrder: 0 };
+  if (list.length === 0) return { buyNow: 0, preOrder: 999, preOrderUnlimited: true };
 
   const minFloor = (pick) => Math.max(0, Math.min(...list.map(({ product: p, need }) =>
     Math.floor(Number(pick(p) ?? p.available_stock ?? 0) / need))));
 
+  const finitePreOrderComponents = list.filter(({ product }) => Number(product.daily_limit) > 0);
   return {
     buyNow: minFloor(p => p.buy_now_available_stock),
-    preOrder: minFloor(p => p.pre_order_available_stock),
+    preOrder: finitePreOrderComponents.length
+      ? Math.max(0, Math.min(...finitePreOrderComponents.map(({ product, need }) =>
+        Math.floor(Number(product.pre_order_available_stock ?? 0) / need))))
+      : 999,
+    preOrderUnlimited: finitePreOrderComponents.length === 0,
   };
 }
 
@@ -206,6 +211,7 @@ function isQuantityTracked(item, orderType = 'Buy Now') {
 }
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
+  if (orderType === 'Pre-Order' && item.pre_order_unlimited) return Infinity;
   if (item.type === 'bundle' || item.type === 'package') {
     // Pre-order-only na bundle/package: walang Buy Now stock.
     if (orderType === 'Buy Now' && item.order_type === 'Pre-order') return 0;
@@ -1084,6 +1090,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
               available_stock: packageStocks.buyNow,
               buy_now_available_stock: packageStocks.buyNow,
               pre_order_available_stock: packageStocks.preOrder,
+              pre_order_unlimited: packageStocks.preOrderUnlimited,
               is_tracked: true,
               order_slip_fields: [],
               price_groups: [],
@@ -1119,6 +1126,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
           available_stock: bundleStocks.buyNow,
           buy_now_available_stock: bundleStocks.buyNow,
           pre_order_available_stock: bundleStocks.preOrder,
+          pre_order_unlimited: bundleStocks.preOrderUnlimited,
           is_tracked: true,
           type: 'bundle',
           bundleId: b.id,

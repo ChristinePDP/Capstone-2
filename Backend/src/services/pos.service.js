@@ -1,8 +1,10 @@
+import { randomUUID } from 'crypto';
 import { ProductModel } from '../model/product.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
+import { PreOrderCapacityModel } from '../model/preorderCapacity.model.js';
 import { MaterialModel } from '../model/material.model.js';
 import { createOrderError } from '../utils/orderError.js';
 // Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
@@ -16,6 +18,7 @@ import {
   resolveOrderItems,
   validateCelebrationMaterialAvailability,
   validateProductionFormulaAvailability,
+  validatePreOrderPickupDate,
 } from './onlineOrdering.service.js';
 
 // BAGO: ginagamit para gumawa ng token na naka-encode sa QR ng e-receipt.
@@ -50,7 +53,8 @@ async function cleanupFailedPosOrder(orderId, customerId) {
 // Same priority rule gaya ng ginagamit sa onlineOrdering.services.js at
 // orders.service.js: kung may laman (di null, > 0) ang `daily_limit`, ITO
 // ang babasahin/babawasan (Pre-order "slots"); kung wala, sa
-// `stock_quantity` (Pick-up Today na produced stock).
+// `stock_quantity` (Pick-up Today na produced stock). Ang daily_limit ay
+// capacity bawat pickup date at sinusuri kapag alam na ang petsa.
 const getStockLimitField = (product) => {
   const hasDailyLimit = product?.daily_limit !== null
     && product?.daily_limit !== undefined
@@ -69,7 +73,7 @@ const getStockLimitField = (product) => {
 // BAWAT component nito (pinarami sa quantity ng component sa loob ng
 // package). Dito naaayos ang audit trail: ang aktwal na nababawasan ay ang
 // stock ng mismong cake/cupcake/tarp, hindi lang ang "wrapper" package.
-async function deductSingleProductStock(productId, quantity) {
+async function deductSingleProductStock(productId, quantity, orderType = 'Buy Now') {
   if (!productId || Number(quantity) <= 0) return;
 
   const materialResult = await MaterialModel.findByProductId(productId);
@@ -85,12 +89,15 @@ async function deductSingleProductStock(productId, quantity) {
   if (product.category === 'Package' && Array.isArray(product.package_items) && product.package_items.length > 0) {
     for (const component of product.package_items) {
       const componentQty = Number(component.quantity || 0) * Number(quantity);
-      await deductSingleProductStock(component.product_id, componentQty);
+      await deductSingleProductStock(component.product_id, componentQty, orderType);
     }
     return;
   }
 
   const limitField = getStockLimitField(product);
+  // Ang `daily_limit` ay capacity per pickup date para sa Pre-Order, hindi
+  // physical stock na dapat permanenteng lumiit pagkumpleto ng order.
+  if (orderType === 'Pre-Order' && limitField === 'daily_limit') return;
   const currentValue = Number(product[limitField]) || 0;
   const newValue = Math.max(0, currentValue - Number(quantity));
   await ProductModel.update(productId, { [limitField]: newValue });
@@ -101,11 +108,11 @@ async function deductSingleProductStock(productId, quantity) {
 // confirmPosOrderPickup (kapag na-scan ang e-receipt QR sa pickup counter)
 // — pareho itong "completion" moments, kaya dapat parehong logic ang
 // tumatakbo.
-async function deductStockForOrderItems(items) {
+async function deductStockForOrderItems(items, orderType = 'Buy Now') {
   for (const item of items) {
     if (!item.product_id) continue;
     try {
-      await deductSingleProductStock(item.product_id, item.quantity);
+      await deductSingleProductStock(item.product_id, item.quantity, orderType);
     } catch (err) {
       console.error(`[POS SERVICE] Error updating stock for product ${item.product_id}:`, err);
     }
@@ -135,12 +142,9 @@ export const getPosProducts = async (filters = {}) => {
     );
 
     const reservedBuyNowMap = {};
-    const reservedPreOrderMap = {};
     pendingItems.forEach(item => {
-      const target = item.orders?.order_type === 'Pre-Order'
-        ? reservedPreOrderMap
-        : reservedBuyNowMap;
-      target[item.product_id] = (target[item.product_id] || 0) + Number(item.quantity || 0);
+      if (item.orders?.order_type === 'Pre-Order') return;
+      reservedBuyNowMap[item.product_id] = (reservedBuyNowMap[item.product_id] || 0) + Number(item.quantity || 0);
     });
 
     return orderableProducts.map(p => {
@@ -164,7 +168,10 @@ export const getPosProducts = async (filters = {}) => {
         stock_basis_field: limitField,
         available_stock: Math.max(0, physicalStock - (reservedBuyNowMap[p.id] || 0)),
         buy_now_available_stock: Math.max(0, physicalStock - (reservedBuyNowMap[p.id] || 0)),
-        pre_order_available_stock: Math.max(0, preOrderCapacity - (reservedPreOrderMap[p.id] || 0)),
+        // Walang napiling pickup date sa POS menu; i-validate ang finite limit
+        // kapag may pickup date. A zero daily_limit means unlimited.
+        pre_order_available_stock: preOrderCapacity,
+        pre_order_unlimited: limitField !== 'daily_limit' || Number(p.daily_limit) <= 0,
       };
     });
   } catch (error) {
@@ -190,11 +197,28 @@ export const createPosOrder = async (payload) => {
   //    BAGO gumawa ng kahit anong row sa DB — parehong pattern gaya ng
   //    ginagamit ng Online Ordering sa createDatabaseOrder.
   let resolvedItems;
+  let preorderReservationId = null;
   try {
     resolvedItems = await resolveOrderItems(payload.items);
     await validateProductionFormulaAvailability(resolvedItems);
+    if (payload.orderType === 'Pre-Order') {
+      if (!payload.pickup?.date) throw new Error('Please select a pickup date.');
+      await validatePreOrderPickupDate(resolvedItems, payload.pickup.date);
+      preorderReservationId = randomUUID();
+      await PreOrderCapacityModel.reserve(
+        preorderReservationId,
+        payload.pickup.date,
+        resolvedItems,
+        new Date(Date.now() + 30 * 60 * 1000).toISOString()
+      );
+    }
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
   } catch (itemsError) {
+    if (preorderReservationId) {
+      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release rejected pre-order reservation:', releaseError);
+      }
+    }
     throw createOrderError('items', itemsError);
   }
 
@@ -210,6 +234,11 @@ export const createPosOrder = async (payload) => {
       alt_phone: payload.customer?.altPhone || ''
     });
   } catch (err) {
+    if (preorderReservationId) {
+      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release reservation after order insert failure:', releaseError);
+      }
+    }
     throw createOrderError('customer', err);
   }
 
@@ -310,7 +339,16 @@ export const createPosOrder = async (payload) => {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (err) {
     await cleanupFailedPosOrder(newOrder.id, customerData.id);
+    if (preorderReservationId) {
+      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release reservation after item insert failure:', releaseError);
+      }
+    }
     throw createOrderError('items', err);
+  }
+
+  if (preorderReservationId) {
+    await PreOrderCapacityModel.linkToOrder(preorderReservationId, newOrder.id);
   }
 
   // 4. Stock Deduction Logic
@@ -379,7 +417,7 @@ export const confirmPosOrderPickup = async (orderId, token) => {
   try {
     const items = await OrderItemsModel.findByOrderId(orderId);
     if (items && items.length > 0) {
-      await deductStockForOrderItems(items);
+      await deductStockForOrderItems(items, order.order_type);
     }
   } catch (itemsError) {
     console.error('[POS SERVICE] Error fetching items to deduct stock on pickup confirmation:', itemsError);

@@ -29,11 +29,18 @@ function toDateStr(year, month, day) {
 }
 
 // Self-contained month calendar used for Pre-Order date selection.
-function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, onSelect, onClose }) {
+function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, onSelect, onClose, unavailableDates = {}, availabilityItems = [], availabilityLoading = false, onMonthChange }) {
   const initial = selectedDate || minDate || todayDate;
   const [iy, im] = initial.split('-').map(Number);
   const [viewYear, setViewYear] = useState(iy);
   const [viewMonth, setViewMonth] = useState(im - 1); // 0-indexed
+
+  useEffect(() => {
+    onMonthChange?.(viewYear, viewMonth, availabilityItems);
+    // Parent callback is intentionally omitted: its identity changes during
+    // checkout renders; the month and cart contents are the request inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewYear, viewMonth, availabilityItems]);
 
   const firstOfMonth = new Date(viewYear, viewMonth, 1);
   const startWeekday = firstOfMonth.getDay();
@@ -117,7 +124,8 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
           if (!cell.inMonth) {
             return <div key={idx} className="text-[11px] text-center py-1.5 text-[#D8CFC9]">{cell.day}</div>;
           }
-          const isDisabled = cell.dateStr < minDate;
+          const isUnavailable = Boolean(unavailableDates[cell.dateStr]);
+          const isDisabled = availabilityLoading || cell.dateStr < minDate || isUnavailable;
           const isSelected = cell.dateStr === selectedDate;
           const isToday = cell.dateStr === todayDate;
           return (
@@ -125,9 +133,10 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
               type="button"
               key={idx}
               disabled={isDisabled}
+              title={isUnavailable ? (unavailableDates[cell.dateStr].map(item => `${item.productName}: ${item.reason === 'no_limit' ? 'no daily pre-order limit set' : 'daily limit reached'}`).join(', ')) : undefined}
               onClick={() => { onSelect(cell.dateStr); onClose(); }}
               className={`text-[11px] text-center py-1.5 rounded-lg transition-colors
-                ${isDisabled ? 'text-[#D8CFC9] cursor-not-allowed' : 'text-[#3B1F0A] hover:bg-[#F5EFEB] cursor-pointer'}
+                ${isUnavailable ? 'bg-red-50 text-red-400 cursor-not-allowed line-through' : isDisabled ? 'text-[#D8CFC9] cursor-not-allowed' : 'text-[#3B1F0A] hover:bg-[#F5EFEB] cursor-pointer'}
                 ${isSelected ? 'bg-[#4A3B36] text-white hover:bg-[#4A3B36]' : ''}
                 ${isToday && !isSelected ? 'border border-[#8A7264]' : ''}
               `}
@@ -137,6 +146,9 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
           );
         })}
       </div>
+      <p className="mt-2 border-t border-[#EAE4E0] pt-2 text-[9px] leading-tight text-[#8A7264]">
+        {availabilityLoading ? 'Checking pickup date availability…' : 'Red dates are unavailable for at least one product in your cart. Pickup lead-time rules still apply.'}
+      </p>
     </div>,
     document.body
   );
@@ -441,8 +453,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   }, [form, pickupType, paymentType]);
 
   const stockIssues = useMemo(() => {
-    const field = pickupType === 'now' ? 'buy_now_available_stock' : 'pre_order_available_stock';
-    const label = pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order';
+    // Pre-order capacity is per pickup date, so it is validated against the
+    // selected date by the availability endpoint and again by order submission.
+    if (pickupType !== 'now') return [];
+    const field = 'buy_now_available_stock';
+    const label = 'Pick-up Today';
     const qtyById = {};
     cart.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
     const seen = new Set();
@@ -469,6 +484,58 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const PRE_ORDER_MIN_LEAD_DAYS = hasStrictPreOrder ? 3 : 1;
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, PRE_ORDER_MIN_LEAD_DAYS);
+  const availabilityRequestItems = useMemo(() => cart.map(item => ({
+    productId: item.id ?? null,
+    name: item.name,
+    quantity: item.qty,
+    type: item.type || (item.category === 'Package' ? 'package' : null),
+    bundleId: item.bundleId || null,
+    packageId: (item.type === 'package' || item.category === 'Package')
+      ? (item.packageId || item.id || null)
+      : null,
+  })), [cart]);
+  const [unavailablePickupDates, setUnavailablePickupDates] = useState({});
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const availabilityRequestIdRef = useRef(0);
+
+  const loadPickupDateAvailability = async (year, month, items) => {
+    const requestId = ++availabilityRequestIdRef.current;
+    if (!items.length) {
+      setUnavailablePickupDates({});
+      setAvailabilityLoading(false);
+      return;
+    }
+    setAvailabilityLoading(true);
+    setUnavailablePickupDates({});
+    const startDate = toDateStr(year, month, 1);
+    const endDate = toDateStr(year, month, new Date(year, month + 1, 0).getDate());
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/preorder-availability`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, startDate, endDate }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.message || 'Availability check failed.');
+      if (requestId !== availabilityRequestIdRef.current) return;
+      const blockedDates = Object.fromEntries(
+        (result.data?.unavailableDates || []).map(entry => [entry.date, entry.blockedItems || []])
+      );
+      setUnavailablePickupDates(blockedDates);
+      if (form.pickupDate && blockedDates[form.pickupDate]?.length) {
+        setForm(current => current.pickupDate === form.pickupDate ? { ...current, pickupDate: '' } : current);
+        setErrors(current => ({ ...current, pickupDate: 'That pickup date has reached its limit. Please choose another date.' }));
+      }
+      setAvailabilityLoading(false);
+    } catch (err) {
+      console.error('Pickup date availability check failed:', err);
+      if (requestId === availabilityRequestIdRef.current) {
+        setUnavailablePickupDates({});
+        setAvailabilityLoading(false);
+      }
+    }
+  };
 
   // Shop hours para sa Pick-up Today. Labas dito = hindi pwede mag-order for today.
   const SHOP_OPEN_TIME = '08:00';
@@ -527,6 +594,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
     if (needsPickupDate && !form.pickupDate) {
       newErrors.pickupDate = 'Please select a pickup date.';
+    } else if (needsPickupDate && unavailablePickupDates[form.pickupDate]?.length) {
+      const blockedItems = unavailablePickupDates[form.pickupDate].map(item =>
+        `${item.productName} (${item.reason === 'no_limit' ? 'no daily pre-order limit set' : 'daily limit reached'})`
+      );
+      newErrors.pickupDate = `Unavailable for ${blockedItems.join(', ')} on this date. Please choose another pickup date.`;
     }
 
     if (!form.pickupTime) {
@@ -879,6 +951,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                       todayDate={getLiveNow().dateStr}
                                       triggerRef={calendarTriggerRef}
                                       popRef={calendarPopRef}
+                                      unavailableDates={unavailablePickupDates}
+                                      availabilityItems={availabilityRequestItems}
+                                      availabilityLoading={availabilityLoading}
+                                      onMonthChange={loadPickupDateAvailability}
                                       onSelect={(dateStr) => {
                                         setForm(f => ({...f, pickupDate: dateStr}));
                                         setErrors(prev => ({...prev, pickupDate: false}));

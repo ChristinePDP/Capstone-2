@@ -5,6 +5,11 @@ const ORDER_SUBMISSION_ERROR_MESSAGE =
 
 export function createOrderError(stage, cause) {
   const error = new Error(`Order ${stage} processing failed`, { cause });
+  if (cause?.code === 'PREORDER_CAPACITY') {
+    error.status = 409;
+    error.clientMessage = cause.message;
+    return error;
+  }
   error.status = 500;
   error.clientMessage = stage === 'items'
     ? ORDER_ITEM_ERROR_MESSAGE

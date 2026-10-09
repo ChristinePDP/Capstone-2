@@ -17,7 +17,6 @@ import realtimeRoutes from './routes/realtime.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import { errorHandler } from './middleware/errorHandler.js'; 
 import { authMiddlewareJwt } from './middleware/auth.middleware.js';
-import { handlePaymongoWebhook } from './controller/onlineOrdering.controller.js';
 
 const app = express(); 
 
@@ -33,13 +32,6 @@ app.use(cors({
   ],
   credentials: true // kailangan ito dahil gumagamit ka ng withCredentials sa axios
 }));
-
-// --- PAYMONGO WEBHOOK: DAPAT NASA ITAAS ITO, BAGO ANG express.json() ---
-app.post(
-  '/api/online-ordering/paymongo-webhook',
-  express.raw({ type: 'application/json' }),
-  handlePaymongoWebhook
-);
 
 app.use(express.json()); 
 app.use(cookieParser());

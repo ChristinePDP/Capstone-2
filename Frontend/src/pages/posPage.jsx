@@ -141,6 +141,7 @@ export default function PosPage() {
     setCart(prev => prev.flatMap(item => {
       const product = products.find(candidate => candidate.id === item.id);
       if (!product) return [item];
+      if (orderType === 'Pre-Order' && product.pre_order_unlimited) return [item];
 
       const limit = orderType === 'Pre-Order'
         ? product.pre_order_available_stock ?? product.available_stock

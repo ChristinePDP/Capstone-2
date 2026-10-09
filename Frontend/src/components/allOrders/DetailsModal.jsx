@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { ConfirmModal } from '../ui';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -286,7 +287,8 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 export default function DetailsModal({ order, isOpen, onClose, onStatusChange, onPaymentVerification }) {
   const [activeTab, setActiveTab] = useState('order');
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const [paymentVerificationPending, setPaymentVerificationPending] = useState(false);
+  const [paymentAction, setPaymentAction] = useState(null);
+  const [statusAction, setStatusAction] = useState(null);
   const [lightbox, setLightbox] = useState(null);
 
   const openLightbox = (images, index = 0) => setLightbox({ images, index });
@@ -313,7 +315,8 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
   useEffect(() => {
     setConfirmCancel(false);
-    setPaymentVerificationPending(false);
+    setPaymentAction(null);
+    setStatusAction(null);
   }, [order?.id, isOpen]);
 
   useEffect(() => {
@@ -361,7 +364,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
   const paymentType     = order.paymentType || order.payment_type;
   const amountPaid       = order.amountPaid || order.amount_paid || 0;
   const balance           = order.balance ?? (grandTotal - amountPaid);
-  const paymentRef         = order.paymongoPaymentId || order.paymongo_payment_id;
   const isDeposit = paymentType === 'deposit' && Number(balance) > 0;
 
   const pickupDate     = order.pickupDate || order.pickup_date;
@@ -481,7 +483,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
       role="dialog"
       aria-modal="true"
       aria-labelledby="order-details-heading"
-      onClick={onClose}
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
         className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[92dvh] sm:max-h-[90dvh] mt-auto sm:m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
@@ -609,9 +611,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                     <span className="text-sm font-semibold text-amber-900">Balance due</span>
                     <span className="text-base font-bold text-amber-900 tabular-nums">{fmt(balance)}</span>
                   </div>
-                )}
-                {paymentRef && (
-                  <p className="mt-3 text-xs text-[#8A7264] font-mono break-all">Ref: {paymentRef}</p>
                 )}
 
                 {/* Proof of Payment Thumbnail */}
@@ -755,56 +754,18 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
             <div className="flex gap-3">
               <button
                 type="button"
-                disabled={paymentVerificationPending}
-                onClick={async () => {
-                  setPaymentVerificationPending(true);
-                  try {
-                    await onPaymentVerification(order.id, true);
-                  } catch {
-                    // Parent handles toast error
-                  } finally {
-                    setPaymentVerificationPending(false);
-                  }
-                }}
-                className={`inline-flex ${BTN_BASE} flex-1 bg-green-700 text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-60`}
+                onClick={() => setPaymentAction('accept')}
+                className={`inline-flex ${BTN_BASE} flex-1 bg-green-700 text-white hover:bg-green-800 focus-visible:ring-green-700`}
               >
-                {paymentVerificationPending ? 'Updating...' : 'Accept Payment'}
+                Accept Payment
               </button>
               <button
                 type="button"
-                disabled={paymentVerificationPending}
-                onClick={async () => {
-                  const reason = window.prompt('Reason for rejecting this payment:');
-                  if (!reason?.trim()) return;
-                  setPaymentVerificationPending(true);
-                  try {
-                    await onPaymentVerification(order.id, false, reason.trim());
-                  } catch {
-                    // Parent handles toast error
-                  } finally {
-                    setPaymentVerificationPending(false);
-                  }
-                }}
-                className={`inline-flex ${BTN_BASE} flex-1 ${BTN_DANGER} disabled:cursor-not-allowed disabled:opacity-60`}
+                onClick={() => setPaymentAction('reject')}
+                className={`inline-flex ${BTN_BASE} flex-1 ${BTN_DANGER}`}
               >
-                {paymentVerificationPending ? 'Updating...' : 'Reject'}
+                Reject
               </button>
-            </div>
-          ) : confirmCancel ? (
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm font-semibold text-[#3B1F0A]">Cancel order #{orderNumber}? It will be marked as Cancelled.</p>
-              <div className="flex gap-2.5">
-                <button type="button" onClick={() => setConfirmCancel(false)} className={`inline-flex ${BTN_BASE} ${BTN_CLOSE} flex-1 sm:flex-none`}>
-                  Keep order
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { onStatusChange(order.id, 'Cancelled'); onClose(); }}
-                  className={`inline-flex ${BTN_BASE} ${BTN_DANGER} flex-1 sm:flex-none`}
-                >
-                  Yes, cancel
-                </button>
-              </div>
             </div>
           ) : (
             <div className="flex items-center gap-2.5 sm:justify-between">
@@ -832,7 +793,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                   {next && (
                     <button
                       type="button"
-                      onClick={() => { onStatusChange(order.id, next); onClose(); }}
+                      onClick={() => setStatusAction(next)}
                       className={`inline-flex ${BTN_BASE} text-white shadow-sm flex-1 sm:flex-none whitespace-nowrap ${
                         STATUS_BUTTON_STYLES[next] || 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700'
                       }`}
@@ -895,6 +856,50 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={Boolean(statusAction)}
+        onClose={() => setStatusAction(null)}
+        onConfirm={async () => {
+          try {
+            await onStatusChange(order.id, statusAction);
+          } catch {
+            // Parent handles the error toast.
+          }
+        }}
+        title={`Mark as ${statusAction}`}
+        message={`Update order #${orderNumber} to ${statusAction}?`}
+        confirmLabel={`Mark as ${statusAction}`}
+        variant="primary"
+      />
+
+      <ConfirmModal
+        isOpen={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={() => onStatusChange(order.id, 'Cancelled')}
+        title="Cancel Order"
+        message={`Cancel order #${orderNumber}? It will be marked as Cancelled.`}
+        confirmLabel="Yes, cancel"
+        variant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(paymentAction)}
+        onClose={() => setPaymentAction(null)}
+        onConfirm={async () => {
+          try {
+            await onPaymentVerification(order.id, paymentAction === 'accept');
+          } catch {
+            // Parent handles the error toast.
+          }
+        }}
+        title={paymentAction === 'accept' ? 'Accept Payment' : 'Reject Payment'}
+        message={paymentAction === 'accept'
+          ? `Accept payment for order #${orderNumber}? The order will move to Confirmed.`
+          : `Reject payment for order #${orderNumber}? The order will be cancelled.`}
+        confirmLabel={paymentAction === 'accept' ? 'Confirm Accept' : 'Confirm Reject'}
+        variant={paymentAction === 'accept' ? 'primary' : 'danger'}
+      />
     </div>
   );
 }

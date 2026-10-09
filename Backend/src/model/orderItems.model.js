@@ -61,12 +61,27 @@ const OrderItemsModel = {
         quantity,
         orders!inner ( status, order_type )
       `)
-      .in('orders.status', ['Confirmed', 'Ready']);
-      // TINANGGAL NATIN YUNG .eq('orders.order_type', 'Buy Now') 
-      // para mabasa na rin niya ang mga Pre-Orders
+      .in('orders.status', ['Pending Verification', 'Confirmed', 'Ready']);
 
     if (error) throw error;
     return data;
+  },
+
+  async getPreOrdersByPickupDateRange(startDate, endDate) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select(`
+        product_id,
+        quantity,
+        orders!inner ( status, order_type, pickup_date )
+      `)
+      .eq('orders.order_type', 'Pre-Order')
+      .in('orders.status', ['Pending Verification', 'Confirmed', 'Ready'])
+      .gte('orders.pickup_date', startDate)
+      .lte('orders.pickup_date', endDate);
+
+    if (error) throw error;
+    return data || [];
   },
 };
 

@@ -4,12 +4,11 @@ import rateLimit from 'express-rate-limit'; // 1. I-import ang rateLimit
 
 import { 
   getMenuProducts, 
-  createPaymongoLink, 
+  getPreOrderAvailability,
   uploadInspiration, 
   placeOrder,
   markOrderCompleted,
   getPublicConfig,
-  getPendingOrderStatus,
   placeManualPaymentOrder
 } from '../controller/onlineOrdering.controller.js';
 
@@ -31,15 +30,12 @@ const checkoutLimiter = rateLimit({
 });
 
 router.get('/products', getMenuProducts);
+router.post('/preorder-availability', getPreOrderAvailability);
 router.get('/config', getPublicConfig);
-
-// 3. Ilagay ang `checkoutLimiter` bilang middleware bago tawagin ang controller
-router.post('/paymongo-checkout', checkoutLimiter, createPaymongoLink);
 
 router.post('/upload-inspiration', upload.single('image'), uploadInspiration);
 router.post('/manual-payment-order', checkoutLimiter, upload.single('proof'), placeManualPaymentOrder);
 router.post('/place-order', placeOrder);
 router.patch('/complete/:orderId', markOrderCompleted);
-router.get('/pending-order/:id', getPendingOrderStatus);
 
 export default router;

@@ -305,6 +305,9 @@ const OrdersService = {
 
             if (product) {
               const limitField = getStockLimitField(product);
+              // daily_limit is a per-pickup-date Pre-Order capacity, not
+              // physical stock; keep it unchanged when an order is completed.
+              if (updated.order_type === 'Pre-Order' && limitField === 'daily_limit') continue;
               const currentValue = Number(product[limitField]) || 0;
               const newValue = Math.max(0, currentValue - item.quantity);
               await ProductModel.update(item.product_id, { [limitField]: newValue });
@@ -321,7 +324,7 @@ const OrdersService = {
     return finalOrder;
   },
 
-  async verifyPayment(id, accepted, adminId, reason = null) {
+  async verifyPayment(id, accepted, adminId) {
     const order = await OrdersModel.findById(id);
     if (!order) {
       const err = new Error('Order not found');
@@ -334,8 +337,7 @@ const OrdersService = {
     return OrdersModel.updatePaymentVerification(
       id,
       accepted ? 'Accepted' : 'Rejected',
-      adminId,
-      accepted ? null : reason
+      adminId
     );
   },
 };

@@ -82,9 +82,9 @@ const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)
     }
   };
 
-  const handlePaymentVerification = async (id, accepted, reason) => {
+  const handlePaymentVerification = async (id, accepted) => {
     try {
-      await verifyOrderPayment(id, accepted, reason);
+      await verifyOrderPayment(id, accepted);
       showToast(accepted ? 'Payment accepted.' : 'Payment rejected.');
     } catch (err) {
       showToast(err.message || 'Failed to verify payment.', 'error');

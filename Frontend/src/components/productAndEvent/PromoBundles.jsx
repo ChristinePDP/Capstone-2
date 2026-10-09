@@ -399,10 +399,9 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
     : 'Contains item with no production formula - Cannot appear in POS/Online Ordering';
   const missingPreOrderLimitNames = bundle.category === 'Package' && bundle.order_type === 'Pre-order'
     ? (bundle.package_items || [])
-        .filter(item => item.availability && Number(item.availability.pre_order_available_stock ?? 0) <= 0)
-        .map(item => Number(item.availability?.daily_limit) > 0
-          ? `${item.product?.name || item.name} (pre-order limit reached)`
-          : `${item.product?.name || item.name} (no pre-order limit set)`)
+        .filter(item => Number(item.availability?.daily_limit) > 0
+          && Number(item.availability?.pre_order_available_stock ?? 0) <= 0)
+        .map(item => `${item.product?.name || item.name} (pre-order limit reached)`)
         .filter(Boolean)
     : [];
   const preOrderWarning = missingPreOrderLimitNames.length

@@ -160,7 +160,7 @@ const OrdersModel = {
     return data;
   },
 
-  async updatePaymentVerification(id, status, adminId, rejectionReason = null) {
+  async updatePaymentVerification(id, status, adminId) {
     const { data, error } = await getSupabase()
       .from(TABLE)
       .update({
@@ -168,7 +168,6 @@ const OrdersModel = {
         status: status === 'Accepted' ? 'Confirmed' : 'Cancelled',
         payment_verified_at: new Date().toISOString(),
         payment_verified_by: adminId || null,
-        payment_rejection_reason: rejectionReason,
       })
       .eq('id', id)
       .eq('status', 'Pending Verification')

@@ -1,15 +1,8 @@
 // backend/src/controllers/onlineOrdering.controller.js
-import crypto from 'crypto';
-import { fetchMenuProducts, uploadImageToBucket, createDatabaseOrder, 
+import { fetchMenuProducts, getPreOrderDateAvailability, uploadImageToBucket, createDatabaseOrder,
   completeOrderAndDeductStock, createProduct, 
   getStorageBaseUrl, 
-  updateProduct,
-  createPendingOrder,
-  attachCheckoutSessionToPendingOrder,
-  getPendingOrder,
-  markPendingOrderPaid,
-  finalizePendingOrder,
-  verifyCheckoutSessionPaid } from '../services/onlineOrdering.service.js';
+  updateProduct } from '../services/onlineOrdering.service.js';
 import { supabase } from '../config/supabase.js'; 
 
 export const getPublicConfig = async (req, res) => {
@@ -48,215 +41,26 @@ export const getMenuProducts = async (req, res) => {
   }
 };
 
-export const createPaymongoLink = async (req, res) => {
+export const getPreOrderAvailability = async (req, res) => {
   try {
-    const { amount, description, customerName, customerPhone, orderPayload } = req.body;
-
-    if (!orderPayload) {
-      return res.status(400).json({ success: false, message: 'Missing orderPayload' });
-    }
-
-    const amountInCents = Math.round(amount * 100);
-    const clientOrigin = req.headers.origin || 'http://localhost:5173';
-
-    // 1. I-STAGE lang ang order — WALA pang laman ang `orders` table dito.
-    //    Ang row na ito ang gagamitin ng webhook para gawin ang totoong
-    //    order kapag na-confirm na ng PayMongo na nabayaran.
-    const pendingOrder = await createPendingOrder({ payload: orderPayload, amountDueNow: amount });
-
-    const options = {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        authorization: `Basic ${Buffer.from(process.env.PAYMONGO_SECRET_KEY + ':').toString('base64')}`
-      },
-      body: JSON.stringify({
-        data: {
-          attributes: {
-            send_email_receipt: false,
-            show_description: true,
-            show_line_items: true,
-            success_url: `${clientOrigin}/onlineOrdering/confirm?pending_id=${pendingOrder.id}`,
-            cancel_url: `${clientOrigin}/onlineOrdering/checkout?pending_id=${pendingOrder.id}`,
-            description: `${description} | Customer: ${customerName || 'Guest'}`,
-            billing: {
-              name: customerName || 'Guest',
-              phone: customerPhone || 'N/A'
-            },
-            payment_method_types: ['gcash', 'paymaya', 'card'],
-            // 2. Ito ang "susi" na ipapasa pabalik ng PayMongo sa webhook
-            //    event — dito babalik-tanawin ng webhook kung aling
-            //    pending order ang dapat i-promote sa totoong `orders` row.
-            metadata: {
-              pending_order_id: pendingOrder.id
-            },
-            line_items: [
-              {
-                currency: 'PHP',
-                amount: amountInCents,
-                name: description || 'Online Order',
-                quantity: 1
-              }
-            ]
-          }
-        }
-      })
+    const { items, startDate, endDate } = req.body || {};
+    const isDate = value => {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
     };
-
-    const response = await fetch('https://api.paymongo.com/v1/checkout_sessions', options);
-    const json = await response.json();
-
-    if (json.data) {
-      await attachCheckoutSessionToPendingOrder(pendingOrder.id, json.data.id);
-      res.status(200).json({
-        success: true,
-        checkoutUrl: json.data.attributes.checkout_url,
-        pendingOrderId: pendingOrder.id
-      });
-    } else {
-      console.error('Paymongo Checkout Creation Error:', json.errors);
-      res.status(400).json({ success: false, error: json.errors });
+    if (!Array.isArray(items) || !items.length || !isDate(startDate) || !isDate(endDate) || startDate > endDate) {
+      return res.status(400).json({ success: false, message: 'A cart and valid pickup date range are required.' });
     }
+    const rangeDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+    if (rangeDays > 45) {
+      return res.status(400).json({ success: false, message: 'Pickup availability can only be checked one month at a time.' });
+    }
+    const availability = await getPreOrderDateAvailability({ items, startDate, endDate });
+    return res.status(200).json({ success: true, data: availability });
   } catch (error) {
-    console.error('Paymongo Error Catch:', error);
-    res.status(500).json({ success: false, message: 'Payment link generation failed' });
-  }
-};
-
-// PayMongo signs webhook deliveries with a "Paymongo-Signature" header
-// shaped like: t=<timestamp>,te=<test_signature>,li=<live_signature>
-// The signed payload is `${timestamp}.${rawRequestBody}`, HMAC-SHA256'd
-// with your webhook's signing secret (from the Dashboard, or the
-// `secret_key` returned when you create the webhook via the API).
-const verifyPaymongoSignature = (rawBody, signatureHeader, secret) => {
-  if (!signatureHeader || !secret) return false;
-
-  const parts = Object.fromEntries(
-    signatureHeader.split(',').map((pair) => pair.split('='))
-  );
-  if (!parts.t) return false;
-
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(`${parts.t}.${rawBody}`)
-    .digest('hex');
-
-  // Gamitin ang test signature habang naka-test mode kayo sa PayMongo;
-  // palitan ng `parts.li` kapag live keys na ang gamit niyo.
-  const candidate = process.env.PAYMONGO_MODE === 'live' ? parts.li : parts.te;
-  return candidate === expected;
-};
-
-// IMPORTANT: kailangan RAW body (Buffer) ang `req.body` dito para gumana
-// ang signature check — huwag i-apply ang global `express.json()` middleware
-// sa route na ito. Tignan ang mga instructions sa ibaba para sa route setup.
-export const handlePaymongoWebhook = async (req, res) => {
-  try {
-    const signature = req.headers['paymongo-signature'];
-    const rawBody = req.body.toString('utf8');
-
-    const isValid = verifyPaymongoSignature(rawBody, signature, process.env.PAYMONGO_WEBHOOK_SECRET);
-    if (!isValid) {
-      console.warn('Paymongo Webhook: invalid signature, rejecting request.');
-      return res.status(401).json({ success: false, message: 'Invalid signature' });
-    }
-
-    const event = JSON.parse(rawBody);
-    const eventType = event?.data?.attributes?.type;
-    const paymentResource = event?.data?.attributes?.data; // ang Payment resource
-
-    console.log('[WEBHOOK] Received Paymongo event:', eventType);
-
-    if (eventType === 'payment.paid' || eventType === 'checkout_session.payment.paid') {
-      const paymentId = paymentResource?.id;
-      const pendingOrderId = paymentResource?.attributes?.metadata?.pending_order_id;
-
-      if (!pendingOrderId) {
-        console.warn('[WEBHOOK] payment.paid but walang pending_order_id sa metadata:', paymentId);
-        return res.status(200).json({ received: true });
-      }
-
-      const pendingOrder = await getPendingOrder(pendingOrderId);
-      if (!pendingOrder) {
-        console.warn('[WEBHOOK] Walang nahanap na pending order para sa:', pendingOrderId);
-        return res.status(200).json({ received: true });
-      }
-
-      // Idempotency guard — pwedeng ma-deliver nang paulit-ulit ang parehong
-      // event ng PayMongo, kaya i-check muna kung na-process na dati.
-      if (pendingOrder.status === 'paid') {
-        console.log('[WEBHOOK] Pending order na ito ay na-process na dati:', pendingOrderId);
-        return res.status(200).json({ received: true, already_processed: true });
-      }
-
-      // 3. DITO lamang natin ginagawa ang TOTOONG order sa database —
-      //    pagkatapos lang ma-confirm ng PayMongo na nabayaran na.
-      //    Dumadaan na ito sa `finalizePendingOrder` (may atomic claim) —
-      //    parehong function na ginagamit ng status-poll fallback sa
-      //    ibaba, kaya hindi madodoble ang order kahit sabay silang tumakbo.
-      const result = await finalizePendingOrder(pendingOrderId, paymentId);
-
-      if (result.created) {
-        console.log('[WEBHOOK] Order created after payment confirmation:', result.order.order_number);
-      } else {
-        console.log('[WEBHOOK] Pending order already being/been processed:', pendingOrderId);
-      }
-    }
-
-    res.status(200).json({ received: true });
-  } catch (error) {
-    // Kung dito babagsak ang paggawa ng order (hal. "Items Error: ..."),
-    // hindi ito makikita ng customer — kaya dito lang ito lalabas. Ibinalik
-    // na ang claim, kaya susubukan ulit ng status-poll fallback.
-    console.error('Paymongo Webhook Error:', error?.stack || error);
-    // 200 pa rin ibalik para hindi tayo bombahin ng retries ng Paymongo dahil
-    // sa sarili nating bug — mag-log lang para ma-follow up.
-    res.status(200).json({ received: true, error: error.message });
-  }
-};
-
-// Tinatawag ito ni Confirm.jsx paulit-ulit (polling) habang naghihintay ng
-// webhook confirmation mula sa PayMongo.
-export const getPendingOrderStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    let pendingOrder = await getPendingOrder(id);
-
-    if (!pendingOrder) {
-      return res.status(404).json({ success: false, message: 'Pending order not found' });
-    }
-
-    // FALLBACK: kung `pending` pa rin habang nagpo-poll ang Confirm.jsx,
-    // hindi natin hinihintay lang ang webhook — direktang itinatanong sa
-    // PayMongo kung bayad na ang checkout session, at kung oo, ginagawa na
-    // ang totoong order dito mismo (parehong `finalizePendingOrder` ng
-    // webhook, may atomic claim kaya walang duplicate). Sa ganitong paraan
-    // gumagana pa rin ang order kahit hindi maabot ng webhook ang backend.
-    if (pendingOrder.status === 'pending' && pendingOrder.paymongo_checkout_session_id) {
-      try {
-        const { paid, paymentId } = await verifyCheckoutSessionPaid(pendingOrder.paymongo_checkout_session_id);
-        if (paid) {
-          console.log('[PENDING STATUS] Payment confirmed via PayMongo lookup, finalizing order for:', id);
-          await finalizePendingOrder(id, paymentId);
-          pendingOrder = (await getPendingOrder(id)) || pendingOrder;
-        }
-      } catch (fallbackError) {
-        // Huwag ibagsak ang polling — susubukan ulit sa susunod na poll.
-        console.error('[PENDING STATUS] Fallback finalize failed:', fallbackError?.stack || fallbackError);
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      status: pendingOrder.status,
-      order: pendingOrder.status === 'paid'
-        ? { id: pendingOrder.result_order_id, order_number: pendingOrder.result_order_number }
-        : null
-    });
-  } catch (error) {
-    console.error('Get Pending Order Status Error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Pre-order Availability Error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to check pickup date availability.' });
   }
 };
 
@@ -366,7 +170,7 @@ export const placeManualPaymentOrder = async (req, res) => {
     if (!proofPath || !proofPath.startsWith('proof_of_transaction/')) {
       throw new Error('Failed to determine the uploaded payment proof path.');
     }
-    const savedOrder = await createDatabaseOrder(orderPayload, null, { url: proofUrl, path: proofPath });
+    const savedOrder = await createDatabaseOrder(orderPayload, { url: proofUrl, path: proofPath });
     return res.status(201).json({ success: true, order: savedOrder });
   } catch (error) {
     if (proofUrl) {

@@ -362,9 +362,9 @@ export function AppProvider({ children }) {
     }
   };
 
-  const verifyOrderPayment = async (id, accepted, reason = '') => {
+  const verifyOrderPayment = async (id, accepted) => {
     const endpoint = `${ORDERS_API_URL}/${id}/payment/${accepted ? 'accept' : 'reject'}`;
-    const res = await apiClient.post(endpoint, accepted ? {} : { reason });
+    const res = await apiClient.post(endpoint, {});
     const updated = res.data?.data;
     setOrders((prev) => prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o)));
     return updated;
