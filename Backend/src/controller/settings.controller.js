@@ -17,7 +17,10 @@ export async function uploadPaymentQr(req, res, next) {
     }
     const data = await savePaymentQr(req.file, req.user?.id);
     res.json({ success: true, data });
-  } catch (error) { next(error); }
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
+    next(error);
+  }
 }
 
 export async function removePaymentQr(_req, res, next) {

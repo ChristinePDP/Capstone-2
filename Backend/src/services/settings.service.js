@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { toWebP } from '../utils/imageToWebP.js';
 
 const BUCKET = 'payment-qr';
 const TABLE = 'payment_settings';
@@ -11,10 +12,10 @@ export async function getPaymentSettings() {
 
 export async function savePaymentQr(file, adminId) {
   const current = await getPaymentSettings();
-  const extension = file.originalname.split('.').pop().toLowerCase();
-  const path = `qr_codes/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
-  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
-    contentType: file.mimetype,
+  const converted = await toWebP(file.buffer, { maxSize: 1600, quality: 85 });
+  const path = `qr_codes/${Date.now()}-${Math.random().toString(36).slice(2)}.webp`;
+  const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, converted.buffer, {
+    contentType: 'image/webp',
     upsert: false,
   });
   if (uploadError) throw uploadError;

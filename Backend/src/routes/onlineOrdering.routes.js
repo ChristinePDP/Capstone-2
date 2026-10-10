@@ -15,7 +15,7 @@ import {
 const router = express.Router();
 
 // I-set up ang multer
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 
 // 2. I-setup ang Rate Limiter (Max 5 requests every 10 minutes per IP)
 const checkoutLimiter = rateLimit({

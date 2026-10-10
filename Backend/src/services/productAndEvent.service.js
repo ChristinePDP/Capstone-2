@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js'; 
+import { toWebP } from '../utils/imageToWebP.js';
 import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
 import { BundleModel } from '../model/bundle.model.js';
@@ -352,13 +353,13 @@ export const deleteDatabaseProduct = async (id) => {
 };
 
 export const uploadImageToProductBucket = async (file) => {
-  const fileExt = file.originalname.split('.').pop();
-  const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+  const converted = await toWebP(file.buffer, { maxSize: 1600, quality: 84 });
+  const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
 
   const { data, error } = await supabase.storage
     .from('product-images')
-    .upload(fileName, file.buffer, {
-      contentType: file.mimetype,
+    .upload(fileName, converted.buffer, {
+      contentType: 'image/webp',
       upsert: false
     });
 

@@ -97,7 +97,7 @@ export const uploadProductImage = async (req, res) => {
     res.status(200).json({ success: true, url: publicUrl });
   } catch (error) {
     console.error('Product Image Upload Error:', error);
-    res.status(500).json({ success: false, message: 'Failed to upload image' });
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to upload image' });
   }
 };
 
@@ -124,7 +124,7 @@ export const uploadInspiration = async (req, res) => {
     res.status(200).json({ success: true, url: publicUrl });
   } catch (error) {
     console.error('Image Upload Error:', error);
-    res.status(500).json({ success: false, message: 'Failed to upload image' });
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to upload image' });
   }
 };
 

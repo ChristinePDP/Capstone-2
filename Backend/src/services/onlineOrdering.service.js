@@ -1,6 +1,7 @@
 // backend/src/services/onlineOrdering.services.js
 import { randomUUID } from 'crypto';
 import { supabase } from '../config/supabase.js'; 
+import { toWebP } from '../utils/imageToWebP.js';
 import { createOrderError } from '../utils/orderError.js';
 import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
@@ -168,20 +169,22 @@ const isTransientStorageError = (error) => {
 const UPLOAD_MAX_ATTEMPTS = 3;
 
 export const uploadImageToBucket = async (file, bucketName = 'inspiration-images', folder = '') => {
-  const fileExt = file.originalname.split('.').pop().toLowerCase();
+  const converted = await toWebP(file.buffer, bucketName === 'payment-assets'
+    ? { maxSize: 1600, quality: 85 }
+    : { maxSize: 1600, quality: 80 });
   let lastError = null;
 
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt += 1) {
     // Bagong filename sa bawat subok — kung natuloy pala ang naunang upload
     // kahit pumalya ang response, hindi ito babangga ("already exists").
-    const objectName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const objectName = `${Date.now()}-${Math.random().toString(36).substring(7)}.webp`;
     const fileName = folder ? `${folder.replace(/\/+$/, '')}/${objectName}` : objectName;
 
     try {
       const { error } = await supabase.storage
         .from(bucketName)
-        .upload(fileName, file.buffer, {
-          contentType: file.mimetype,
+        .upload(fileName, converted.buffer, {
+          contentType: 'image/webp',
           upsert: false
         });
 
