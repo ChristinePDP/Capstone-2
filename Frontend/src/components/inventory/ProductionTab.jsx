@@ -12,6 +12,37 @@ import { normalizeText, normalizeUnit, convertToBase } from '../../utils/unitUti
 // ng product para makita kung sapat ang stock ng ingredients.
 
 const PAGE_SIZE = 20;
+const MANILA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+const getManilaDate = (date = new Date()) => {
+  const parts = MANILA_DATE_FORMATTER.formatToParts(date);
+  const part = type => parts.find(item => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
+
+const parsePickupDate = value => {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : getManilaDate(parsed);
+};
+
+const parsePickupMinutes = value => {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const text = String(value).trim();
+  const match = text.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i)
+    || text.match(/(\d{1,2})\s*(AM|PM)/i);
+  if (!match) return Number.POSITIVE_INFINITY;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || 0);
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === 'PM' && hours < 12) hours += 12;
+  if (meridiem === 'AM' && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+};
 
 const roundQty = (value) => +Number(value || 0).toFixed(4);
 
@@ -73,10 +104,21 @@ const isConfirmedPreOrder = (order = {}) =>
 
 const formatPickup = (value) => {
   if (!value) return 'No pickup date';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime())
-    ? String(value)
-    : d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+  const date = parsePickupDate(value);
+  if (!date) return String(value);
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12)).toLocaleDateString('en-PH', {
+    month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila',
+  });
+};
+
+const formatPickupTime = value => {
+  if (!value) return 'Time not set';
+  const text = String(value).trim();
+  if (/(?:-|–|—|\bto\b)/i.test(text)) return text;
+  const match = text.match(/\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?/i)
+    || text.match(/\d{1,2}\s*(?:AM|PM)/i);
+  return match ? match[0].trim() : String(value);
 };
 
 // Para sa products na "Both" (Pick-up Today + Pre-Order): puwedeng piliin kung
@@ -130,6 +172,8 @@ function PreOrderProduction({ tabBar }) {
   const { show: showToast } = useToast();
 
   const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [specificDate, setSpecificDate] = useState(() => getManilaDate());
   const [page, setPage] = useState(1);
   const [produceTarget, setProduceTarget] = useState(null);
   const [buyTarget, setBuyTarget] = useState(null); // order whose items-to-buy list is open
@@ -203,25 +247,24 @@ function PreOrderProduction({ tabBar }) {
 
         const customer = order.customers?.name || order.customer_name || order.customerName || 'Walk-in';
         const pickup = order.pickup_date ?? order.pickupDate ?? null;
+        const pickupTime = order.pickup_time ?? order.pickupTime ?? null;
 
         return {
           id: order.id,
           number: order.order_number ?? order.orderNumber ?? String(order.id).slice(0, 8),
           customer,
           pickup,
+          pickupTime,
           items,
         };
       })
       .filter(o => o.items.length > 0)
-      // Hidden sort: pinakamalapit na pickup date muna (kasama ang overdue sa
-      // pinakauna). Walang pickup date = pinakahuli. Kapag pareho ang petsa,
-      // sunod ang order number para stable ang pagkakasunod.
       .sort((a, b) => {
-        const ta = a.pickup ? new Date(a.pickup).getTime() : NaN;
-        const tb = b.pickup ? new Date(b.pickup).getTime() : NaN;
-        const da = Number.isNaN(ta) ? Number.POSITIVE_INFINITY : ta;
-        const db = Number.isNaN(tb) ? Number.POSITIVE_INFINITY : tb;
-        if (da !== db) return da < db ? -1 : 1; // iwas NaN sa Infinity - Infinity
+        const da = parsePickupDate(a.pickup) || '9999-99-99';
+        const db = parsePickupDate(b.pickup) || '9999-99-99';
+        if (da !== db) return da.localeCompare(db);
+        const timeOrder = parsePickupMinutes(a.pickupTime) - parsePickupMinutes(b.pickupTime);
+        if (timeOrder) return timeOrder;
         return String(a.number).localeCompare(String(b.number), undefined, { numeric: true });
       });
   }, [orders, recipes, ingredients, materials, productsById]);
@@ -304,8 +347,31 @@ function PreOrderProduction({ tabBar }) {
     }
   };
 
+  const today = getManilaDate();
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  const tomorrowDate = new Date(Date.UTC(todayYear, todayMonth - 1, todayDay + 1, 12));
+  const tomorrow = getManilaDate(tomorrowDate);
+  const countsByDate = evaluated.reduce((counts, order) => {
+    const date = parsePickupDate(order.pickup);
+    if (date) counts[date] = (counts[date] || 0) + 1;
+    return counts;
+  }, {});
+  const todayCount = countsByDate[today] || 0;
+  const tomorrowCount = countsByDate[tomorrow] || 0;
+  const overdueCount = evaluated.filter(order => {
+    const date = parsePickupDate(order.pickup);
+    return date && date < today;
+  }).length;
+  const dateFiltered = evaluated.filter(order => {
+    const date = parsePickupDate(order.pickup);
+    if (dateFilter === 'all') return true;
+    if (dateFilter === 'overdue') return !!date && date < today;
+    if (dateFilter === 'tomorrow') return date === tomorrow;
+    if (dateFilter === 'specific') return date === specificDate;
+    return date === today;
+  });
   const q = search.trim().toLowerCase();
-  const filtered = evaluated.filter(o =>
+  const filtered = dateFiltered.filter(o =>
     !q
     || String(o.number).toLowerCase().includes(q)
     || o.customer.toLowerCase().includes(q)
@@ -315,7 +381,8 @@ function PreOrderProduction({ tabBar }) {
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const readyCount = evaluated.filter(o => !o.needsAttention).length;
+  const readyCount = filtered.filter(o => !o.needsAttention).length;
+  const attentionCount = filtered.length - readyCount;
 
   return (
     <Card>
@@ -329,8 +396,8 @@ function PreOrderProduction({ tabBar }) {
       {tabBar}
 
       <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="relative max-w-xs w-full">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full min-w-[220px] flex-[1_1_320px] max-w-xl">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
             <input
               type="text"
@@ -340,12 +407,36 @@ function PreOrderProduction({ tabBar }) {
               className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none bg-white"
             />
           </div>
-          <div className="flex flex-wrap gap-2 text-[11px] font-bold">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              ['all', 'All'],
+              ['today', `Today (${todayCount})`],
+              ['tomorrow', `Tomorrow (${tomorrowCount})`],
+              ['overdue', `Overdue (${overdueCount})`],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setDateFilter(key); setPage(1); }}
+                className={`px-2.5 py-1.5 text-xs font-semibold border rounded-lg whitespace-nowrap transition-colors ${dateFilter === key ? 'bg-brand-700 text-white border-brand-700' : 'bg-white text-brand-600 border-brand-200 hover:bg-brand-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+            <input
+              type="date"
+              value={specificDate}
+              aria-label="Filter pre-orders by pickup date"
+              onChange={e => { setSpecificDate(e.target.value); setDateFilter('specific'); setPage(1); }}
+              className={`px-2 py-1.5 text-xs border rounded-lg bg-white text-brand-700 outline-none ${dateFilter === 'specific' ? 'border-brand-700' : 'border-brand-200'}`}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
             {readyCount > 0 && (
               <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{readyCount} ready to produce</span>
             )}
-            {evaluated.length - readyCount > 0 && (
-              <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100">{evaluated.length - readyCount} need attention</span>
+            {attentionCount > 0 && (
+              <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100">{attentionCount} need attention</span>
             )}
           </div>
         </div>
@@ -371,7 +462,7 @@ function PreOrderProduction({ tabBar }) {
                     title="Pickup date of this pre-order"
                     className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded-md"
                   >
-                    <CalendarDays size={10} /> Pickup: {formatPickup(order.pickup)}
+                    <CalendarDays size={10} /> Pickup: {formatPickup(order.pickup)} · {formatPickupTime(order.pickupTime)}
                   </span>
 
                   <ul className="space-y-0.5">
@@ -444,7 +535,15 @@ function PreOrderProduction({ tabBar }) {
         )}
 
         {!isLoading && !paged.length && (
-          <div className="text-center py-8 text-brand-300">No confirmed pre-orders to produce.</div>
+          <div className="text-center py-8 text-brand-300">
+            {search.trim()
+              ? 'Walang pre-order na tumutugma sa paghahanap.'
+              : dateFilter === 'today' || dateFilter === 'tomorrow' || dateFilter === 'specific'
+              ? 'Walang pre-order na i-pi-pickup sa petsang ito.'
+              : dateFilter === 'overdue'
+                ? 'Walang overdue na pre-order na kailangang i-produce.'
+                : 'No confirmed pre-orders to produce.'}
+          </div>
         )}
       </div>
 
