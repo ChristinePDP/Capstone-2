@@ -36,12 +36,16 @@ app.use(cors({
 app.use(express.json()); 
 app.use(cookieParser());
 
-app.use((req, res, next) => { 
-  const timestamp = new Date().toISOString();
-  console.log(` ${req.method} ${req.url}`); 
-  if (req.method === 'POST' || req.method === 'PATCH') { 
-    console.log('Body:', JSON.stringify(req.body)); 
-  }
+// FIXED: dating nagpi-print ng req.body (kasama ang passwords, OTPs, at
+// customer/payment data) sa logs. Metadata lang ang nilolog ngayon:
+// method, path (walang query string), status code, at tagal.
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(
+      `${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`
+    );
+  });
   next();
 });
 
