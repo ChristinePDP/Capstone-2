@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Plus, Trash2, CheckCircle2, Search, CalendarDays, AlertTriangle, ShoppingCart } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, Search, CalendarDays, AlertTriangle, ShoppingCart, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Card, CardSkeleton, ConfirmModal } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
@@ -12,6 +12,7 @@ import { normalizeText, normalizeUnit, convertToBase } from '../../utils/unitUti
 // ng product para makita kung sapat ang stock ng ingredients.
 
 const PAGE_SIZE = 20;
+
 const MANILA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
 });
@@ -177,6 +178,8 @@ function PreOrderProduction({ tabBar }) {
   const [page, setPage] = useState(1);
   const [produceTarget, setProduceTarget] = useState(null);
   const [buyTarget, setBuyTarget] = useState(null); // order whose items-to-buy list is open
+  const [drawer, setDrawer] = useState(null); // { id } — in-card drawer for the full item list
+  const [attentionTarget, setAttentionTarget] = useState(null); // order whose issues modal is open
   const [expenseRows, setExpenseRows] = useState([{ label: '', amount: '' }]);
   const [expenseErrors, setExpenseErrors] = useState({});
   const [isProducing, setIsProducing] = useState(false);
@@ -278,6 +281,68 @@ function PreOrderProduction({ tabBar }) {
   const usesStock = (order, it) => !!it.canUseStock && sources[sourceKey(order.id, it.key)] === 'stock';
   const setSource = (order, it, value) =>
     setSources(prev => ({ ...prev, [sourceKey(order.id, it.key)]: value }));
+
+  const renderItemRow = (order, it, compact = false) => (
+    <li key={it.key} className="text-xs text-brand-800">
+      <div className="flex items-start justify-between gap-1.5">
+        <span
+          className={`min-w-0 flex-1 ${compact ? 'truncate' : 'break-words [overflow-wrap:anywhere]'}`}
+          title={compact ? it.productName : undefined}
+        >
+          {it.productName}
+        </span>
+        <span className="font-bold shrink-0">×{it.qty}</span>
+      </div>
+      {!compact && it.canUseStock && (
+        <div
+          className="mt-1 flex rounded-md overflow-hidden border border-brand-200 text-[10px] font-bold"
+          title="This product is also sold as Pick-up Today. Choose where this order comes from."
+        >
+          <button
+            type="button"
+            onClick={() => setSource(order, it, 'fresh')}
+            className={`flex-1 py-1 transition-colors ${!usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
+          >
+            Produce new
+          </button>
+          <button
+            type="button"
+            onClick={() => setSource(order, it, 'stock')}
+            className={`flex-1 py-1 border-l border-brand-200 transition-colors ${usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
+          >
+            From stock ({it.stockQty})
+          </button>
+        </div>
+      )}
+    </li>
+  );
+
+  const renderIssues = (order) => (
+    <div className="space-y-2">
+      {order.stockIssues.length > 0 && (
+        <div className="rounded-xl border border-red-100 bg-red-50/60 px-4 py-3 text-sm text-red-700 break-words">
+          {renderStockIssue(order)}
+        </div>
+      )}
+      {order.missing.length > 0 && (
+        <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3 text-sm text-amber-700 break-words">
+          {renderMissing(order)}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderStockIssue = (order) => (
+    <>
+      <span className="font-bold">Not enough stock:</span> {order.stockIssues.map(s => `${s.productName} (need ${s.needed}, have ${s.available})`).join(', ')}. Switch to "Produce new" or restock.
+    </>
+  );
+
+  const renderMissing = (order) => (
+    <>
+      <span className="font-bold">No formula ({order.missing.length}):</span> {order.missing.map(m => m.productName).join(', ')}. Add it in Production Formula.
+    </>
+  );
 
   const openProduce = (order) => {
     setProduceTarget(order);
@@ -446,71 +511,42 @@ function PreOrderProduction({ tabBar }) {
         {isLoading && <CardSkeleton count={3} />}
 
         {!isLoading && paged.length > 0 && (
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 min-w-0 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {paged.map(order => (
               <div
                 key={order.id}
-                className={`flex flex-col border rounded-xl bg-white shadow-sm overflow-hidden ${order.needsAttention ? 'border-red-200' : 'border-emerald-200'}`}
+                className={`relative flex flex-col min-w-0 w-full max-w-full h-[210px] border rounded-xl bg-white shadow-sm overflow-hidden ${order.needsAttention ? 'border-red-200' : 'border-emerald-200'}`}
               >
-                <div className="p-3 space-y-2 flex-1">
-                  <div className="min-w-0">
+                <div className="p-3 flex flex-col gap-2 flex-1 min-h-0 min-w-0">
+                  <div className="min-w-0 shrink-0">
                     <p className="font-bold text-brand-900 text-sm truncate">{order.number}</p>
                     <p className="text-[11px] text-brand-400 truncate">{order.customer}</p>
                   </div>
 
                   <span
                     title="Pickup date of this pre-order"
-                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded-md"
+                    className="inline-flex self-start shrink-0 max-w-full items-start gap-1 text-[10px] font-semibold text-brand-600 bg-brand-50 border border-brand-100 px-1.5 py-0.5 rounded-md break-words"
                   >
-                    <CalendarDays size={10} /> Pickup: {formatPickup(order.pickup)} · {formatPickupTime(order.pickupTime)}
+                    <CalendarDays size={10} className="shrink-0 mt-0.5" /> <span className="min-w-0">Pickup: {formatPickup(order.pickup)} · {formatPickupTime(order.pickupTime)}</span>
                   </span>
 
-                  <ul className="space-y-0.5">
-                    {order.items.map(it => (
-                      <li key={it.key} className="text-xs text-brand-800">
-                        <div className="flex items-start justify-between gap-1.5">
-                          <span className="min-w-0 break-words">{it.productName}</span>
-                          <span className="font-bold shrink-0">×{it.qty}</span>
-                        </div>
-                        {it.canUseStock && (
-                          <div
-                            className="mt-1 flex rounded-md overflow-hidden border border-brand-200 text-[10px] font-bold"
-                            title="This product is also sold as Pick-up Today. Choose where this order comes from."
-                          >
-                            <button
-                              type="button"
-                              onClick={() => setSource(order, it, 'fresh')}
-                              className={`flex-1 py-1 transition-colors ${!usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
-                            >
-                              Produce new
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSource(order, it, 'stock')}
-                              className={`flex-1 py-1 border-l border-brand-200 transition-colors ${usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
-                            >
-                              From stock ({it.stockQty})
-                            </button>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-
-                  {order.stockIssues.length > 0 && (
-                    <p className="pt-2 border-t border-red-100 text-[11px] text-red-700">
-                      <span className="font-bold">Not enough stock:</span> {order.stockIssues.map(s => `${s.productName} (need ${s.needed}, have ${s.available})`).join(', ')}. Switch to "Produce new" or restock.
-                    </p>
-                  )}
-
-                  {order.missing.length > 0 && (
-                    <p className="pt-2 border-t border-red-100 text-[11px] text-amber-700">
-                      <span className="font-bold">No formula:</span> {order.missing.map(m => m.productName).join(', ')}. Add it in Production Formula.
-                    </p>
-                  )}
+                  <div className="flex-1 min-h-0 overflow-hidden space-y-2">
+                    <ul className="space-y-0.5">
+                      {order.items.slice(0, 1).map(it => renderItemRow(order, it, true))}
+                    </ul>
+                    {(order.items.length > 1 || order.items.some(it => it.canUseStock)) && (
+                      <button
+                        type="button"
+                        onClick={() => setDrawer({ id: order.id })}
+                        className="text-[11px] font-bold text-brand-600 underline underline-offset-2"
+                      >
+                        {order.items.length > 1 ? `See more (+${order.items.length - 1})` : 'See more'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="px-3 pb-3">
+                <div className="px-3 pb-3 shrink-0">
                   {order.shortages.length > 0 ? (
                     <button
                       type="button"
@@ -520,15 +556,44 @@ function PreOrderProduction({ tabBar }) {
                       <AlertTriangle size={11} /> View items to buy ({order.shortages.length})
                     </button>
                   ) : order.needsAttention ? (
-                    <div className="flex items-center justify-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 border border-red-100 py-1.5 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setAttentionTarget(order)}
+                      className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 py-1.5 rounded-lg transition-colors"
+                    >
                       <AlertTriangle size={11} /> Needs attention
-                    </div>
+                    </button>
                   ) : (
                     <Button size="sm" variant="primary" className="w-full justify-center bg-emerald-600 border-none" onClick={() => openProduce(order)}>
                       <CheckCircle2 size={12} className="mr-1" /> Produce
                     </Button>
                   )}
                 </div>
+
+                {drawer?.id === order.id && (
+                  <div className="absolute inset-0 z-10 flex flex-col bg-white">
+                    <div className="flex items-start justify-between gap-2 px-3 pt-3 pb-2 border-b border-brand-100 shrink-0">
+                      <div className="min-w-0">
+                        <p className="font-bold text-brand-900 text-sm truncate">{order.number}</p>
+                        <p className="text-[11px] text-brand-400">Order details</p>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Close"
+                        onClick={() => setDrawer(null)}
+                        className="p-1 -mr-1 rounded-md text-brand-500 hover:bg-brand-50"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 pb-3 space-y-2">
+                      <ul className="space-y-1">
+                        {order.items.map(it => renderItemRow(order, it))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -558,6 +623,21 @@ function PreOrderProduction({ tabBar }) {
       )}
 
       <Modal
+        isOpen={!!attentionTarget}
+        onClose={() => setAttentionTarget(null)}
+        title={`Needs attention — ${attentionTarget?.number || ''}`}
+        subtitle="Resolve these before producing this order."
+        size="md"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setAttentionTarget(null)}>Close</Button>
+          </div>
+        }
+      >
+        {attentionTarget && renderIssues(attentionTarget)}
+      </Modal>
+
+      <Modal
         isOpen={!!buyTarget}
         onClose={() => setBuyTarget(null)}
         title={`Items to buy — ${buyTarget?.number || ''}`}
@@ -569,6 +649,9 @@ function PreOrderProduction({ tabBar }) {
           </div>
         }
       >
+        {buyTarget && (buyTarget.stockIssues.length > 0 || buyTarget.missing.length > 0) && (
+          <div className="mb-3">{renderIssues(buyTarget)}</div>
+        )}
         {buyTarget && (
           <ul className="divide-y divide-gray-100 border border-red-100 rounded-xl overflow-hidden max-h-[60vh] overflow-y-auto">
             {buyTarget.shortages.map((item, idx) => (

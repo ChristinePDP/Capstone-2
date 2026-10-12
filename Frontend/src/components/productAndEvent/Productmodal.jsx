@@ -20,6 +20,7 @@ const BLANK_PRODUCT = {
   eventTags: [],
   sourcingType: 'partner',
   partnerCost: '',
+  isActive: true,
 };
 
 const FIELD_TYPES = ['Text', 'Textarea', 'Number', 'Select', 'Multi-select', 'Multi-image'];
@@ -273,6 +274,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     eventTags: product.event_tags || [],
     sourcingType: product.sourcing_type || 'own',
     partnerCost: product.partner_cost ?? '',
+    isActive: product.is_active !== false,
   } : BLANK_PRODUCT;
 
   const [form, setForm] = useState(initialFormState);
@@ -314,6 +316,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         eventTags: product.event_tags || [],
         sourcingType: product.sourcing_type || 'own',
         partnerCost: product.partner_cost ?? '',
+        isActive: product.is_active !== false,
       } : BLANK_PRODUCT);
       setDailyLimitEnabled(dailyLimit > 0);
       
@@ -467,6 +470,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             // categories they are reset so no stale value is kept.
             sourcing_type: isCelebration ? form.sourcingType : null,
             partner_cost: isPartner ? Number(form.partnerCost) : null,
+            is_active: form.isActive,
         };
 
         const saveUrl = isEditing
@@ -528,7 +532,37 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
       }
     >
       <div className="w-full flex flex-col gap-3 sm:gap-6 lg:gap-8">
-        
+
+        {/* Active / Inactive toggle — nasa pinakataas para madaling makita.
+            Inactive = nananatili sa Product Management pero HINDI lalabas
+            sa POS at sa online menu. */}
+        {isEditing && (
+          <div className={`flex items-center justify-between gap-4 rounded-2xl border p-3 sm:p-4 transition-colors ${
+            form.isActive ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-300 bg-amber-50'
+          }`}>
+            <div className="min-w-0">
+              <p className={`text-xs font-bold uppercase tracking-wider ${form.isActive ? 'text-emerald-800' : 'text-amber-800'}`}>
+                {form.isActive ? 'Active' : 'Inactive'}
+              </p>
+              <p className={`text-[11px] mt-0.5 ${form.isActive ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {form.isActive
+                  ? 'This product is visible in the POS and online menu.'
+                  : 'Hidden from the POS and online menu. You can reactivate it anytime.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.isActive}
+              aria-label="Toggle product active status"
+              onClick={() => handleChange('isActive', !form.isActive)}
+              className={`relative shrink-0 w-12 h-7 rounded-full transition-colors ${form.isActive ? 'bg-emerald-600' : 'bg-[#C9BDB5]'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${form.isActive ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
+        )}
+
         <div className="flex flex-col gap-3 sm:gap-6 lg:gap-8">
           <ProductDetailsForm
             ref={detailsCardRef}

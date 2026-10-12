@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X } from 'lucide-react';
+import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
@@ -64,6 +64,129 @@ function FormSelect({ label, required, error, hint, className = '', children, ..
       >
         {children}
       </select>
+    </FieldShell>
+  );
+}
+
+// Select na may search (dropdown na may "Type to search..." sa taas ng listahan).
+// options: [{ value, label }]
+function SearchableSelect({
+  label, required, error, hint, value, options, onChange,
+  placeholder = '— Select —', searchPlaceholder = 'Type to search...', emptyText = 'No results found',
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeIdx, setActiveIdx] = useState(0);
+  const wrapRef = useRef(null);
+  const searchRef = useRef(null);
+  const listRef = useRef(null);
+
+  const selected = options.find(o => o.value === value);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  const close = () => { setOpen(false); setQuery(''); };
+  const choose = (opt) => { onChange(opt.value); close(); };
+
+  // click sa labas = isara
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) close(); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  // pagbukas: i-start sa napiling item
+  useEffect(() => {
+    if (!open) return;
+    const idx = options.findIndex(o => o.value === value);
+    setActiveIdx(idx >= 0 ? idx : 0);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // balik sa unang resulta kapag nagbago ang search
+  useEffect(() => { setActiveIdx(0); }, [query]);
+
+  // panatilihing kita ang active item habang nag-a-arrow key
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [activeIdx, open]);
+
+  const onKeyDown = (e) => {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); }
+      return;
+    }
+    if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    else if (e.key === 'Tab') close();
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, filtered.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (filtered[activeIdx]) choose(filtered[activeIdx]); }
+  };
+
+  return (
+    <FieldShell label={label} required={required} error={error} hint={hint}>
+      <div ref={wrapRef} className="relative" onKeyDown={onKeyDown}>
+        <div
+          className={`w-full flex items-center gap-2 border rounded-xl px-3 py-2.5 text-xs bg-white transition-colors cursor-text ${error ? 'border-red-500' : open ? 'border-[#5A453C]' : 'border-[#DED4CC]'}`}
+          onClick={() => { setOpen(true); searchRef.current?.focus(); }}
+        >
+          <input
+            ref={searchRef}
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-haspopup="listbox"
+            aria-autocomplete="list"
+            aria-invalid={!!error}
+            data-invalid={error ? 'true' : undefined}
+            autoComplete="off"
+            value={open ? query : (selected ? selected.label : '')}
+            onFocus={() => setOpen(true)}
+            onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+            placeholder={open && selected ? selected.label : (open ? searchPlaceholder : placeholder)}
+            className={`min-w-0 flex-1 truncate text-xs outline-none bg-transparent ${selected && !open ? 'text-[#3B1F0A]' : 'text-[#3B1F0A]'} ${open && selected ? 'placeholder:text-[#3B1F0A]' : 'placeholder:text-[#8A7264]'}`}
+          />
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={open ? 'Close list' : 'Open list'}
+            onMouseDown={e => e.preventDefault()}
+            onClick={e => { e.stopPropagation(); if (open) close(); else { setOpen(true); searchRef.current?.focus(); } }}
+            className="shrink-0 text-[#8A7264]"
+          >
+            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white border border-[#DED4CC] rounded-xl shadow-lg overflow-hidden">
+            <ul ref={listRef} role="listbox" className="max-h-56 overflow-y-auto py-1">
+              {filtered.length === 0 ? (
+                <li className="px-3.5 py-3 text-xs text-[#8A7264] text-center">{emptyText}</li>
+              ) : filtered.map((opt, idx) => {
+                const isSel = opt.value === value;
+                return (
+                  <li
+                    key={`${opt.value}-${idx}`}
+                    role="option"
+                    aria-selected={isSel}
+                    data-active={idx === activeIdx ? 'true' : undefined}
+                    onMouseEnter={() => setActiveIdx(idx)}
+                    onClick={() => choose(opt)}
+                    className={`flex items-center justify-between gap-2 px-3.5 py-2.5 text-xs cursor-pointer ${idx === activeIdx ? 'bg-brand-50' : ''} ${isSel ? 'font-bold text-[#3B1F0A]' : 'text-[#6B5648]'}`}
+                  >
+                    <span className="min-w-0 break-words">{opt.label}</span>
+                    {isSel && <Check size={13} className="shrink-0 text-[#8A7264]" />}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
     </FieldShell>
   );
 }
@@ -667,22 +790,19 @@ export default function WasteTab() {
 
           {logType === 'ingredient' && (
             <div className="space-y-6">
-              <FormSelect
+              <SearchableSelect
                 label="Select Ingredient"
                 required
                 error={formErrors.item}
+                placeholder="— Select an ingredient —"
                 value={ingName}
-                onChange={e => {
-                  const matched = ingredients.find(i => i.name === e.target.value);
-                  setIngName(e.target.value);
+                options={ingredients.map(i => ({ value: i.name, label: `${i.name} (In stock: ${i.stock} ${i.unit})` }))}
+                onChange={val => {
+                  const matched = ingredients.find(i => i.name === val);
+                  setIngName(val);
                   if (matched) setIngUnit(matched.unit);
                 }}
-              >
-                <option value="">— Select an ingredient —</option>
-                {ingredients.map(i => (
-                  <option key={i.id} value={i.name}>{i.name} (In stock: {i.stock} {i.unit})</option>
-                ))}
-              </FormSelect>
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
                 <FormInput
                   label="Quantity Lost"
@@ -704,22 +824,19 @@ export default function WasteTab() {
 
           {logType === 'material' && (
             <div className="space-y-6">
-              <FormSelect
+              <SearchableSelect
                 label="Select Product Material"
                 required
                 error={formErrors.item}
+                placeholder="— Select a product material —"
                 value={matName}
-                onChange={e => {
-                  const matched = productMaterials.find(m => m.name === e.target.value);
-                  setMatName(e.target.value);
+                options={productMaterials.map(m => ({ value: m.name, label: `${m.name} (In stock: ${m.stock} ${m.unit})` }))}
+                onChange={val => {
+                  const matched = productMaterials.find(m => m.name === val);
+                  setMatName(val);
                   if (matched) setMatUnit(matched.unit);
                 }}
-              >
-                <option value="">— Select a product material —</option>
-                {productMaterials.map(m => (
-                  <option key={m.id} value={m.name}>{m.name} (In stock: {m.stock} {m.unit})</option>
-                ))}
-              </FormSelect>
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
                 <FormInput
                   label="Quantity Lost"
@@ -741,20 +858,17 @@ export default function WasteTab() {
 
           {logType === 'product' && (
             <div className="space-y-6">
-              <FormSelect
+              <SearchableSelect
                 label="Select Product"
                 required
                 error={formErrors.item}
+                placeholder="— Select a product —"
                 value={productName}
-                onChange={e => {
-                  setProductName(e.target.value); setProductQty(''); setProductUnit('pcs');
+                options={products.filter(p => p.stock > 0).map(p => ({ value: p.name, label: `${p.name} (Current Stock: ${p.stock} pcs)` }))}
+                onChange={val => {
+                  setProductName(val); setProductQty(''); setProductUnit('pcs');
                 }}
-              >
-                <option value="">— Select a product —</option>
-                {products.filter(p => p.stock > 0).map(p => (
-                  <option key={p.id} value={p.name}>{p.name} (Current Stock: {p.stock} pcs)</option>
-                ))}
-              </FormSelect>
+              />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-6">
                 <FormInput
                   label="Quantity"

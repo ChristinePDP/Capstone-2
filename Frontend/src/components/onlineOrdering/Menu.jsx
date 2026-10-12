@@ -1,5 +1,5 @@
 // src/components/onlineOrdering/Menu.jsx
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
@@ -46,6 +46,74 @@ function EmptyCategoryNotice({ category }) {
 // Builds "Product A (Option, Option) + Product B" text for a bundle —
 // same logic as the admin Promo Bundles card.
 // ─────────────────────────────────────────────────────────────
+// Description na naka-clamp sa `lines`. Lalabas lang ang "See more" kapag talagang
+// putol ang text (sinusukat). Naka-overlay ito sa dulo ng huling line kaya HINDI
+// nagdadagdag ng taas -> hindi nagbabago ang laki ng card.
+function ClampedDescription({ text, lines = 2, onMore, className = '' }) {
+  const ref = useRef(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setOverflowing(el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, lines]);
+
+  if (!text) return null;
+
+  return (
+    <div className={`relative ${className}`}>
+      <p
+        ref={ref}
+        className="break-words"
+        style={{ display: '-webkit-box', WebkitLineClamp: lines, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+      >
+        {text}
+      </p>
+      {overflowing && (
+        <button
+          type="button"
+          onClick={onMore}
+          className="absolute bottom-0 right-0 pl-6 font-semibold text-[#3B1F0A] underline underline-offset-2 bg-[linear-gradient(to_left,#fff_65%,rgba(255,255,255,0))]"
+        >
+          See more
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Drawer sa loob mismo ng card (absolute, kaya hindi nag-a-adjust ang card).
+// Nananatili ang image; pinapalitan lang nito ang text area (name, description,
+// price, button) ng buong description, at nag-i-scroll kung hindi pa rin kasya.
+// Ang X ang pansara.
+function CardDetailsDrawer({ description, onClose }) {
+  return (
+    <div className="absolute inset-0 z-30 bg-white">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute top-2 right-2 z-10 p-1.5 rounded-full text-[#8A7264] hover:text-[#3B1F0A] hover:bg-[#F5EFEB] transition-colors"
+      >
+        <X size={15} />
+      </button>
+      <div className="absolute inset-0 overflow-y-auto p-3 sm:p-4">
+        {/* Float spacer: umiiwas lang ang text sa X sa unang mga line, buo na ang lapad sa ibaba */}
+        <div aria-hidden="true" className="float-right w-7 h-7 ml-1" />
+        {description && (
+          <p className="text-[11px] sm:text-xs text-[#8A7264] leading-relaxed whitespace-pre-line break-words">{description}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function getBundleDescription(bundle) {
   const products = bundle.products || [];
   const bundleOptions = bundle.bundle_options || {};
@@ -1367,6 +1435,7 @@ export default function Menu({ cart, setCart }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [modal, setModal] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [detailsId, setDetailsId] = useState(null); // product card na naka-open ang See more drawer
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [rawProducts, setRawProducts] = useState([]);
   const [rawBundles, setRawBundles] = useState([]);
@@ -1834,27 +1903,27 @@ export default function Menu({ cart, setCart }) {
                       </button>
                     )}
                   </div>
-                  <div className="p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
+                  <div className="relative p-3 sm:p-4 lg:p-3 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
                     <div className="flex-1 mb-2">
                       <h3 className="font-bold text-xs sm:text-sm lg:text-xs text-[#3B1F0A] leading-snug line-clamp-2">{p.name}</h3>
 
                       {p.type === 'bundle' && (
-                        <p
-                          className="text-[10px] sm:text-[11px] text-[#8A7264] truncate mt-0.5"
-                          title={getBundleDescription(p)}
-                        >
-                          {getBundleDescription(p)}
-                        </p>
+                        <ClampedDescription
+                          text={getBundleDescription(p)}
+                          lines={1}
+                          className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug mt-0.5"
+                          onMore={() => setDetailsId(p.id)}
+                        />
                       )}
 
                       {inclusionText && (
-                        <p
-                          className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug line-clamp-2 mt-1"
-                          title={inclusionText}
-                        >
-                          {inclusionText}
-                        </p>
+                        <ClampedDescription
+                          text={inclusionText}
+                          lines={2}
+                          className="text-[10px] sm:text-[11px] text-[#8A7264] leading-snug mt-1"
+                          onMore={() => setDetailsId(p.id)}
+                        />
                       )}
                     </div>
 
@@ -1883,6 +1952,13 @@ export default function Menu({ cart, setCart }) {
                     >
                       {isSoldOut ? 'Out of Stock' : 'Add to Cart'}
                     </button>
+
+                    {detailsId === p.id && (
+                      <CardDetailsDrawer
+                        description={p.type === 'bundle' ? getBundleDescription(p) : inclusionText}
+                        onClose={() => setDetailsId(null)}
+                      />
+                    )}
                   </div>
                 </div>
               );
