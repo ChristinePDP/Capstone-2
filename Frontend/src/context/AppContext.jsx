@@ -167,12 +167,22 @@ export function AppProvider({ children }) {
           estimatedCost: Number(recipe.estimated_cost ?? 0),
           yield: Number(recipe.yield_quantity ?? 0),
           yieldUnit: recipe.yield_unit || 'pcs',
-          ingredients: (recipe.recipe_ingredients || []).map(ri => ({
-            name: ri.item_name,
-            qty: Number(ri.quantity ?? 0),
-            unit: ri.unit,
-            itemType: ri.item_type,
-          })),
+          ingredients: (recipe.recipe_ingredients || []).map(ri => {
+            const linkedInventoryItem = ri.raw_ingredient_id
+              ? normalizedIngredients.find(item => item.id === ri.raw_ingredient_id)
+              : ri.material_id
+                ? normalizedMaterials.find(item => item.id === ri.material_id)
+                : null;
+            return {
+              name: linkedInventoryItem?.name || ri.item_name,
+              qty: Number(ri.quantity ?? 0),
+              unit: ri.unit,
+              itemType: ri.item_type,
+              rawIngredientId: ri.raw_ingredient_id || null,
+              materialId: ri.material_id || null,
+              inventoryItemId: ri.raw_ingredient_id || ri.material_id || null,
+            };
+          }),
         });
       });
 
@@ -525,9 +535,9 @@ export function AppProvider({ children }) {
   };
 
   // ── Inventory History (restock / production / waste trail) ────
-  const fetchInventoryHistory = useCallback(async (itemName, itemType) => {
+  const fetchInventoryHistory = useCallback(async (itemName, itemType, itemId) => {
     try {
-      const res = await apiClient.get('/logs', { params: { item_name: itemName, item_type: itemType } });
+      const res = await apiClient.get('/logs', { params: { item_name: itemName, item_type: itemType, item_id: itemId } });
       return res.data?.data || [];
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to fetch inventory history'), { cause: err });

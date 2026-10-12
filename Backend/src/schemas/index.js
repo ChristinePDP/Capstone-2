@@ -146,9 +146,14 @@ const RestockSchema = z.object({
 const RecipeIngredientSchema = z.object({
   item_type: z.enum(['raw', 'material']),
   item_name: z.string().min(1),
+  raw_ingredient_id: z.string().uuid().nullable().optional(),
+  material_id: z.string().uuid().nullable().optional(),
   quantity:  z.coerce.number().positive(),
   unit:      z.string().min(1),
-});
+}).refine((item) => {
+  if (item.item_type === 'raw') return !item.material_id || item.material_id === null;
+  return !item.raw_ingredient_id || item.raw_ingredient_id === null;
+}, { message: 'Inventory ID must match item_type.' });
 
 const CreateRecipeSchema = z.object({
   product_id:     z.string().uuid(),
@@ -173,6 +178,8 @@ const ConfirmBatchSchema = z.object({
 const WasteLogSchema = z.object({
   waste_type: z.enum(['ingredient', 'material', 'product']),
   item_name:  z.string().min(1),
+  raw_ingredient_id: z.string().uuid().nullable().optional(),
+  material_id: z.string().uuid().nullable().optional(),
   quantity:   z.coerce.number().positive(),
   unit:       z.string().min(1),
   reason:     z.string().min(1),

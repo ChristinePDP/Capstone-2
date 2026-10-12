@@ -17,7 +17,7 @@ const formatDT = (iso) => {
 const PAGE_SIZE = 5;
 
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
-export function RestockHistoryPanel({ itemName, itemType }) {
+export function RestockHistoryPanel({ itemName, itemType, itemId }) {
   const { fetchInventoryHistory, voidRestockLog } = useApp() || {};
   const { show } = useToast();
   const [logs, setLogs] = useState([]);
@@ -44,7 +44,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
     setLoading(true);
     setErrorMsg('');
     try {
-      const data = await fetchRef.current(itemName, itemType);
+      const data = await fetchRef.current(itemName, itemType, itemId);
       const restocksOnly = (Array.isArray(data) ? data : [])
         .filter(log => log.action === 'Restock');
       setLogs(restocksOnly);
@@ -64,7 +64,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
       setLoading(true);
       setErrorMsg('');
       try {
-        const data = await fetchRef.current(itemName, itemType);
+      const data = await fetchRef.current(itemName, itemType, itemId);
         const restocksOnly = (Array.isArray(data) ? data : [])
           .filter(log => log.action === 'Restock');
         if (!cancelled) {
@@ -85,7 +85,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
 
     load();
     return () => { cancelled = true; };
-  }, [itemName, itemType]);
+  }, [itemName, itemType, itemId]);
 
   const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -277,7 +277,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
                         )}
                       </div>
                       <div className="text-right shrink-0">
-                        <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</p>
+                        <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity} {log.unit}</p>
                         {log.cost > 0 && <p className="text-[11px] text-brand-500">₱{Number(log.cost).toFixed(2)}</p>}
                       </div>
                     </div>
@@ -336,7 +336,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
                       <td className="px-3 py-2 text-[11px] font-medium text-amber-600 whitespace-nowrap">
                         {log.expiration_date ? new Date(log.expiration_date).toLocaleDateString('en-PH') : '—'}
                       </td>
-                      <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity}</td>
+                      <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity} {log.unit}</td>
                       <td className="px-3 py-2 text-right text-xs text-brand-600 font-medium">{log.cost > 0 ? `₱${Number(log.cost).toFixed(2)}` : '—'}</td>
                     </tr>
                   );
@@ -355,7 +355,7 @@ export function RestockHistoryPanel({ itemName, itemType }) {
         onClose={() => setConfirmLog(null)}
         onConfirm={() => runVoid(confirmLog, false)}
         title="I-void ang restock na ito?"
-        message={confirmLog ? `Ibabawas ang ${confirmLog.quantity} na dati'y naidagdag sa "${itemName}". Mananatili ang record bilang audit trail, pero babalik ang stock sa dati.` : ''}
+        message={confirmLog ? `Ibabawas ang ${confirmLog.quantity} ${confirmLog.unit || ''} na dati'y naidagdag sa "${itemName}". Mananatili ang record bilang audit trail, pero babalik ang stock sa dati.` : ''}
         confirmLabel={voidingId ? 'Inaalis...' : 'Oo, i-void'}
         variant="danger"
       />

@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
-import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS } from '../../utils/unitUtils';
+import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
@@ -38,7 +38,6 @@ function FieldShell({ label, required, error, hint, children }) {
     </div>
   );
 }
-
 function FormInput({ label, required, error, hint, suffix, className = '', ...props }) {
   return (
     <FieldShell label={label} required={required} error={error} hint={hint}>
@@ -56,7 +55,6 @@ function FormInput({ label, required, error, hint, suffix, className = '', ...pr
     </FieldShell>
   );
 }
-
 function FormSelect({ label, required, error, hint, className = '', children, ...props }) {
   return (
     <FieldShell label={label} required={required} error={error} hint={hint}>
@@ -123,9 +121,9 @@ export default function IngredientsTab() {
     }
 
     if (payload.detailsPayload && payload.restockPayload) {
-      showToast(`Details updated and +${payload.addedQty} ${currentEditIng.unit} added to ${currentEditIng.name}.`);
+      showToast(`Details updated and +${payload.addedQty} ${payload.itemUnit || currentEditIng.unit} added to ${payload.itemName || currentEditIng.name}.`);
     } else if (payload.restockPayload) {
-      showToast(`+${payload.addedQty} ${currentEditIng.unit} added to ${currentEditIng.name}.`);
+      showToast(`+${payload.addedQty} ${payload.itemUnit || currentEditIng.unit} added to ${payload.itemName || currentEditIng.name}.`);
     } else if (payload.detailsPayload) {
       showToast('Ingredient details updated.');
     }
@@ -297,6 +295,9 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const [cost, setCost]               = useState('');
   const [expiry, setExpiry]           = useState('');
   const [detailsCost, setDetailsCost] = useState(String(ingredient?.costPerUnit ?? ''));
+  const [savedDetails, setSavedDetails] = useState({ name: ingredient?.name ?? '', unit: ingredient?.unit ?? 'kg', min: ingredient?.min ?? '', costPerUnit: ingredient?.costPerUnit ?? '' });
+  const [currentStock, setCurrentStock] = useState(Number(ingredient?.stock ?? 0));
+  const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [isSaving, setIsSaving]             = useState(false);
@@ -317,10 +318,9 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const detailsCostError = getCostError(detailsCost);
 
   const isDetailsModified = isEdit && (
-    name.trim() !== (ingredient?.name ?? '').trim() ||
-    unit !== (ingredient?.unit ?? 'kg') ||
-    String(min) !== String(ingredient?.min ?? '') ||
-    String(detailsCost) !== String(ingredient?.costPerUnit ?? '')
+    name.trim() !== savedDetails.name.trim() ||
+    unit !== savedDetails.unit ||
+    String(min) !== String(savedDetails.min)
   );
 
   // Errors ng "Ingredient Details" panel (edit mode)
@@ -422,21 +422,40 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
         scrollToFirstInvalid();
         return;
       }
+      const unitChanged = unit !== savedDetails.unit;
+      if (unitChanged) {
+        const convertedStock = convertToBase(currentStock, savedDetails.unit, unit);
+        if (!Number.isFinite(convertedStock)) {
+          setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
+          return;
+        }
+        setConfirmPayload({
+          detailsConfirmationOnly: true,
+          detailsPayload: { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0 },
+          itemName: name.trim(),
+          unitChange: {
+            oldUnit: savedDetails.unit, newUnit: unit, oldStock: currentStock, newStock: convertedStock,
+            oldMin: Number(savedDetails.min) || 0, newMin: Number(min) || 0,
+          },
+        });
+        return;
+      }
     }
     setEditingDetails(false);
   };
 
   const handleCancelDetails = () => {
-    setName(ingredient?.name ?? '');
-    setUnit(ingredient?.unit ?? 'kg');
-    setMin(ingredient?.min ?? '');
-    setDetailsCost(String(ingredient?.costPerUnit ?? ''));
+    setName(savedDetails.name);
+    setUnit(savedDetails.unit);
+    setMin(String(savedDetails.min));
+    setDetailsCost(String(savedDetails.costPerUnit));
     setErrors(prev => {
       const rest = { ...prev };
       delete rest.name; delete rest.min; delete rest.detailsCost;
       return rest;
     });
     setEditingDetails(false);
+    setUnitConversionConfirmed(false);
   };
 
   const handleValidate = () => {
@@ -471,8 +490,18 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       return;
     }
 
+    if (unit !== savedDetails.unit && !unitConversionConfirmed) {
+      setErrors({ general: 'Confirm the unit conversion using the Save button in Ingredient Details first.' });
+      return;
+    }
+    const unitChanged = unit !== savedDetails.unit;
+    const convertedStock = unitChanged ? convertToBase(currentStock, savedDetails.unit, unit) : currentStock;
+    if (unitChanged && !Number.isFinite(convertedStock)) {
+      setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
+      return;
+    }
     const detailsPayload = isDetailsModified || editingDetails
-      ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0, cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0 }
+      ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0 }
       : null;
 
     const restockPayload = stock ? {
@@ -484,6 +513,8 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     setConfirmPayload({
       detailsPayload,
       restockPayload,
+      unitChange: null,
+      stockAfterUnitChange: convertedStock,
       addedQty,
       itemName: name.trim(),
       itemUnit: unit,
@@ -493,9 +524,18 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
   const executeSave = async () => {
     if (!confirmPayload) return;
+    if (confirmPayload.detailsConfirmationOnly) {
+      setUnitConversionConfirmed(true);
+      setEditingDetails(false);
+      setConfirmPayload(null);
+      return;
+    }
     setIsSaving(true);
     try {
       await onSave(confirmPayload);
+      setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost });
+      setCurrentStock(confirmPayload.stockAfterUnitChange ?? currentStock);
+      setUnitConversionConfirmed(false);
       setConfirmPayload(null);
       setStock('');
       setCost('');
@@ -512,13 +552,17 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
   const confirmTitle = confirmPayload?.isNew
     ? 'Confirm New Ingredient'
+    : confirmPayload?.unitChange
+      ? 'Confirm Unit Conversion'
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
       ? 'Confirm Changes and Restock'
       : confirmPayload?.restockPayload
         ? 'Confirm Restock'
         : 'Confirm Changes';
 
-  const confirmMessage = confirmPayload?.detailsPayload && confirmPayload?.restockPayload
+  const confirmMessage = confirmPayload?.unitChange
+    ? <><strong className="text-brand-800">{confirmPayload.unitChange.oldStock} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newStock} {confirmPayload.unitChange.newUnit}</strong><br />Minimum stock: {confirmPayload.unitChange.oldMin} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newMin} {confirmPayload.unitChange.newUnit}. The total value of existing stock will be preserved. This conversion will be saved when you click Save Changes.</>
+    : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
     ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''} to stock. Are you sure?`
     : confirmPayload?.restockPayload
       ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
@@ -531,8 +575,8 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       <Modal
         isOpen={isOpen}
         onClose={() => !isSaving && onClose()}
-        title={isEdit ? `Manage Stock — ${ingredient?.name}` : 'Add New Ingredient'}
-        subtitle={isEdit ? `Unit: ${ingredient?.unit}` : 'Record a newly purchased sack or bulk ingredient.'}
+        title={isEdit ? `Manage Stock — ${name}` : 'Add New Ingredient'}
+        subtitle={isEdit ? `Unit: ${unit}` : 'Record a newly purchased sack or bulk ingredient.'}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -560,7 +604,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
                 <p className="text-lg font-black text-brand-800 leading-tight">
                   ₱{((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0)).toFixed(2)}
-                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({ingredient?.stock} {ingredient?.unit})</span>
+                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({currentStock} {savedDetails.unit})</span>
                 </p>
               </div>
             </div>
@@ -723,10 +767,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                         <span className="block text-[10px] font-bold uppercase text-brand-400">Min. Stock</span>
                         <span className="text-sm font-bold text-brand-800 block">{min} {unit}</span>
                       </div>
-                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
-                        <span className="block text-[10px] font-bold uppercase text-brand-400">Cost per Unit</span>
-                        <span className="text-sm font-bold text-brand-800 block">₱{(parseFloat(detailsCost) || 0).toFixed(2)}</span>
-                      </div>
                     </>
                   ) : (
                     <>
@@ -735,9 +775,19 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                         required
                         error={fieldErr.name}
                         value={name}
-                        onChange={e => setName(e.target.value)}
+                        onChange={e => { setName(e.target.value); setUnitConversionConfirmed(false); }}
                       />
-                      <FormSelect label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
+                      <FormSelect label="Unit" required value={unit} onChange={e => {
+                        const nextUnit = e.target.value;
+                        const convertedMin = convertToBase(Number(min || 0), unit, nextUnit);
+                        const convertedRestock = stock
+                          ? convertToBase(Number(parseFractionInput(stock)), unit, nextUnit)
+                          : NaN;
+                        setUnit(nextUnit);
+                        setUnitConversionConfirmed(false);
+                        if (Number.isFinite(convertedMin)) setMin(String(Number(convertedMin.toFixed(4))));
+                        if (Number.isFinite(convertedRestock)) setStock(String(Number(convertedRestock.toFixed(4))));
+                      }}>
                         {STOCK_UNIT_CATEGORIES.map(cat => (
                           <optgroup key={cat.label} label={cat.label}>
                             {cat.units.map(u => <option key={u} value={u}>{u}</option>)}
@@ -750,15 +800,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                         type="text"
                         inputMode="decimal"
                         value={min}
-                        onChange={e => setMin(sanitizeNumericText(e.target.value))}
-                      />
-                      <FormInput
-                        label="Cost/Unit (₱)"
-                        error={fieldErr.detailsCost}
-                        type="text"
-                        inputMode="decimal"
-                        value={formatPesoLive(detailsCost)}
-                        onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                        onChange={e => { setMin(sanitizeNumericText(e.target.value)); setUnitConversionConfirmed(false); }}
                       />
                     </>
                   )}
@@ -777,7 +819,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     error={fieldErr.stock}
                     type="text"
                     inputMode="decimal"
-                    suffix={ingredient?.unit}
+                    suffix={unit}
                     value={stock}
                     onChange={e => setStock(sanitizeQtyText(e.target.value))}
                     onBlur={() => setStock(current => parseFractionInput(current))}
@@ -804,7 +846,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" />}
+          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" itemId={ingredient?.id} />}
         </div>
       </Modal>
 

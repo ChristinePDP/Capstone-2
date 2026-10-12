@@ -156,13 +156,14 @@ const RecipeController = {
 const InventoryLogController = {
   getHistory: async (req, res, next) => {
     try {
-      const { item_name, item_type, startDate, endDate, limit } = req.query;
+      const { item_name, item_type, item_id, startDate, endDate, limit } = req.query;
       const defaultEnd = new Date().toISOString();
       const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
       const data = await InventoryLogService.getHistory({
         itemName: item_name,
         itemType: item_type,
+        itemId: item_id,
         startDate: startDate || defaultStart,
         endDate: endDate || defaultEnd,
         limit: limit ? Math.min(500, parseInt(limit, 10)) : 100,

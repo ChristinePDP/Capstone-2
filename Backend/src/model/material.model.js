@@ -12,19 +12,65 @@ const MaterialModel = {
   setStock: (id, stock_quantity) =>
     supabase.from('celebration_materials').update({ stock_quantity }).eq('id', id).select().single(),
 
-  deductById: async (id, qty) => {
-    const { data, error } = await supabase
-      .from('celebration_materials')
-      .select('stock_quantity')
-      .eq('id', id)
-      .single();
+  deductById: async (id, qty, fromUnit) => {
+    const { data: item, error } = await supabase.from('celebration_materials')
+      .select('id, name, stock_quantity, unit').eq('id', id).single();
     if (error) throw error;
-    if (!data) return;
+    if (!item) throw new Error('Product material not found.');
+    const deductQty = fromUnit && fromUnit !== item.unit ? convertUnit(qty, fromUnit, item.unit) : Number(qty);
+    if (!Number.isFinite(deductQty)) throw new Error(`Hindi compatible ang unit na ${fromUnit} sa ${item.unit} para sa ${item.name}.`);
 
-    return supabase
-      .from('celebration_materials')
-      .update({ stock_quantity: Math.max(0, Number(data.stock_quantity || 0) - Number(qty)) })
-      .eq('id', id);
+    const { data: batches, error: fetchErr } = await supabase.from('inventory_logs')
+      .select('id, remaining_quantity, remaining_unit')
+      .eq('material_id', id).eq('transaction_type', 'IN')
+      .is('voided_at', null).gt('remaining_quantity', 0)
+      .order('expiration_date', { ascending: true, nullsFirst: false });
+    if (fetchErr) throw fetchErr;
+
+    let remainingToDeduct = deductQty;
+    for (const batch of batches || []) {
+      if (remainingToDeduct <= 0) break;
+      const batchUnit = batch.remaining_unit || item.unit;
+      const available = convertUnit(batch.remaining_quantity, batchUnit, item.unit);
+      if (!Number.isFinite(available)) throw new Error(`Hindi ma-convert ang natitirang batch ng ${item.name} mula ${batchUnit} papuntang ${item.unit}.`);
+      const take = Math.min(available, remainingToDeduct);
+      const takeInBatchUnit = convertUnit(take, item.unit, batchUnit);
+      const { error: lotErr } = await supabase.from('inventory_logs')
+        .update({ remaining_quantity: Math.max(0, Number(batch.remaining_quantity) - takeInBatchUnit) })
+        .eq('id', batch.id);
+      if (lotErr) throw lotErr;
+      remainingToDeduct -= take;
+    }
+
+    const { error: stockErr } = await supabase.from('celebration_materials')
+      .update({ stock_quantity: Math.max(0, Number(item.stock_quantity) - deductQty) }).eq('id', id);
+    if (stockErr) throw stockErr;
+    return { item, deducted: deductQty };
+  },
+
+  restoreById: async (id, qty, fromUnit) => {
+    const { data: item, error } = await supabase.from('celebration_materials')
+      .select('stock_quantity, unit').eq('id', id).single();
+    if (error) throw error;
+    const restoreQty = fromUnit && fromUnit !== item.unit ? convertUnit(qty, fromUnit, item.unit) : Number(qty);
+    if (!Number.isFinite(restoreQty)) throw new Error(`Hindi compatible ang unit na ${fromUnit} sa ${item.unit}.`);
+    const { error: updateErr } = await supabase.from('celebration_materials').update({ stock_quantity: Number(item.stock_quantity) + restoreQty }).eq('id', id);
+    if (updateErr) throw updateErr;
+    return { item, restoredQuantity: restoreQty };
+  },
+
+  reverseRestockById: async (id, qty, fromUnit, force = false) => {
+    const { data: item, error } = await supabase.from('celebration_materials')
+      .select('stock_quantity, unit').eq('id', id).single();
+    if (error || !item) return { notFound: true };
+    const reverseQty = fromUnit && fromUnit !== item.unit ? convertUnit(qty, fromUnit, item.unit) : Number(qty);
+    if (!Number.isFinite(reverseQty)) throw new Error(`Hindi compatible ang unit na ${fromUnit} sa ${item.unit}.`);
+    const currentStock = Number(item.stock_quantity || 0);
+    if (currentStock < reverseQty && !force) return { insufficient: true, currentStock, requested: reverseQty };
+    const newStock = Math.max(0, currentStock - reverseQty);
+    const { error: updateErr } = await supabase.from('celebration_materials').update({ stock_quantity: newStock }).eq('id', id);
+    if (updateErr) throw updateErr;
+    return { updated: true, newStock };
   },
 
   deductByName: async (name, qty, fromUnit) => {

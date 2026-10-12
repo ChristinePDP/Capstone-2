@@ -8,6 +8,7 @@ import { RecipeModel } from '../model/recipe.model.js';
 import { WasteModel } from '../model/waste.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { OrdersService } from './orders.service.js';
+import { convertUnit } from '../utils/unitConversion.js';
 
 const ProductService = {
   getProducts: async (filters) => {
@@ -46,6 +47,9 @@ const IngredientService = {
       await InventoryLogModel.logHistory({
         item_type: 'raw',
         item_name: data.name,
+        raw_ingredient_id: data.id,
+        unit: data.unit,
+        remaining_unit: data.unit,
         transaction_type: 'IN',
         quantity: initialQty,
         cost: initialCost,
@@ -59,7 +63,25 @@ const IngredientService = {
   },
 
   update: async (id, body) => {
-    const { data, error } = await IngredientModel.update(id, body);
+    let data; let error;
+    if (body.unit) {
+      const { data: current, error: findError } = await IngredientModel.findById(id);
+      if (findError || !current) throw new AppError('Ingredient not found', 404);
+      if (body.unit !== current.unit) {
+        const { data: converted, error: convertError } = await supabase.rpc('update_raw_ingredient_details', {
+          p_id: id,
+          p_name: body.name ?? current.name,
+          p_unit: body.unit,
+          p_minimum_stock: body.minimum_stock ?? current.minimum_stock,
+        });
+        if (convertError) throw new AppError(convertError.message || 'Hindi ma-convert ang inventory unit.', 400);
+        data = converted;
+      } else {
+        ({ data, error } = await IngredientModel.update(id, body));
+      }
+    } else {
+      ({ data, error } = await IngredientModel.update(id, body));
+    }
     if (error || !data) throw new AppError('Ingredient not found', 404);
     return data;
   },
@@ -83,7 +105,11 @@ const IngredientService = {
     const { data: current, error: findErr } = await IngredientModel.findById(id);
     if (findErr || !current) throw new AppError('Ingredient not found', 404);
 
-    const newTotalStock = current.stock_quantity + addedQty;
+    const oldStock = Number(current.stock_quantity || 0);
+    const newTotalStock = oldStock + addedQty;
+    const nextUnitCost = newTotalStock > 0
+      ? (oldStock * Number(current.cost_per_unit || 0) + totalCost) / newTotalStock
+      : 0;
     console.log('BAGONG TOTAL STOCK:', newTotalStock);
 
     // IMPORTANT: hindi na dapat "i-update" ang minimum_stock dito sa
@@ -93,7 +119,7 @@ const IngredientService = {
     // sinusuri, at wala namang ipinasa ang frontend, magiging NaN ito
     // at masisira ang existing value sa database. Kaya isasama lang
     // natin sa update object kung talagang may ipinasang value.
-    const updatePayload = { stock_quantity: newTotalStock };
+    const updatePayload = { stock_quantity: newTotalStock, cost_per_unit: Number(nextUnitCost.toFixed(4)) };
     if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
       const parsedMin = Number(body.minimum_stock);
       if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
@@ -106,6 +132,9 @@ const IngredientService = {
     const logPayload = {
       item_type: 'raw',
       item_name: current.name,
+      raw_ingredient_id: current.id,
+      unit: current.unit,
+      remaining_unit: current.unit,
       transaction_type: 'IN',
       quantity: addedQty,
       cost: totalCost,
@@ -182,6 +211,9 @@ const MaterialService = {
       await InventoryLogModel.logHistory({
         item_type: 'material',
         item_name: data.name,
+        material_id: data.id,
+        unit: data.unit,
+        remaining_unit: data.unit,
         transaction_type: 'IN',
         quantity: initialQty,
         cost: initialCost,
@@ -202,7 +234,26 @@ const MaterialService = {
     if (!UUID_RE.test(String(id))) {
       throw new AppError('Material not found.', 404);
     }
-    const { data, error } = await MaterialModel.update(id, safeBody);
+    let data; let error;
+    if (safeBody.unit) {
+      const { data: current, error: findError } = await MaterialModel.findById(id);
+      if (findError || !current) throw new AppError('Material not found', 404);
+      if (safeBody.unit !== current.unit) {
+        const { data: converted, error: convertError } = await supabase.rpc('update_material_details', {
+          p_id: id,
+          p_name: safeBody.name ?? current.name,
+          p_unit: safeBody.unit,
+          p_minimum_stock: safeBody.minimum_stock ?? current.minimum_stock,
+          p_product_id: safeBody.product_id ?? current.product_id ?? null,
+        });
+        if (convertError) throw new AppError(convertError.message || 'Hindi ma-convert ang material unit.', 400);
+        data = converted;
+      } else {
+        ({ data, error } = await MaterialModel.update(id, safeBody));
+      }
+    } else {
+      ({ data, error } = await MaterialModel.update(id, safeBody));
+    }
     if (error) throw new AppError(`Failed to update material: ${error.message}`, 500);
     return data;
   },
@@ -230,13 +281,17 @@ const MaterialService = {
     }
 
     // 3. Compute ang bagong stock
-    const newTotalStock = Number(current.stock_quantity || 0) + addedQty;
+    const oldStock = Number(current.stock_quantity || 0);
+    const newTotalStock = oldStock + addedQty;
+    const nextUnitCost = newTotalStock > 0
+      ? (oldStock * Number(current.cost_per_unit || 0) + totalCost) / newTotalStock
+      : 0;
 
     // 4. I-update sa database — hindi na dapat i-overwrite ang
     // minimum_stock dito (tinanggal na sa Restock modal ng frontend;
     // sa "Ayusin ang Detalye" na lang dapat babaguhin ito). Isasama
     // lang ito sa update kung talagang may ipinasang value.
-    const updatePayload = { stock_quantity: newTotalStock };
+    const updatePayload = { stock_quantity: newTotalStock, cost_per_unit: Number(nextUnitCost.toFixed(4)) };
     if (body.minimum_stock !== undefined && body.minimum_stock !== null && body.minimum_stock !== '') {
       const parsedMin = Number(body.minimum_stock);
       if (Number.isFinite(parsedMin)) updatePayload.minimum_stock = parsedMin;
@@ -254,6 +309,9 @@ const MaterialService = {
       const logPayload = {
         item_type: 'material',
         item_name: current.name,
+        material_id: current.id,
+        unit: current.unit,
+        remaining_unit: current.unit,
         transaction_type: 'IN',
         quantity: addedQty,
         cost: totalCost,
@@ -303,8 +361,11 @@ const InventoryLogService = {
 
     // Piliin ang tamang model base sa item_type ('raw' o 'material')
     const Model = log.item_type === 'raw' ? IngredientModel : MaterialModel;
-
-    const result = await Model.reverseRestock(log.item_name, log.quantity, force);
+    const result = log.raw_ingredient_id && log.item_type === 'raw'
+      ? await IngredientModel.reverseRestockById(log.raw_ingredient_id, log.quantity, log.unit, force)
+      : log.material_id && log.item_type === 'material'
+        ? await MaterialModel.reverseRestockById(log.material_id, log.quantity, log.unit, force)
+        : await Model.reverseRestock(log.item_name, log.quantity, force);
 
     if (result.notFound) {
       throw new AppError(`"${log.item_name}" ay hindi na mahanap sa kasalukuyang inventory (baka na-delete na).`, 404);
@@ -332,6 +393,9 @@ const InventoryLogService = {
     await InventoryLogModel.logHistory({
       item_type: log.item_type,
       item_name: log.item_name,
+      raw_ingredient_id: log.raw_ingredient_id || null,
+      material_id: log.material_id || null,
+      unit: log.unit || null,
       transaction_type: 'OUT',
       quantity: log.quantity,
       cost: 0,
@@ -384,11 +448,25 @@ const ProductionService = {
     }
 
     // 1. I-compute ang mga ibabawas
-    const deductions = recipe.recipe_ingredients.map(ri => ({
-      item_type: ri.item_type,
-      item_name: ri.item_name,
-      quantity:  +(ri.quantity * deductFactor).toFixed(4),
-      unit:      ri.unit,
+    const deductions = await Promise.all(recipe.recipe_ingredients.map(async ri => {
+      let currentItemName = ri.item_name;
+      if (ri.raw_ingredient_id) {
+        const { data } = await IngredientModel.findById(ri.raw_ingredient_id);
+        if (!data) throw new AppError('May ingredient sa formula na wala na sa inventory.', 400);
+        currentItemName = data.name;
+      } else if (ri.material_id) {
+        const { data } = await MaterialModel.findById(ri.material_id);
+        if (!data || data.material_type !== 'product') throw new AppError('May product material sa formula na wala na sa inventory.', 400);
+        currentItemName = data.name;
+      }
+      return {
+        item_type: ri.item_type,
+        item_name: currentItemName,
+        raw_ingredient_id: ri.raw_ingredient_id || null,
+        material_id: ri.material_id || null,
+        quantity: +(ri.quantity * deductFactor).toFixed(4),
+        unit: ri.unit,
+      };
     }));
 
     // 2. I-save ang production log
@@ -402,16 +480,22 @@ const ProductionService = {
     // 4. Bawasan ang actual stock sa database at MAG-LOG SA HISTORY
     for (const d of deductions) {
       try {
+        let deductionResult;
         if (d.item_type === 'raw') {
           // Ipinapasa ang d.unit (unit na naka-declare sa recipe) — kung
           // magkaiba ito sa aktwal na unit ng stock sa database (hal.
           // recipe = "g" pero stock = "kg"), awtomatiko itong iko-convert
           // sa loob ng deductByName bago ibawas. Kung hindi ma-convert
           // (di-magkatugmang klase ng unit), mag-e-error ito.
-          await IngredientModel.deductByName(d.item_name, d.quantity, d.unit);
+          deductionResult = d.raw_ingredient_id
+            ? await IngredientModel.deductById(d.raw_ingredient_id, d.quantity, d.unit)
+            : await IngredientModel.deductByName(d.item_name, d.quantity, d.unit);
         } else {
-          await MaterialModel.deductByName(d.item_name, d.quantity, d.unit);
+          deductionResult = d.material_id
+            ? await MaterialModel.deductById(d.material_id, d.quantity, d.unit)
+            : await MaterialModel.deductByName(d.item_name, d.quantity, d.unit);
         }
+        if (deductionResult?.item?.name) d.item_name = deductionResult.item.name;
       } catch (deductErr) {
         // Itigil agad ang batch confirmation kung hindi ligtas i-deduct
         // ang isang ingredient — mas mabuting malaman agad ng user kaysa
@@ -425,6 +509,9 @@ const ProductionService = {
       await InventoryLogModel.logHistory({
         item_type: d.item_type,          
         item_name: d.item_name,
+        raw_ingredient_id: d.raw_ingredient_id,
+        material_id: d.material_id,
+        unit: d.unit,
         transaction_type: 'OUT',         
         quantity: d.quantity,
         cost: 0,                         
@@ -685,12 +772,31 @@ const RecipeService = {
     return data;
   },
 
+  normalizeLinkedIngredients: async (ingredients = []) => Promise.all(ingredients.map(async item => {
+    if (item.item_type === 'raw') {
+      if (!item.raw_ingredient_id || item.material_id) {
+        throw new AppError('Pumili ng existing raw ingredient para ma-link ang bawat formula row.', 400);
+      }
+      const { data, error } = await IngredientModel.findById(item.raw_ingredient_id);
+      if (error || !data) throw new AppError('Hindi na makita ang napiling raw ingredient sa inventory.', 400);
+      return { ...item, item_name: data.name, material_id: null };
+    }
+    if (!item.material_id || item.raw_ingredient_id) {
+      throw new AppError('Pumili ng existing product material para ma-link ang bawat formula row.', 400);
+    }
+    const { data, error } = await MaterialModel.findById(item.material_id);
+    if (error || !data) throw new AppError('Hindi na makita ang napiling product material sa inventory.', 400);
+    if (data.material_type !== 'product') throw new AppError('Product Materials lang ang puwedeng ilagay sa production formula.', 400);
+    return { ...item, item_name: data.name, raw_ingredient_id: null };
+  })),
+
   create: async (body) => {
     const { ingredients, ...recipeData } = body;
+    const linkedIngredients = await RecipeService.normalizeLinkedIngredients(ingredients);
     const { data: recipe, error } = await RecipeModel.create(recipeData);
     if (error) throw error;
 
-    const { error: ingErr } = await RecipeModel.insertIngredients(recipe.id, ingredients);
+    const { error: ingErr } = await RecipeModel.insertIngredients(recipe.id, linkedIngredients);
     if (ingErr) throw ingErr;
 
     return recipe;
@@ -698,13 +804,16 @@ const RecipeService = {
 
   update: async (id, body) => {
     const { ingredients, ...recipeData } = body;
+    const linkedIngredients = ingredients === undefined
+      ? undefined
+      : await RecipeService.normalizeLinkedIngredients(ingredients);
     const { data, error } = await RecipeModel.update(id, recipeData);
     if (error || !data) throw new AppError('Recipe not found', 404);
 
     if (ingredients !== undefined) {
       await RecipeModel.deleteIngredients(id);
-      if (ingredients.length) {
-        const { error: ingErr } = await RecipeModel.insertIngredients(id, ingredients);
+      if (linkedIngredients.length) {
+        const { error: ingErr } = await RecipeModel.insertIngredients(id, linkedIngredients);
         if (ingErr) throw ingErr;
       }
     }
@@ -726,6 +835,15 @@ const WasteService = {
   },
 
   log: async (body) => {
+    if (body.waste_type === 'ingredient' && body.raw_ingredient_id) {
+      const { data } = await IngredientModel.findById(body.raw_ingredient_id);
+      if (!data) throw new AppError('Ingredient not found in inventory.', 404);
+      body.item_name = data.name;
+    } else if (body.waste_type === 'material' && body.material_id) {
+      const { data } = await MaterialModel.findById(body.material_id);
+      if (!data || data.material_type !== 'product') throw new AppError('Product material not found in inventory.', 404);
+      body.item_name = data.name;
+    }
     // 1. Logic for deducting stocks — ipinapasa rin ang body.unit para
     // pareho ring protektado ito (tingnan ang paliwanag sa
     // ProductionService.confirmBatch tungkol sa unit-aware deduction).
@@ -737,9 +855,11 @@ const WasteService = {
     // dito.
     try {
       if (body.waste_type === 'ingredient') {
-        await IngredientModel.deductByName(body.item_name, body.quantity, body.unit);
+        if (body.raw_ingredient_id) await IngredientModel.deductById(body.raw_ingredient_id, body.quantity, body.unit);
+        else await IngredientModel.deductByName(body.item_name, body.quantity, body.unit);
       } else if (body.waste_type === 'material') {
-        await MaterialModel.deductByName(body.item_name, body.quantity, body.unit);
+        if (body.material_id) await MaterialModel.deductById(body.material_id, body.quantity, body.unit);
+        else await MaterialModel.deductByName(body.item_name, body.quantity, body.unit);
       } else if (body.waste_type === 'product') {
         await ProductModel.deductByName(body.item_name, body.quantity);
       }
@@ -766,6 +886,9 @@ const WasteService = {
       await InventoryLogModel.logHistory({
         item_type: body.waste_type === 'ingredient' ? 'raw' : 'material',
         item_name: body.item_name,
+        raw_ingredient_id: body.raw_ingredient_id || null,
+        material_id: body.material_id || null,
+        unit: body.unit,
         transaction_type: 'OUT',
         quantity: Number(body.quantity),
         cost: Number(body.cost || 0),
@@ -788,11 +911,14 @@ const WasteService = {
     if (findErr || !log) throw new AppError('Waste record not found', 404);
     if (log.voided_at) throw new AppError('Naka-void na ang record na ito.', 400);
 
+    let restoredInventoryLot = null;
     try {
       if (log.waste_type === 'ingredient') {
-        await IngredientModel.restoreByName(log.item_name, log.quantity, log.unit);
+        if (log.raw_ingredient_id) restoredInventoryLot = await IngredientModel.restoreById(log.raw_ingredient_id, log.quantity, log.unit);
+        else await IngredientModel.restoreByName(log.item_name, log.quantity, log.unit);
       } else if (log.waste_type === 'material') {
-        await MaterialModel.restoreByName(log.item_name, log.quantity, log.unit);
+        if (log.material_id) restoredInventoryLot = await MaterialModel.restoreById(log.material_id, log.quantity, log.unit);
+        else await MaterialModel.restoreByName(log.item_name, log.quantity, log.unit);
       } else if (log.waste_type === 'product') {
         await ProductModel.restoreByName(log.item_name, log.quantity);
       }
@@ -806,10 +932,15 @@ const WasteService = {
       await InventoryLogModel.logHistory({
         item_type: log.waste_type === 'ingredient' ? 'raw' : 'material',
         item_name: log.item_name,
+        raw_ingredient_id: log.raw_ingredient_id || null,
+        material_id: log.material_id || null,
+        unit: log.unit,
         transaction_type: 'IN',
         quantity: Number(log.quantity),
         cost: 0,
-        action: 'Void Waste (Pagtatama)'
+        action: 'Void Waste (Pagtatama)',
+        remaining_quantity: restoredInventoryLot?.restoredQuantity ?? Number(log.quantity),
+        remaining_unit: restoredInventoryLot?.item?.unit ?? log.unit,
       });
     }
 

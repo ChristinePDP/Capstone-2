@@ -62,17 +62,18 @@ const InventoryLogModel = {
     return data;
   },
 
-  getHistory: async ({ startDate, endDate, itemName, itemType, limit = 100 } = {}) => {
+  getHistory: async ({ startDate, endDate, itemName, itemType, itemId, limit = 100 } = {}) => {
       let query = supabase
         .from('inventory_logs')
-        // DAGDAG: expiration_date
-        .select('id, item_type, item_name, transaction_type, quantity, cost, action, created_at, voided_at, expiration_date')
+        .select('id, item_type, item_name, raw_ingredient_id, material_id, unit, transaction_type, quantity, cost, action, created_at, voided_at, expiration_date')
         .order('created_at', { ascending: false })
         .limit(limit);
 
       if (startDate) query = query.gte('created_at', startDate);
       if (endDate) query = query.lte('created_at', endDate);
-      if (itemName) query = query.eq('item_name', itemName);
+      if (itemId && itemType === 'raw') query = query.eq('raw_ingredient_id', itemId);
+      else if (itemId && itemType === 'material') query = query.eq('material_id', itemId);
+      else if (itemName) query = query.eq('item_name', itemName);
       if (itemType) query = query.eq('item_type', itemType);
 
       const { data, error } = await query;

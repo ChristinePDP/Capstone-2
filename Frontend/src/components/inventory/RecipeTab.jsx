@@ -371,8 +371,14 @@ export default function RecipeTab() {
   // basis ng owner sa pagtatakda ng selling price ng product.
   const costLookup = useMemo(() => {
     const map = new Map();
-    ingredients.forEach(item => map.set(`raw:${normalizeText(item.name)}`, item));
-    materials.forEach(item => map.set(`material:${normalizeText(item.name)}`, item));
+    ingredients.forEach(item => {
+      map.set(`id:${item.id}`, item);
+      map.set(`raw:${normalizeText(item.name)}`, item);
+    });
+    materials.forEach(item => {
+      map.set(`id:${item.id}`, item);
+      map.set(`material:${normalizeText(item.name)}`, item);
+    });
     return map;
   }, [ingredients, materials]);
 
@@ -380,7 +386,8 @@ export default function RecipeTab() {
     const lines = (recipe.ingredients || []).map(i => ({
       qty: i.qty,
       unit: i.unit,
-      item: costLookup.get(`${String(i.itemType || 'raw').toLowerCase()}:${normalizeText(i.name)}`),
+      item: (i.inventoryItemId && costLookup.get(`id:${i.inventoryItemId}`))
+        || costLookup.get(`${String(i.itemType || 'raw').toLowerCase()}:${normalizeText(i.name)}`),
     }));
     const { total, missing } = sumCost(lines);
     const batchYield = Number(recipe.yield) || 0;
@@ -440,7 +447,9 @@ export default function RecipeTab() {
     setYldUnit(r.yieldUnit || 'pcs');
 
     const mappedRows = (r.ingredients || []).map(i => {
-      const item = inventoryOptions.find(option => normalizeText(option.name) === normalizeText(i.name || i.item_name || '') && normalizeText(option.sourceType) === normalizeText(i.itemType || i.item_type || option.sourceType));
+      const linkedId = i.inventoryItemId || i.rawIngredientId || i.materialId || i.raw_ingredient_id || i.material_id;
+      const item = (linkedId && inventoryById[linkedId])
+        || inventoryOptions.find(option => normalizeText(option.name) === normalizeText(i.name || i.item_name || '') && normalizeText(option.sourceType) === normalizeText(i.itemType || i.item_type || option.sourceType));
       return {
         itemId: item?.id || '',
         qty: i.qty ?? i.quantity ?? '',
@@ -585,6 +594,8 @@ export default function RecipeTab() {
         return {
           item_type: inventoryItem.sourceType,
           item_name: inventoryItem.name,
+          raw_ingredient_id: inventoryItem.sourceType === 'raw' ? inventoryItem.id : null,
+          material_id: inventoryItem.sourceType === 'material' ? inventoryItem.id : null,
           quantity: roundQty(normalizedQty),
           unit: baseUnit,
         };

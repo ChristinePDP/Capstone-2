@@ -81,6 +81,8 @@ const UNIT_ALIASES = {
   teaspoon: 'tsp', teaspoons: 'tsp', tsp: 'tsp',
   piece: 'pcs', pieces: 'pcs', pc: 'pcs', pcs: 'pcs',
   dozen: 'dozen', doz: 'dozen', dz: 'dozen',
+  meter: 'm', meters: 'm', metre: 'm', metres: 'm', m: 'm',
+  yard: 'yd', yards: 'yd', yd: 'yd', yds: 'yd',
 };
 
 // Ang factor ay "ilang LITRO katumbas ng 1 unit na ito" (para sa
@@ -91,6 +93,7 @@ const UNIT_GROUPS = {
   mass:   { kg: 1, g: 0.001 },
   volume: { l: 1, ml: 0.001, cup: 0.236588, tbsp: 0.0147868, tsp: 0.00492892 },
   count:  { pcs: 1, dozen: 12 },
+  length: { m: 1, yd: 0.9144 },
 };
 
 export const normalizeText = (value = '') => String(value).trim().toLowerCase();

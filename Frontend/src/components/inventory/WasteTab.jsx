@@ -230,11 +230,13 @@ export default function WasteTab() {
     let finalUnit = '';
     let selectedItemStock = 0;
     let qtyText = '';
+    let inventoryItemId = null;
 
     if (logType === 'ingredient') {
       const match = ingredients.find(i => i.name === ingName);
       if (!ingName) errs.item = 'Please select an ingredient.';
       selectedItemStock = match ? match.stock : 0;
+      inventoryItemId = match?.id || null;
       finalItem = ingName;
       qtyText = ingQty;
       rawQty = parseFloat(ingQty);
@@ -244,6 +246,7 @@ export default function WasteTab() {
       const match = products.find(p => p.name === productName);
       if (!productName) errs.item = 'Please select a product.';
       selectedItemStock = match ? match.stock : 0;
+      inventoryItemId = match?.id || null;
       finalItem = productName;
       qtyText = productQty;
       rawQty = parseInt(productQty, 10);
@@ -253,6 +256,7 @@ export default function WasteTab() {
       const match = productMaterials.find(m => m.name === matName);
       if (!matName) errs.item = 'Please select a product material.';
       selectedItemStock = match ? match.stock : 0;
+      inventoryItemId = match?.id || null;
       finalItem = matName;
       qtyText = matQty;
       rawQty = parseFloat(matQty);
@@ -274,6 +278,8 @@ export default function WasteTab() {
     const payload = {
       waste_type: logType,
       item_name: finalItem,
+      raw_ingredient_id: logType === 'ingredient' ? inventoryItemId : null,
+      material_id: logType === 'material' ? inventoryItemId : null,
       quantity: rawQty,
       unit: finalUnit ? String(finalUnit) : (logType === 'ingredient' ? 'kg' : 'pcs'),
       cost: computedCost,

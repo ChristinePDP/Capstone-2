@@ -19,12 +19,15 @@ const UNIT_ALIASES = {
   liter: 'l', liters: 'l', litre: 'l', litres: 'l', l: 'l',
   piece: 'pcs', pieces: 'pcs', pc: 'pcs', pcs: 'pcs',
   dozen: 'dozen', doz: 'dozen', dz: 'dozen',
+  meter: 'm', meters: 'm', metre: 'm', metres: 'm', m: 'm',
+  yard: 'yd', yards: 'yd', yd: 'yd', yds: 'yd',
 };
 
 const UNIT_GROUPS = {
   mass:   { kg: 1, g: 0.001 },
   volume: { l: 1, ml: 0.001 },
   count:  { pcs: 1, dozen: 12 },
+  length: { m: 1, yd: 0.9144 },
 };
 
 const normalizeText = (value = '') => String(value).trim().toLowerCase();

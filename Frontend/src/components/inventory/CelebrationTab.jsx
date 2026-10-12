@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
-import { STOCK_UNIT_CATEGORIES } from '../../utils/unitUtils';
+import { STOCK_UNIT_CATEGORIES, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
@@ -276,9 +276,9 @@ export default function CelebrationTab() {
     }
 
     if (payload.detailsPayload && payload.restockPayload) {
-      showToast(`Details updated and +${payload.addedQty} ${currentEditMat.unit} added to ${currentEditMat.name}.`);
+      showToast(`Details updated and +${payload.addedQty} ${payload.itemUnit || currentEditMat.unit} added to ${payload.itemName || currentEditMat.name}.`);
     } else if (payload.restockPayload) {
-      showToast(`+${payload.addedQty} ${currentEditMat.unit} added to ${currentEditMat.name}.`);
+      showToast(`+${payload.addedQty} ${payload.itemUnit || currentEditMat.unit} added to ${payload.itemName || currentEditMat.name}.`);
     } else if (payload.detailsPayload) {
       showToast('Material details updated.');
     }
@@ -676,6 +676,9 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   const [detailsCost, setDetailsCost] = useState(String(material?.costPerUnit ?? ''));
   const [editingDetails, setEditingDetails] = useState(false);
+  const [savedDetails, setSavedDetails] = useState({ name: material?.name ?? '', unit: material?.unit ?? 'pcs', min: material?.min ?? '', costPerUnit: material?.costPerUnit ?? '', productId: material?.productId || material?.product_id || '' });
+  const [currentStock, setCurrentStock] = useState(Number(material?.stock ?? 0));
+  const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
@@ -694,11 +697,10 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   const detailsCostError = getCostError(detailsCost);
 
   const isDetailsModified = isEdit && (
-    name.trim() !== (material?.name ?? '').trim() ||
-    unit !== (material?.unit ?? 'pcs') ||
-    String(min) !== String(material?.min ?? '') ||
-    String(detailsCost) !== String(material?.costPerUnit ?? '')
-    || productId !== (material?.productId || material?.product_id || '')
+    name.trim() !== savedDetails.name.trim() ||
+    unit !== savedDetails.unit ||
+    String(min) !== String(savedDetails.min) ||
+    productId !== savedDetails.productId
   );
 
   // Errors ng "Material Details" panel (edit mode)
@@ -802,18 +804,37 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
         scrollToFirstInvalid();
         return;
       }
+      const unitChanged = unit !== savedDetails.unit;
+      if (unitChanged) {
+        const convertedStock = convertToBase(currentStock, savedDetails.unit, unit);
+        if (!Number.isFinite(convertedStock)) {
+          setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
+          return;
+        }
+        setConfirmPayload({
+          detailsConfirmationOnly: true,
+          detailsPayload: { name: name.trim(), product_id: productId || null, unit, minimum_stock: parseFloat(min) || 0 },
+          itemName: name.trim(),
+          unitChange: {
+            oldUnit: savedDetails.unit, newUnit: unit, oldStock: currentStock, newStock: convertedStock,
+            oldMin: Number(savedDetails.min) || 0, newMin: Number(min) || 0,
+          },
+        });
+        return;
+      }
     }
     setEditingDetails(false);
   };
 
   const handleCancelDetails = () => {
-    setName(material?.name ?? '');
-    setUnit(material?.unit ?? 'pcs');
-    setMin(material?.min ?? '');
-    setDetailsCost(String(material?.costPerUnit ?? ''));
-    setProductId(material?.productId || material?.product_id || '');
+    setName(savedDetails.name);
+    setUnit(savedDetails.unit);
+    setMin(String(savedDetails.min));
+    setDetailsCost(String(savedDetails.costPerUnit));
+    setProductId(savedDetails.productId);
     setErrors(clearDetailsErrors);
     setEditingDetails(false);
+    setUnitConversionConfirmed(false);
   };
 
   const handleValidate = () => {
@@ -849,13 +870,22 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
       return;
     }
 
+    if (unit !== savedDetails.unit && !unitConversionConfirmed) {
+      setErrors({ general: 'Confirm the unit conversion using the Save button in Material Details first.' });
+      return;
+    }
+    const unitChanged = unit !== savedDetails.unit;
+    const convertedStock = unitChanged ? convertToBase(currentStock, savedDetails.unit, unit) : currentStock;
+    if (unitChanged && !Number.isFinite(convertedStock)) {
+      setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
+      return;
+    }
     const detailsPayload = isDetailsModified || editingDetails
       ? {
           name: name.trim(),
           product_id: productId || null,
           unit,
           minimum_stock: parseFloat(min) || 0,
-          cost_per_unit: detailsCost ? parseFloat(detailsCost) : 0,
         }
       : null;
 
@@ -868,6 +898,8 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     setConfirmPayload({
       detailsPayload,
       restockPayload,
+      unitChange: null,
+      stockAfterUnitChange: convertedStock,
       addedQty,
       itemName: name.trim(),
       itemUnit: unit,
@@ -877,9 +909,18 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   const executeSave = async () => {
     if (!confirmPayload) return;
+    if (confirmPayload.detailsConfirmationOnly) {
+      setUnitConversionConfirmed(true);
+      setEditingDetails(false);
+      setConfirmPayload(null);
+      return;
+    }
     setIsSaving(true);
     try {
       await onSave(confirmPayload);
+      setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost, productId });
+      setCurrentStock(confirmPayload.stockAfterUnitChange ?? currentStock);
+      setUnitConversionConfirmed(false);
       setConfirmPayload(null);
       setStock('');
       setCost('');
@@ -896,13 +937,17 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   const confirmTitle = confirmPayload?.isNew
     ? 'Confirm New Material'
+    : confirmPayload?.unitChange
+      ? 'Confirm Unit Conversion'
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
       ? 'Confirm Changes'
       : confirmPayload?.restockPayload
         ? 'Confirm Add Stock'
         : 'Confirm Edit';
 
-  const confirmMessage = confirmPayload?.detailsPayload && confirmPayload?.restockPayload
+  const confirmMessage = confirmPayload?.unitChange
+    ? <><strong className="text-brand-800">{confirmPayload.unitChange.oldStock} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newStock} {confirmPayload.unitChange.newUnit}</strong><br />Minimum stock: {confirmPayload.unitChange.oldMin} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newMin} {confirmPayload.unitChange.newUnit}. The total value of existing stock will be preserved. This conversion will be saved when you click Save Changes.</>
+    : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
     ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Are you sure?`
     : confirmPayload?.restockPayload
       ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
@@ -921,6 +966,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
         onChange={(nextName, linkedId) => {
           setName(nextName);
           setProductId(linkedId ?? '');
+          setUnitConversionConfirmed(false);
         }}
         products={products}
         placeholder={placeholder}
@@ -948,8 +994,8 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${material?.name}` : `Add New ${viewLabel ?? 'Material'}`}
-        subtitle={isEdit ? `Unit: ${material?.unit}` : `Record a new batch of ${viewLabel?.toLowerCase() ?? 'material'}.`}
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${name}` : `Add New ${viewLabel ?? 'Material'}`}
+        subtitle={isEdit ? `Unit: ${unit}` : `Record a new batch of ${viewLabel?.toLowerCase() ?? 'material'}.`}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
@@ -977,7 +1023,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                 <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
                 <p className="text-lg font-black text-brand-800 leading-tight">
                   ₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}
-                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({material?.stock} {material?.unit})</span>
+                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({currentStock} {savedDetails.unit})</span>
                 </p>
               </div>
             </div>
@@ -1127,15 +1173,21 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                         <span className="block text-[10px] font-bold uppercase text-brand-400">Min. Stock</span>
                         <span className="text-sm font-bold text-brand-800 block">{min} {unit}</span>
                       </div>
-                      <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">
-                        <span className="block text-[10px] font-bold uppercase text-brand-400">Cost per Unit</span>
-                        <span className="text-sm font-bold text-brand-800 block">₱{(parseFloat(detailsCost) || 0).toFixed(2)}</span>
-                      </div>
                     </>
                   ) : (
                     <>
                       {renderNameField('Name')}
-                      <FormSelect label="Unit" required value={unit} onChange={e => setUnit(e.target.value)}>
+                      <FormSelect label="Unit" required value={unit} onChange={e => {
+                        const nextUnit = e.target.value;
+                        const convertedMin = convertToBase(Number(min || 0), unit, nextUnit);
+                        const convertedRestock = stock
+                          ? convertToBase(Number(parseFractionInput(stock)), unit, nextUnit)
+                          : NaN;
+                        setUnit(nextUnit);
+                        setUnitConversionConfirmed(false);
+                        if (Number.isFinite(convertedMin)) setMin(String(Number(convertedMin.toFixed(4))));
+                        if (Number.isFinite(convertedRestock)) setStock(String(Number(convertedRestock.toFixed(4))));
+                      }}>
                         {unitOptions}
                       </FormSelect>
                       <FormInput
@@ -1144,15 +1196,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                         type="text"
                         inputMode="decimal"
                         value={min}
-                        onChange={e => setMin(sanitizeNumericText(e.target.value))}
-                      />
-                      <FormInput
-                        label="Cost/Unit (₱)"
-                        error={fieldErr.detailsCost}
-                        type="text"
-                        inputMode="decimal"
-                        value={formatPesoLive(detailsCost)}
-                        onChange={e => setDetailsCost(sanitizeNumericText(parseFormattedPeso(e.target.value)))}
+                        onChange={e => { setMin(sanitizeNumericText(e.target.value)); setUnitConversionConfirmed(false); }}
                       />
                     </>
                   )}
@@ -1171,7 +1215,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                     error={fieldErr.stock}
                     type="text"
                     inputMode="decimal"
-                    suffix={material?.unit}
+                    suffix={unit}
                     value={stock}
                     onChange={e => setStock(sanitizeQtyText(e.target.value))}
                     onBlur={() => setStock(current => parseFractionInput(current))}
@@ -1199,7 +1243,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" />}
+          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" itemId={material?.id} />}
         </div>
       </Modal>
 
