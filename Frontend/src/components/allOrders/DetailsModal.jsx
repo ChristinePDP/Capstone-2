@@ -465,7 +465,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
     <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-2">
       {[
         orderType && { k: 'Type', node: <TagBadge>{orderType}</TagBadge> },
-        source && { k: 'Source', node: <TagBadge>{placedByAdmin ? 'Walk-in (Staff)' : source === 'online' ? 'Online' : source}</TagBadge> },
+        source && { k: 'Source', node: <TagBadge>{placedByAdmin ? 'Walk-in' : source === 'online' ? 'Online' : source}</TagBadge> },
         createdAt && { k: 'Placed', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(createdAt)}</span>, wide: true },
         updatedAt && updatedAt !== createdAt && { k: 'Updated', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(updatedAt)}</span>, wide: true },
       ].filter(Boolean).map(({ k, node, wide }) => (

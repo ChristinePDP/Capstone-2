@@ -40,7 +40,7 @@ function typeVariant(t) {
 }
 function sourceLabel(order) {
   const placedByAdmin = order.placedByAdmin || order.placed_by_admin;
-  if (placedByAdmin) return 'Walk-in (Staff)';
+  if (placedByAdmin) return 'Walk-in';
   const source = order.source || order.order_source;
   if (!source) return null;
   return source === 'online' ? 'Online' : source.charAt(0).toUpperCase() + source.slice(1);
