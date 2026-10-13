@@ -169,11 +169,6 @@ export default function SalesForecast({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-5 mt-4 pt-4 border-t border-[#e7ded4] text-xs shrink-0">
-        <span className="flex items-center gap-2 text-[#9a8b7a] font-semibold">
-          <span className="w-4 border-t-2 border-solid border-[#d97706]" /> Forecasted Sales
-        </span>
-      </div>
     </div>
   );
 }
