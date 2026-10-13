@@ -7,7 +7,7 @@ import { ProductModel } from '../model/product.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
-import { PreOrderCapacityModel } from '../model/preorderCapacity.model.js';
+import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
 import { MaterialModel } from '../model/material.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
 import { notifyNewOrder } from './notification.service.js';
@@ -520,6 +520,59 @@ export const resolveOrderItems = async (items = []) => {
   return resolved;
 };
 
+export const reserveResolvedCheckoutItems = async (reservationId, orderType, pickupDate, resolvedItems, expiresAt) => {
+  const materialByProduct = new Map();
+  const productIds = [...new Set(resolvedItems.map(item => item.product_id).filter(Boolean))];
+  const matches = await Promise.all(productIds.map(async productId => {
+    const result = await MaterialModel.findByProductId(productId);
+    if (result.error) throw result.error;
+    return [productId, result.data?.id || null];
+  }));
+  matches.forEach(([productId, materialId]) => materialByProduct.set(productId, materialId));
+  const reservationItems = resolvedItems.map(item => ({
+    product_id: item.product_id,
+    material_id: orderType === 'Buy Now' ? materialByProduct.get(item.product_id) || null : null,
+    quantity: Number(item.quantity || 0),
+  }));
+  try {
+    return await CheckoutReservationModel.reserve(reservationId, orderType, pickupDate, reservationItems, expiresAt);
+  } catch (cause) {
+    const error = new Error(cause.message || 'Some items are no longer available. Please review your cart.');
+    error.status = 409;
+    error.code = 'CHECKOUT_RESERVATION';
+    throw error;
+  }
+};
+
+export const reserveCheckoutOrder = async payload => {
+  const orderType = payload?.orderType;
+  const pickupDate = payload?.pickup?.date;
+  if (!['Buy Now', 'Pre-Order'].includes(orderType) || !pickupDate || !payload?.reservationId) {
+    const error = new Error('Checkout details are incomplete. Please review your order and try again.');
+    error.status = 400;
+    throw error;
+  }
+  const resolvedItems = await resolveOrderItems(payload.items || []);
+  if (!resolvedItems.length) {
+    const error = new Error('Your cart is empty. Please add items before continuing.');
+    error.status = 400;
+    throw error;
+  }
+  await validateProductionFormulaAvailability(resolvedItems);
+  if (orderType === 'Pre-Order') await validatePreOrderPickupDate(resolvedItems, pickupDate);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  let reservationResult;
+  try {
+    reservationResult = await reserveResolvedCheckoutItems(payload.reservationId, orderType, pickupDate, resolvedItems, expiresAt);
+  } catch (cause) {
+    const error = new Error(cause.message || 'Some items are no longer available. Please review your cart.');
+    error.status = 409;
+    error.code = 'CHECKOUT_RESERVATION';
+    throw error;
+  }
+  return { reservationId: payload.reservationId, expiresAt: reservationResult?.expires_at || expiresAt };
+};
+
 const addQuantitiesByProduct = (target, items = [], date = '') => {
   if (!target[date]) target[date] = {};
   for (const item of items) {
@@ -716,13 +769,24 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
   // 1. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle) bago gumawa ng kahit anong bagong row sa DB.
   let resolvedItems;
-  const reservationId = payload.orderType === 'Pre-Order'
-    ? randomUUID()
-    : null;
+  const suppliedReservationId = payload.checkoutReservationId || null;
+  const checkoutReservationId = suppliedReservationId || randomUUID();
+  if (manualPayment && suppliedReservationId) {
+    const existingOrder = await OrdersModel.findByCheckoutReservationId(suppliedReservationId);
+    if (existingOrder) return existingOrder;
+  }
+  if (manualPayment && !suppliedReservationId) {
+    const error = new Error('Your stock reservation has expired. Please check availability and start payment again.');
+    error.status = 409;
+    error.clientMessage = error.message;
+    throw error;
+  }
   try {
     resolvedItems = await resolveOrderItems(payload.items);
-    await validateProductionFormulaAvailability(resolvedItems);
-    if (payload.orderType === 'Pre-Order') {
+    if (!suppliedReservationId) {
+      await validateProductionFormulaAvailability(resolvedItems);
+    }
+    if (payload.orderType === 'Pre-Order' && !suppliedReservationId) {
       if (!payload.pickup?.date) throw new Error('Please select a pickup date.');
       await validatePreOrderPickupDate(resolvedItems, payload.pickup.date);
     }
@@ -730,16 +794,39 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
       `[ORDER] ${payload.items.length} cart item(s) -> ${resolvedItems.length} order_items row(s):`,
       payload.items.map(i => `${i.name || i.packageId || i.bundleId} [type=${i.type || '-'}]`).join(', ')
     );
-    await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
-    if (payload.orderType === 'Pre-Order') {
-      await PreOrderCapacityModel.reserve(
-        reservationId,
-        payload.pickup.date,
+    if (suppliedReservationId) {
+      await reserveResolvedCheckoutItems(
+        checkoutReservationId,
+        payload.orderType,
+        payload.pickup?.date || new Date().toISOString().slice(0, 10),
         resolvedItems,
-        new Date(Date.now() + 30 * 60 * 1000).toISOString()
+        new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      );
+    }
+    if (!suppliedReservationId) {
+      await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
+      await reserveResolvedCheckoutItems(
+        checkoutReservationId,
+        payload.orderType,
+        payload.pickup?.date || new Date().toISOString().slice(0, 10),
+        resolvedItems,
+        new Date(Date.now() + 15 * 60 * 1000).toISOString()
       );
     }
   } catch (itemsError) {
+    if (manualPayment && suppliedReservationId) {
+      try {
+        const existingOrder = await OrdersModel.findByCheckoutReservationId(suppliedReservationId);
+        if (existingOrder) return existingOrder;
+      } catch (lookupError) {
+        console.error('[ORDER] Failed to check for a duplicate checkout submission:', lookupError);
+      }
+    }
+    if (!manualPayment) {
+      try { await CheckoutReservationModel.release(checkoutReservationId); } catch (releaseError) {
+        console.error('[ORDER] Failed to release reservation after validation failure:', releaseError);
+      }
+    }
     throw createOrderError('items', itemsError);
   }
 
@@ -760,9 +847,9 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
       alt_phone: payload.customer.alternativeNumber || ''
     });
   } catch (custError) {
-    if (reservationId) {
-      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
-        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after customer insert failure:', releaseError);
+    if (!manualPayment) {
+      try { await CheckoutReservationModel.release(checkoutReservationId); } catch (releaseError) {
+        console.error('[ORDER] Failed to release reservation after customer insert failure:', releaseError);
       }
     }
     throw createOrderError('customer', custError);
@@ -782,6 +869,7 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
     pickup_date: payload.pickup.date,
     pickup_time: payload.pickup.time,
     pickup_time_end: payload.pickup.timeEnd || null,
+    checkout_reservation_id: checkoutReservationId,
     ...(manualPayment ? {
       payment_verification_status: 'Pending',
       proof_of_payment_path: manualPayment.path,
@@ -793,9 +881,25 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
   try {
     newOrder = await OrdersModel.create([orderToInsert]);
   } catch (orderError) {
-    if (reservationId) {
-      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
-        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after order insert failure:', releaseError);
+    if (manualPayment && suppliedReservationId) {
+      try {
+        const existingOrder = await OrdersModel.findByCheckoutReservationId(suppliedReservationId);
+        if (existingOrder) {
+          try { await CustomersModel.deleteById(customerData.id); } catch (cleanupError) {
+            console.error('[ORDER] Failed to remove duplicate retry customer:', cleanupError);
+          }
+          return existingOrder;
+        }
+      } catch (lookupError) {
+        console.error('[ORDER] Failed to check for an existing order after insert error:', lookupError);
+      }
+    }
+    try { await CustomersModel.deleteById(customerData.id); } catch (cleanupError) {
+      console.error('[ORDER] Failed to clean up customer after order insert error:', cleanupError);
+    }
+    if (!manualPayment) {
+      try { await CheckoutReservationModel.release(checkoutReservationId); } catch (releaseError) {
+        console.error('[ORDER] Failed to release reservation after order insert failure:', releaseError);
       }
     }
     throw createOrderError('order', orderError);
@@ -812,16 +916,37 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
   try {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (itemsError) {
-    if (reservationId) {
-      try { await PreOrderCapacityModel.release(reservationId); } catch (releaseError) {
-        console.error('[PRE-ORDER CAPACITY] Failed to release reservation after item insert failure:', releaseError);
+    try { await OrdersModel.deleteById(newOrder.id); } catch (cleanupError) {
+      console.error('[ORDER] Failed to clean up incomplete order:', cleanupError);
+    }
+    try { await CustomersModel.deleteById(customerData.id); } catch (cleanupError) {
+      console.error('[ORDER] Failed to clean up customer after item insert error:', cleanupError);
+    }
+    if (!manualPayment) {
+      try { await CheckoutReservationModel.release(checkoutReservationId); } catch (releaseError) {
+        console.error('[ORDER] Failed to release reservation after item insert failure:', releaseError);
       }
     }
     throw createOrderError('items', itemsError);
   }
 
-  if (reservationId) {
-    await PreOrderCapacityModel.linkToOrder(reservationId, newOrder.id);
+  try {
+    // Lock and bind the order only after its items exist. This validates the
+    // deadline at proof submission and avoids immortal unlinked proof holds.
+    await CheckoutReservationModel.link(checkoutReservationId, newOrder.id);
+  } catch (linkError) {
+    try { await OrdersModel.deleteById(newOrder.id); } catch (cleanupError) {
+      console.error('[ORDER] Failed to clean up order after reservation link failure:', cleanupError);
+    }
+    try { await CustomersModel.deleteById(customerData.id); } catch (cleanupError) {
+      console.error('[ORDER] Failed to clean up customer after reservation link failure:', cleanupError);
+    }
+    if (!manualPayment) {
+      try { await CheckoutReservationModel.release(checkoutReservationId); } catch (releaseError) {
+        console.error('[ORDER] Failed to release reservation after link failure:', releaseError);
+      }
+    }
+    throw createOrderError('order', linkError);
   }
 
   notifyNewOrder(newOrder, payload);
@@ -891,6 +1016,9 @@ export const completeOrderAndDeductStock = async (orderId) => {
     err.status = 404;
     throw err;
   }
+  if (existingOrder.order_type === 'Buy Now' && existingOrder.checkout_reservation_id) {
+    await CheckoutReservationModel.commit(existingOrder.checkout_reservation_id);
+  }
   if (existingOrder.status === 'Completed') {
     console.log('[SERVICE] Order already Completed — skipping duplicate settlement/deduction.');
     return existingOrder;
@@ -948,7 +1076,7 @@ export const completeOrderAndDeductStock = async (orderId) => {
 
   console.log(`[SERVICE] 5. Found ${items?.length || 0} items to deduct:`, items);
 
-  if (items && items.length > 0) {
+  if (items && items.length > 0 && !(existingOrder.order_type === 'Buy Now' && existingOrder.checkout_reservation_id)) {
     for (const item of items) {
       if (!item.product_id) continue;
 

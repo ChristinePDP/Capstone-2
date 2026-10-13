@@ -70,6 +70,17 @@ const OrdersModel = {
     return data;
   },
 
+  async findByCheckoutReservationId(reservationId) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*, customers(name, phone), order_items(*)')
+      .eq('checkout_reservation_id', reservationId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  },
+
   async create(payload) {
     // FIX: Ini-extract na natin ang { data, error } para id lang ang ibalik
     const { data, error } = await getSupabase()

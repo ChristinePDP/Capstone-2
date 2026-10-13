@@ -9,7 +9,8 @@ import {
   placeOrder,
   markOrderCompleted,
   getPublicConfig,
-  placeManualPaymentOrder
+  placeManualPaymentOrder,
+  reserveCheckout
 } from '../controller/onlineOrdering.controller.js';
 
 const router = express.Router();
@@ -29,8 +30,22 @@ const checkoutLimiter = rateLimit({
   legacyHeaders: false, // I-disable ang `X-RateLimit-*` headers
 });
 
+// A normal online checkout calls the reservation endpoint and then submits
+// proof. Keep its availability checks from consuming the proof-upload quota.
+const reservationLimiter = rateLimit({
+  windowMs: 3 * 60 * 1000,
+  max: 10,
+  message: {
+    success: false,
+    message: 'Too many availability checks. Please wait a moment and try again.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 router.get('/products', getMenuProducts);
 router.post('/preorder-availability', getPreOrderAvailability);
+router.post('/reserve-checkout', reservationLimiter, reserveCheckout);
 router.get('/config', getPublicConfig);
 
 router.post('/upload-inspiration', upload.single('image'), uploadInspiration);

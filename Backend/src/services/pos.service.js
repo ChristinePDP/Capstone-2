@@ -4,7 +4,7 @@ import { RecipeModel } from '../model/recipe.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { OrdersModel } from '../model/orders.model.js';
 import { CustomersModel } from '../model/customers.model.js';
-import { PreOrderCapacityModel } from '../model/preorderCapacity.model.js';
+import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
 import { MaterialModel } from '../model/material.model.js';
 import { createOrderError } from '../utils/orderError.js';
 // Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
@@ -16,6 +16,7 @@ import { createOrderError } from '../utils/orderError.js';
 // ang order slip answers pagdating sa DB.
 import {
   resolveOrderItems,
+  reserveResolvedCheckoutItems,
   validateCelebrationMaterialAvailability,
   validateProductionFormulaAvailability,
   validatePreOrderPickupDate,
@@ -197,25 +198,39 @@ export const createPosOrder = async (payload) => {
   //    BAGO gumawa ng kahit anong row sa DB — parehong pattern gaya ng
   //    ginagamit ng Online Ordering sa createDatabaseOrder.
   let resolvedItems;
-  let preorderReservationId = null;
+  let preorderReservationId = payload.checkoutReservationId || randomUUID();
+  if (payload.checkoutReservationId) {
+    const existingOrder = await OrdersModel.findByCheckoutReservationId(preorderReservationId);
+    if (existingOrder) {
+      return { ...existingOrder, receiptToken: makeReceiptToken(existingOrder.id) };
+    }
+  }
   try {
     resolvedItems = await resolveOrderItems(payload.items);
     await validateProductionFormulaAvailability(resolvedItems);
     if (payload.orderType === 'Pre-Order') {
       if (!payload.pickup?.date) throw new Error('Please select a pickup date.');
       await validatePreOrderPickupDate(resolvedItems, payload.pickup.date);
-      preorderReservationId = randomUUID();
-      await PreOrderCapacityModel.reserve(
-        preorderReservationId,
-        payload.pickup.date,
-        resolvedItems,
-        new Date(Date.now() + 30 * 60 * 1000).toISOString()
-      );
     }
     await validateCelebrationMaterialAvailability(resolvedItems, payload.orderType);
+    await reserveResolvedCheckoutItems(
+      preorderReservationId,
+      payload.orderType,
+      payload.pickup?.date || getManilaNow().date,
+      resolvedItems,
+      new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    );
   } catch (itemsError) {
+    if (payload.checkoutReservationId) {
+      try {
+        const existingOrder = await OrdersModel.findByCheckoutReservationId(preorderReservationId);
+        if (existingOrder) return { ...existingOrder, receiptToken: makeReceiptToken(existingOrder.id) };
+      } catch (lookupError) {
+        console.error('[POS SERVICE] Failed to check an existing order after reservation error:', lookupError?.stack || lookupError);
+      }
+    }
     if (preorderReservationId) {
-      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release rejected pre-order reservation:', releaseError);
       }
     }
@@ -235,7 +250,7 @@ export const createPosOrder = async (payload) => {
     });
   } catch (err) {
     if (preorderReservationId) {
-      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release reservation after order insert failure:', releaseError);
       }
     }
@@ -295,6 +310,7 @@ export const createPosOrder = async (payload) => {
     // para hindi blangko at hindi kailangang pumasok sa 8AM-5PM na slots.
     pickup_time: payload.pickup?.time || (isBuyNow ? manilaNow.time : null),
     pickup_time_end: payload.pickup?.timeEnd || null,
+    checkout_reservation_id: preorderReservationId,
 
     // OPTIONAL: if you add a `pickup_time_slot` text column to `orders`, uncomment
     // the line below to preserve the full slot range (e.g. "08:00-10:00") instead
@@ -307,6 +323,22 @@ export const createPosOrder = async (payload) => {
   try {
     newOrder = await OrdersModel.create([orderToInsert]);
   } catch (err) {
+    if (preorderReservationId) {
+      try {
+        const existingOrder = await OrdersModel.findByCheckoutReservationId(preorderReservationId);
+        if (existingOrder) {
+          try { await CustomersModel.deleteById(customerData.id); } catch (cleanupError) {
+            console.error('[POS SERVICE] Failed to remove duplicate retry customer:', cleanupError?.stack || cleanupError);
+          }
+          return { ...existingOrder, receiptToken: makeReceiptToken(existingOrder.id) };
+        }
+      } catch (lookupError) {
+        console.error('[POS SERVICE] Failed to check an existing order after insert error:', lookupError?.stack || lookupError);
+      }
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release reservation after order creation failure:', releaseError);
+      }
+    }
     try {
       await CustomersModel.deleteById(customerData.id);
     } catch (cleanupError) {
@@ -340,7 +372,7 @@ export const createPosOrder = async (payload) => {
   } catch (err) {
     await cleanupFailedPosOrder(newOrder.id, customerData.id);
     if (preorderReservationId) {
-      try { await PreOrderCapacityModel.release(preorderReservationId); } catch (releaseError) {
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release reservation after item insert failure:', releaseError);
       }
     }
@@ -348,7 +380,16 @@ export const createPosOrder = async (payload) => {
   }
 
   if (preorderReservationId) {
-    await PreOrderCapacityModel.linkToOrder(preorderReservationId, newOrder.id);
+    try {
+      await CheckoutReservationModel.link(preorderReservationId, newOrder.id);
+    } catch (err) {
+      console.error('[POS SERVICE] Failed to link the checkout reservation:', err?.stack || err);
+      await cleanupFailedPosOrder(newOrder.id, customerData.id);
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release reservation after link failure:', releaseError?.stack || releaseError);
+      }
+      throw createOrderError('order', err);
+    }
   }
 
   // 4. Stock Deduction Logic
@@ -359,9 +400,12 @@ export const createPosOrder = async (payload) => {
   // ng aktwal na completion (confirmPosOrderPickup / Orders.jsx).
   if (shouldCompleteImmediately) {
     try {
-      await deductStockForOrderItems(itemsToInsert);
+      await CheckoutReservationModel.commit(preorderReservationId);
     } catch (err) {
       await cleanupFailedPosOrder(newOrder.id, customerData.id);
+      try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
+        console.error('[POS SERVICE] Failed to release reservation after commit failure:', releaseError?.stack || releaseError);
+      }
       throw createOrderError('order', err);
     }
   }
@@ -387,6 +431,10 @@ export const confirmPosOrderPickup = async (orderId, token) => {
   // scan, o na-Complete na dati via Orders.jsx admin page), huwag nang
   // ulitin ang settlement/deduction sa ibaba.
   if (order.status === 'Completed') throw new Error('Order already marked as completed');
+
+  if (order.checkout_reservation_id) {
+    await CheckoutReservationModel.commit(order.checkout_reservation_id);
+  }
 
   // FIX: walang generic `update()` sa OrdersModel — `updateStatus(id, status)`
   // lang ang meron, kaya ito ang tamang gamitin dito.
@@ -417,7 +465,9 @@ export const confirmPosOrderPickup = async (orderId, token) => {
   try {
     const items = await OrderItemsModel.findByOrderId(orderId);
     if (items && items.length > 0) {
-      await deductStockForOrderItems(items, order.order_type);
+      if (!(order.order_type === 'Buy Now' && order.checkout_reservation_id)) {
+        await deductStockForOrderItems(items, order.order_type);
+      }
     }
   } catch (itemsError) {
     console.error('[POS SERVICE] Error fetching items to deduct stock on pickup confirmation:', itemsError);

@@ -10,6 +10,8 @@ import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages } from '../shared/orderSlipUploads';
 import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
+const POS_CHECKOUT_RESERVATION_KEY = 'aileen_cake_max_pos_checkout_reservation_id';
+
 // ─────────────────────────────────────────────────────────────
 // Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
 // and the backend: `daily_limit` is the basis for Pre-order "slots";
@@ -75,6 +77,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const [ereceiptData, setEreceiptData] = useState(null); 
   const [expandedCartIndexes, setExpandedCartIndexes] = useState(() => new Set());
   const submissionLockRef = useRef(false);
+  const checkoutReservationIdRef = useRef(sessionStorage.getItem(POS_CHECKOUT_RESERVATION_KEY) || null);
 
   // FIX (toast): iisang LOCAL na toast bar na ito (walang bagong/hiwalay
   // na file) — ginagamit na ito ngayon PARA SA LAHAT ng dating alert()/
@@ -483,6 +486,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const isWalkIn = orderType === 'Buy Now' && !form.pickupTime;
 
     const payload = {
+      checkoutReservationId: checkoutReservationIdRef.current || (checkoutReservationIdRef.current = crypto.randomUUID()),
       orderType: orderType,
       customer: { name: form.name, phone: form.phone, altPhone: form.altPhone },
       payment: {
@@ -511,6 +515,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     };
 
     try {
+      sessionStorage.setItem(POS_CHECKOUT_RESERVATION_KEY, payload.checkoutReservationId);
       const token = localStorage.getItem('token'); 
       const response = await fetch(`${import.meta.env.VITE_API_URL}/pos/order`, {
         method: 'POST',
@@ -520,7 +525,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       });
 
       const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Failed to process order');
+      if (!response.ok) {
+        const error = new Error(result.message || 'Failed to process order');
+        error.status = response.status;
+        throw error;
+      }
 
       // FIX (req #4): laging isinasara muna ang Order Summary/Checkout
       // modal BAGO magpasya kung magbubukas ng E-Receipt, kaya hindi
@@ -560,6 +569,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       }
 
       onClearCart();
+      checkoutReservationIdRef.current = null;
+      sessionStorage.removeItem(POS_CHECKOUT_RESERVATION_KEY);
       window.dispatchEvent(new CustomEvent('cake:data-changed', {
         detail: { table: 'orders', action: 'created', source: 'pos' }
       }));
@@ -589,6 +600,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     } catch (error) {
       console.error('Checkout error:', error);
+      if (error.status === 409) {
+        checkoutReservationIdRef.current = null;
+        sessionStorage.removeItem(POS_CHECKOUT_RESERVATION_KEY);
+      }
       showToast(getOrderErrorMessage(error), 'error');
     } finally {
       setIsProcessing(false);

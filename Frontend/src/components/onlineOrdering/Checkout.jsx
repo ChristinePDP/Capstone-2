@@ -169,6 +169,8 @@ const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
 const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
 const PAYMENT_PROOF_AMOUNT_KEY = 'aileen_cake_max_payment_proof_amount';
 const PAYMENT_PROOF_NAMESPACE = 'online-order-payment-proof';
+const CHECKOUT_RESERVATION_ID_KEY = 'aileen_cake_max_checkout_reservation_id';
+const CHECKOUT_RESERVATION_EXPIRY_KEY = 'aileen_cake_max_checkout_reservation_expiry';
 
 const ORDER_TYPE_STORAGE_KEY = 'aileen_cake_max_order_type';
 function readStoredOrderType() {
@@ -237,11 +239,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [expandedSummaryIndexes, setExpandedSummaryIndexes] = useState(() => new Set());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isReserving, setIsReserving] = useState(false);
+  const [checkoutReservationId, setCheckoutReservationId] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '');
+  const [reservationExpiresAt, setReservationExpiresAt] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_EXPIRY_KEY) || '');
   const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [, setClockTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setClockTick(t => t + 1), 30000);
+    const id = setInterval(() => setClockTick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
   const [errors, setErrors] = useState({});
@@ -422,6 +427,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   }, [showSummaryModal]);
 
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  const reservationMsRemaining = Date.parse(reservationExpiresAt) - Date.now();
+  const reservationExpired = !checkoutReservationId || !Number.isFinite(reservationMsRemaining) || reservationMsRemaining <= 0;
+  const reservationSecondsRemaining = Math.max(0, Math.ceil(reservationMsRemaining / 1000));
+  const reservationIsUrgent = !reservationExpired && reservationSecondsRemaining <= 5 * 60;
   const halfAmount = totalAmount / 2;
 
   const getLiveNow = () => {
@@ -620,7 +629,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     setShowSummaryModal(true);
   };
 
-  const handleContinueToPayment = () => {
+  const handleContinueToPayment = async () => {
     if (isShopClosedToday()) {
       return setToastMessage(shopClosedMessage);
     }
@@ -642,10 +651,73 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     }
 
     setErrors({});
-    navigate('/onlineOrdering/payment');
+    const now = Date.now();
+    setIsReserving(true);
+    const knownExpiry = Date.parse(reservationExpiresAt);
+    const requestId = checkoutReservationId && (!Number.isFinite(knownExpiry) || knownExpiry > now)
+      ? checkoutReservationId
+      : crypto.randomUUID();
+    setCheckoutReservationId(requestId);
+    sessionStorage.setItem(CHECKOUT_RESERVATION_ID_KEY, requestId);
+    const reservationPayload = {
+      reservationId: requestId,
+      orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
+      pickup: {
+        date: pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate,
+      },
+      items: cart.map(item => ({
+        productId: item.id ?? null,
+        name: item.name,
+        category: item.category,
+        quantity: item.qty,
+        unitPrice: item.price,
+        subtotal: item.price * item.qty,
+        selectedPriceOptions: item.selected_price_options || null,
+        type: item.type || (item.category === 'Package' ? 'package' : null),
+        bundleId: item.bundleId || null,
+        packageId: (item.type === 'package' || item.category === 'Package')
+          ? (item.packageId || item.id || null)
+          : null,
+      })),
+    };
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reservationPayload),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        if (response.status === 409) {
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
+          setCheckoutReservationId('');
+          setReservationExpiresAt('');
+        }
+        setToastMessage(data.message || 'Some items are no longer available. Please review your cart.');
+        return;
+      }
+      const expiry = data.data.expiresAt;
+      setReservationExpiresAt(expiry);
+      sessionStorage.setItem(CHECKOUT_RESERVATION_EXPIRY_KEY, expiry);
+      navigate('/onlineOrdering/payment');
+    } catch (err) {
+      console.error('Checkout stock reservation failed:', err);
+      setToastMessage('Could not reserve your items. Please try again.');
+    } finally {
+      setIsReserving(false);
+    }
   };
 
   const handlePlaceOrder = async () => {
+    if (reservationExpired) {
+      setToastMessage('Your stock reservation has expired. Please check availability again before continuing to payment.');
+      sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
+      sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
+      setCheckoutReservationId('');
+      setReservationExpiresAt('');
+      return;
+    }
     if (isShopClosedToday()) {
       setShowSummaryModal(false);
       setToastMessage(shopClosedMessage);
@@ -749,6 +821,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
     const orderPayload = {
+        checkoutReservationId,
         orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
         customer: {
           name: form.name,
@@ -812,6 +885,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         setCart([]);
         try {
           localStorage.removeItem(CHECKOUT_DRAFT_KEY);
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
+          setCheckoutReservationId('');
+          setReservationExpiresAt('');
           const proofMarker = localStorage.getItem(PAYMENT_PROOF_KEY);
           localStorage.removeItem(PAYMENT_PROOF_KEY);
           localStorage.removeItem(PAYMENT_PROOF_AMOUNT_KEY);
@@ -824,6 +901,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         setShowSummaryModal(false);
         navigate('/onlineOrdering/confirm', { state: { ...JSON.parse(sessionStorage.getItem('tempOrderData') || '{}'), order: data.order } });
       } else {
+        if (response.status === 409) {
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
+          sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
+          setCheckoutReservationId('');
+          setReservationExpiresAt('');
+        }
         setToastMessage(getOrderErrorMessage(
           { message: data.message },
           'Failed to submit payment proof. Please try again.'
@@ -1067,10 +1150,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <button
                         type="button"
                         onClick={handleContinueToPayment}
-                        disabled={shopClosedNow}
-                        className={`mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full px-4 py-2.5 text-[13px] font-semibold text-white transition-colors ${shopClosedNow ? 'bg-[#9C8B80] opacity-60 cursor-not-allowed' : 'bg-[#3B1F0A] hover:bg-[#2A1608]'}`}
+                        disabled={shopClosedNow || isReserving}
+                        className={`mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full px-4 py-2.5 text-[13px] font-semibold text-white transition-colors ${shopClosedNow || isReserving ? 'bg-[#9C8B80] opacity-60 cursor-not-allowed' : 'bg-[#3B1F0A] hover:bg-[#2A1608]'}`}
                       >
-                        Continue to Payment
+                        {isReserving ? 'Checking availability...' : 'Continue to Payment'}
                       </button>
 
                       <button
@@ -1101,6 +1184,23 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <h3 className="text-lg font-serif text-[#3B1F0A] leading-none">Payment</h3>
                   </div>
                   <div className="w-full h-px bg-[#EAE4E0] mb-3 shrink-0"></div>
+                  {reservationExpired ? (
+                    <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                      <p className="font-bold">Your stock reservation has expired.</p>
+                      <p className="mt-1">Do not pay using this checkout. Go back and check availability again to reserve your items.</p>
+                      <button type="button" onClick={() => navigate('/onlineOrdering/checkout')} className="mt-2 rounded-full bg-[#3B1F0A] px-3 py-1.5 font-semibold text-white">
+                        Check Availability Again
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      role="status"
+                      aria-live={reservationIsUrgent ? 'assertive' : 'polite'}
+                      className={`mb-3 rounded-xl border p-2.5 text-xs ${reservationIsUrgent ? 'border-red-300 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}
+                    >
+                      Items reserved for {Math.floor(reservationSecondsRemaining / 60)}:{String(reservationSecondsRemaining % 60).padStart(2, '0')} minutes. Submit your payment proof before the timer ends.
+                    </div>
+                  )}
                   <div className="lg:grid lg:grid-cols-2 lg:grid-rows-1 lg:gap-6 lg:items-stretch lg:flex-1 lg:min-h-0">
                   <div className="min-w-0 flex flex-col">
                   <p className="text-[11px] text-[#8A7264] mb-3.5 shrink-0">We require at least a 50% deposit to process your order.</p>
@@ -1138,7 +1238,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                   <div className="min-w-0 mt-4 lg:mt-0 lg:flex lg:flex-col lg:min-h-0">
                       <div className="rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:items-center lg:justify-center lg:text-center">
                         <p className="text-xs font-semibold text-[#3B1F0A]">Pay via QR code</p>
-                        {paymentConfigLoading ? (
+                        {reservationExpired ? (
+                          <div role="alert" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-center text-xs text-amber-900">
+                            <Clock size={22} />
+                            <span>The payment QR is hidden because this stock reservation has expired.</span>
+                          </div>
+                        ) : paymentConfigLoading ? (
                           <div role="status" aria-live="polite" className="mx-auto my-3 flex h-64 w-64 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
                             <Loader2 size={24} className="animate-spin" />
                             <span className="text-[11px] font-medium">Loading QR code…</span>
@@ -1495,7 +1600,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 </button>
                 <button
                   onClick={handlePlaceOrder}
-                  disabled={isProcessing || shopClosedNow}
+                  disabled={isProcessing || shopClosedNow || reservationExpired}
                   className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
                 >
                   {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Processing...') : 'Place Order'}

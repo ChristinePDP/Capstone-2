@@ -5,6 +5,11 @@ const ORDER_SUBMISSION_ERROR_MESSAGE =
 
 export function createOrderError(stage, cause) {
   const error = new Error(`Order ${stage} processing failed`, { cause });
+  if (cause?.code === 'CHECKOUT_RESERVATION') {
+    error.status = 409;
+    error.clientMessage = cause.message;
+    return error;
+  }
   if (cause?.code === 'PREORDER_CAPACITY') {
     error.status = 409;
     error.clientMessage = cause.message;

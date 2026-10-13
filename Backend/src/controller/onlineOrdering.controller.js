@@ -4,6 +4,20 @@ import { fetchMenuProducts, getPreOrderDateAvailability, uploadImageToBucket, cr
   getStorageBaseUrl, 
   updateProduct } from '../services/onlineOrdering.service.js';
 import { supabase } from '../config/supabase.js'; 
+import { reserveCheckoutOrder } from '../services/onlineOrdering.service.js';
+
+export const reserveCheckout = async (req, res) => {
+  try {
+    const reservation = await reserveCheckoutOrder(req.body || {});
+    return res.status(201).json({ success: true, data: reservation });
+  } catch (error) {
+    console.error('Checkout Reservation Error:', error?.stack || error);
+    return res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Unable to reserve your items. Please try again.',
+    });
+  }
+};
 
 export const getPublicConfig = async (req, res) => {
   try {

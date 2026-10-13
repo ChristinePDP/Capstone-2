@@ -1,6 +1,7 @@
 // backend/services/orders.service.js
 import crypto from 'crypto';
 import { OrdersModel } from '../model/orders.model.js';
+import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { MaterialModel } from '../model/material.model.js';
@@ -242,8 +243,16 @@ const OrdersService = {
       return existingOrder;
     }
 
+    if (status === 'Completed' && existingOrder.checkout_reservation_id) {
+      await CheckoutReservationModel.commit(existingOrder.checkout_reservation_id);
+    }
+
     const updated = await OrdersModel.updateStatus(id, status);
     let finalOrder = updated;
+
+    if (status === 'Cancelled' && updated.checkout_reservation_id) {
+      await CheckoutReservationModel.release(updated.checkout_reservation_id);
+    }
 
     if (status === 'Ready' && existingOrder.status !== 'Ready' && updated.order_type === 'Pre-Order') {
       const items = await OrderItemsModel.findByOrderId(id);
@@ -288,7 +297,7 @@ const OrdersService = {
       try {
         const items = await OrderItemsModel.findByOrderId(id);
 
-        if (items && items.length > 0) {
+        if (items && items.length > 0 && !(updated.order_type === 'Buy Now' && updated.checkout_reservation_id)) {
           for (const item of items) {
             if (!item.product_id) continue;
 
@@ -334,11 +343,11 @@ const OrdersService = {
     if (order.status !== 'Pending Verification' || !getStoredPaymentProofPath(order)) {
       return null;
     }
-    return OrdersModel.updatePaymentVerification(
-      id,
-      accepted ? 'Accepted' : 'Rejected',
-      adminId
-    );
+    // The database locks the order and transitions its reservation in the
+    // same transaction, so racing accept/reject actions cannot split state.
+    const changed = await CheckoutReservationModel.verifyPayment(id, accepted, adminId);
+    if (!changed) return null;
+    return OrdersModel.findById(id);
   },
 };
 
