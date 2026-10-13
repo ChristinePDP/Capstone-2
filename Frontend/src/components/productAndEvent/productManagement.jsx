@@ -210,11 +210,12 @@ function ProductCard({ product, onEdit, onDelete }) {
   const isVariablePricing = product.pricing_mode === 'variable';
   const missingFormula = product.category !== 'Celebration Material'
     && product.has_production_formula === false;
+  const isInactive = product.is_active === false;
 
   return (
-    <div className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0">
+    <div className={`bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0`}>
       {/* Pinaliit nang konti ang height sa mobile para hindi mukhang humahaba */}
-      <div className="@container relative h-28 sm:h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center">
+      <div className={`@container relative h-28 sm:h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center ${isInactive ? 'opacity-60 grayscale' : ''}`}>
         {imageUrl ? (
           <img src={imageUrl} alt={product.name} className="w-full h-full object-cover" />
         ) : (
@@ -232,7 +233,12 @@ function ProductCard({ product, onEdit, onDelete }) {
             </span>
           )}
         </div>
-        {missingFormula && (
+        {isInactive && (
+          <span className="absolute left-2 bottom-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-[#5A453C] text-white px-2 py-1 rounded-full shadow-sm">
+            Inactive
+          </span>
+        )}
+        {missingFormula && !isInactive && (
           <div className="absolute left-2 right-2 bottom-2">
             <span className="block rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm">
               No production formula yet - Cannot appear in POS/Online Ordering
@@ -242,7 +248,7 @@ function ProductCard({ product, onEdit, onDelete }) {
       </div>
 
       {/* Adjust padding for 2-column mobile */}
-      <div className="p-3 sm:p-4 flex flex-col flex-grow">
+      <div className={`p-3 sm:p-4 flex flex-col flex-grow ${isInactive ? 'opacity-60 grayscale' : ''}`}>
         <p className="font-bold text-[#3B1F0A] text-xs sm:text-sm mb-1 truncate">{product.name}</p>
 
         <p className="text-[10px] sm:text-[11px] text-[#8A7264] mb-3 truncate leading-relaxed">
@@ -384,6 +390,12 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     return catOk && searchOk;
   });
 
+  // Sa lahat ng tab (All, Cake, Pastry, atbp.): ang inactive products ay nasa
+  // pinakahuli ng listahan (pagkatapos pati ng mga bundle).
+  const isInactiveProduct = (p) => p.is_active === false;
+  const activeProducts = filtered.filter(p => !isInactiveProduct(p));
+  const inactiveProducts = filtered.filter(isInactiveProduct);
+
   const bundleSearchOk = (b) => !search || (b.bundle_name || '').toLowerCase().includes(search.toLowerCase());
 
   // "bundles" (mula sa promo_bundles table) ay may dalawang category ngayon:
@@ -443,7 +455,9 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     const saved = savedProduct
       ? {
           ...savedProduct,
-          is_active: savedProduct.is_active ?? true,
+          is_active: savedProduct.is_active
+            ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.is_active
+            ?? true,
           has_production_formula: savedProduct.category === 'Celebration Material'
             ? true
             : savedProduct.has_production_formula === true,
@@ -586,13 +600,16 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       ) : (
         /* Naayos na Grid Classes: default 2 columns sa mobile, gap ay 3 sa mobile at 5 sa tablet/desktop */
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-5">
-          {filtered.map(p => (
+          {activeProducts.map(p => (
             <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
           {/* Isinasama ang mga Promo Bundle sa "All" view — sa hulihan ng
               listahan, pagkatapos ng lahat ng regular na product. */}
           {bundlesWithAvailability.map(b => (
             <BundleCard key={`bundle-${b.id}`} bundle={b} onEdit={handleEditBundle} onDelete={handleDeleteBundle} />
+          ))}
+          {inactiveProducts.map(p => (
+            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
           {!filtered.length && !filteredBundles.length && (
             <div className="col-span-full text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">

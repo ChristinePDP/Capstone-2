@@ -298,6 +298,9 @@ export const updateDatabaseProduct = async (id, productData) => {
   const productToUpdate = {
     name: productData.name,
     category: productData.category,
+    // Active/Inactive toggle. Boolean lang ang tinatanggap; kung hindi
+    // pinadala (undefined), hindi ito galaw (tatanggalin sa ibaba).
+    is_active: typeof productData.is_active === 'boolean' ? productData.is_active : undefined,
     order_type: productData.order_type,
     price: productData.price,
     inclusion: productData.inclusion,

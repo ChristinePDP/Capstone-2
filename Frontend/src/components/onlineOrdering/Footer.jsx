@@ -13,8 +13,7 @@ function FacebookIcon(props) {
 
 export default function Footer() {
   const hours = [
-    { day: 'Mon - Sat', time: '7:00 AM - 5:00 PM' },
-    { day: 'Sunday', time: 'Closed', muted: true },
+    { day: 'Mon - Sun', time: '7:00 AM - 5:00 PM' },
   ];
 
   return (
@@ -67,11 +66,11 @@ export default function Footer() {
             <ul className="flex flex-col gap-2 sm:gap-3 text-[11px] sm:text-[12px] text-white/80">
               <li className="flex items-center gap-2">
                 <Phone size={12} className="text-[#D4A87A] shrink-0" />
-                0912-345-6789
+                0915-441-7719
               </li>
               <li className="flex items-center gap-2">
                 <Mail size={12} className="text-[#D4A87A] shrink-0" />
-                <span className="truncate">hello@aileencakemax.com</span>
+                <span className="truncate">AileenCakeMax@gmail.com</span>
               </li>
               <li className="flex items-start gap-2">
                 <MapPin size={12} className="text-[#D4A87A] shrink-0 mt-0.5" />
