@@ -1313,13 +1313,13 @@ function isProductEligible(series, horizonKey) {
   return recentUnits >= rules.minUnitsRecent;
 }
 
-// Forecast ng isang produkto para sa isang horizon.
-function forecastOneProduct(series, horizonKey, futureDates) {
+// Forecast ng isang produkto para sa isang comparison horizon, optionally
+// using the longer model and taking only its first comparison-horizon days.
+function forecastOneProduct(series, horizonKey, futureDates, modelHorizonKey = horizonKey) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
-  const rules = PRODUCT_FORECAST_RULES[horizonKey];
 
   const { values } = runForecastModel(series, futureDates, {
-    ...getModelOptions(horizonKey),
+    ...getModelOptions(modelHorizonKey),
     // FIX: total units ng susunod na 7/30 araw ang kailangan dito, kinukumpara
     // sa aktwal na total ng huling 7/30 araw. Magkaiba ang bilang ng bawat
     // weekday sa dalawang window (lalo na sa 30 araw), kaya kapag may weekday
@@ -1330,7 +1330,7 @@ function forecastOneProduct(series, horizonKey, futureDates) {
     useSeasonality: false,
   });
 
-  const forecast = Math.round(sumOf(values));
+  const forecast = Math.round(sumOf(values.slice(0, horizon)));
   const recentQty = sumOf(series.slice(-horizon).map((p) => p.value));
   const diff = forecast - recentQty;
   const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
@@ -1348,7 +1348,7 @@ function isMeaningfulChange(result, horizonKey) {
 // Backtest para sa product lists: gaano kalapit ang forecast na total
 // units sa totoong nangyari, at TAMA BA ANG DIREKSYON ng mga produktong
 // nilagay sa growth/risk (directionHitPct).
-function backtestProductHorizon(products, horizonKey) {
+function backtestProductHorizon(products, horizonKey, useThirtyDayForecast = false) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
   const { maxOrigins, originStepDays } = FORECAST_MODEL.backtest;
@@ -1369,7 +1369,14 @@ function backtestProductHorizon(products, horizonKey) {
       const test = product.series.slice(originEnd, originEnd + horizon);
       if (test.length < horizon || !isProductEligible(train, horizonKey)) continue;
 
-      const result = forecastOneProduct(train, horizonKey, test.map((p) => p.date));
+      const modelHorizonKey = useThirtyDayForecast && isProductEligible(train, "30d")
+        ? "30d"
+        : horizonKey;
+      const futureDates = Array.from(
+        { length: TIMEFRAME_DAYS[modelHorizonKey] },
+        (_, i) => addDaysToKey(test[0].date, i)
+      );
+      const result = forecastOneProduct(train, horizonKey, futureDates, modelHorizonKey);
       const actual = sumOf(test.map((p) => p.value));
 
       totalActual += actual;
@@ -1405,16 +1412,20 @@ function emptyProductPayload(timeframe) {
   return { label: PF_TIMEFRAME_LABELS[timeframe] || PF_TIMEFRAME_LABELS["30d"], growth: [], risk: [] };
 }
 
-function buildProductHorizonPayload(products, horizonKey, todayKey) {
+function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDayForecast = false) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
   const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
+  const modelHistoryDays = horizonKey === "7d" && useThirtyDayForecast
+    ? REQUIRED_HISTORY_DAYS["30d"]
+    : historyDays;
 
-  // Parehong history window ng Sales Forecast para sa horizon na ito.
+  // Keep enough history for the 30-day model when its first seven days are
+  // also used by the 7-day comparison.
   const scoped = products
-    .map((p) => ({ ...p, series: p.series.slice(-historyDays) }))
+    .map((p) => ({ ...p, series: p.series.slice(-modelHistoryDays) }))
     .filter((p) => p.series.length > 0);
-  const eligible = scoped.filter((p) => isProductEligible(p.series, horizonKey));
+  const eligible = scoped.filter((p) => isProductEligible(p.series.slice(-historyDays), horizonKey));
 
   // DIAGNOSTIC LOG (walang epekto sa forecast): ipakita kung bakit pumasa/bagsak
   // ang bawat produkto, para makita kung aling rule ang humaharang.
@@ -1445,11 +1456,19 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
     );
   }
 
-  const futureDates = buildFutureDateKeys(todayKey, horizon);
-  const results = eligible.map((p) => ({
-    name: p.productName,
-    ...forecastOneProduct(p.series, horizonKey, futureDates),
-  }));
+  const results = eligible.map((p) => {
+    const useThirtyDayModel = horizonKey === "7d"
+      && useThirtyDayForecast
+      && isProductEligible(p.series, "30d");
+    const modelHorizonKey = useThirtyDayModel ? "30d" : horizonKey;
+    const modelSeries = useThirtyDayModel ? p.series : p.series.slice(-historyDays);
+    const futureDates = buildFutureDateKeys(todayKey, TIMEFRAME_DAYS[modelHorizonKey]);
+
+    return {
+      name: p.productName,
+      ...forecastOneProduct(modelSeries, horizonKey, futureDates, modelHorizonKey),
+    };
+  });
 
   const toListItem = (r) => ({ name: r.name, pct: r.pct, diff: r.diff, forecast: r.forecast, recentQty: r.recentQty });
 
@@ -1487,7 +1506,7 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
     eligibleProducts: eligible.length,
     skippedProducts: scoped.length - eligible.length,
     totals,
-    accuracy: backtestProductHorizon(scoped, horizonKey),
+    accuracy: backtestProductHorizon(scoped, horizonKey, useThirtyDayForecast),
     method: {
       type: "recent run-rate + damped trend, like-for-like totals (computed in code, no AI)",
       historyDays,
@@ -1496,6 +1515,9 @@ function buildProductHorizonPayload(products, horizonKey, todayKey) {
       trendDamping: FORECAST_MODEL.trendDamping,
       rules,
       comparison: `forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
+      ...(horizonKey === "7d" && useThirtyDayForecast
+        ? { sevenDayForecastSource: "first 7 days of the 30-day model when eligible; otherwise the 7-day model" }
+        : {}),
     },
   };
 }
@@ -1531,7 +1553,7 @@ async function refreshProductForecast() {
       };
     } else {
       payload = {
-        sevenDay: buildProductHorizonPayload(products, "7d", todayKey),
+        sevenDay: buildProductHorizonPayload(products, "7d", todayKey, includeThirty),
         thirtyDay: includeThirty
           ? buildProductHorizonPayload(products, "30d", todayKey)
           : productInsufficientPart("30d", thirtyCheck.message),

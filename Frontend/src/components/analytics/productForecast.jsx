@@ -17,22 +17,8 @@ export default function ProductForecasting({ data, view = '30d' }) {
   const growthList = (Array.isArray(data?.growth) ? data.growth : []).slice(0, MAX_ITEMS_PER_LIST);
   const riskList = (Array.isArray(data?.risk) ? data.risk : []).slice(0, MAX_ITEMS_PER_LIST);
 
-  const renderMiniSparkline = (trend) => {
-    const isUp = trend === 'up';
-    const color = isUp ? '#10b981' : '#f43f5e';
-    const path = isUp
-      ? "M0,16 L10,12 L20,14 L30,6 L40,8 L50,2"
-      : "M0,2 L10,8 L20,6 L30,14 L40,12 L50,16";
-
-    return (
-      <svg width="40" height="16" viewBox="0 0 50 20" className="overflow-visible hidden sm:block shrink-0">
-        <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M0,18 L50,18" fill="none" stroke={color} strokeWidth="1.5" strokeDasharray="3 3" opacity="0.3" />
-      </svg>
-    );
-  };
-
-  const periodText = view === '7d' ? '7-Day' : '30-Day';
+  const periodDays = view === '7d' ? 7 : 30;
+  const formatSigned = (value) => `${value >= 0 ? '+' : ''}${value}`;
 
   return (
     <div className="w-full bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col p-4 sm:p-5 h-full min-h-[350px]">
@@ -42,7 +28,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
           <h3 className="text-base font-bold text-[#3d2410] leading-tight truncate">
             Product Forecast
           </h3>
-          <p className="text-xs text-[#9a8b7a]">{periodText} Trend Analysis</p>
+          <p className="text-xs text-[#9a8b7a]">Forecast vs last {periodDays} days</p>
         </div>
       </div>
       
@@ -61,20 +47,24 @@ export default function ProductForecasting({ data, view = '30d' }) {
               {growthList.length === 0 ? (
                 <EmptyRow text="No fast moving products detected." />
               ) : (
-                growthList.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between py-2.5 border-b border-[#f3ede4] last:border-0 gap-3 hover:bg-[#faf8f5] transition-colors rounded-lg px-2 -mx-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-[#3d2410] truncate">{item.name}</p>
-                      <p className="text-[11px] text-[#9a8b7a] mt-0.5">
-                        <span className="font-bold text-[#5C3317]">{item.forecast} pcs</span> <span className="opacity-80">(+{item.diff})</span>
-                      </p>
+                growthList.map((item, i) => {
+                  const recent = item.recentQty ?? (item.forecast - item.diff);
+                  return (
+                    <div key={i} className="flex items-center justify-between py-2.5 border-b border-[#f3ede4] last:border-0 gap-3 hover:bg-[#faf8f5] transition-colors rounded-lg px-2 -mx-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-[#3d2410] truncate">{item.name}</p>
+                        <p className="text-[11px] text-[#9a8b7a] mt-0.5">
+                          <span>Last {periodDays} days: {recent} pcs → Next {periodDays} days: </span>
+                          <span className="font-bold text-[#5C3317]">{item.forecast} pcs</span>{' '}
+                          <span className="opacity-80">({formatSigned(item.diff)})</span>
+                        </p>
+                      </div>
+                      <span className="shrink-0 w-12 text-right text-emerald-600 text-[13px] font-bold tabular-nums">
+                        {formatSigned(item.pct)}%
+                      </span>
                     </div>
-                    {renderMiniSparkline('up')}
-                    <span className="shrink-0 w-12 text-right text-emerald-600 text-[13px] font-bold tabular-nums">
-                      +{item.pct}%
-                    </span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -88,20 +78,24 @@ export default function ProductForecasting({ data, view = '30d' }) {
               {riskList.length === 0 ? (
                 <EmptyRow text="No at-risk products detected." />
               ) : (
-                riskList.map((item, i) => (
-                  <div key={i} className="flex items-center justify-between py-2.5 border-b border-[#f3ede4] last:border-0 gap-3 hover:bg-[#faf8f5] transition-colors rounded-lg px-2 -mx-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-[#3d2410] truncate">{item.name}</p>
-                      <p className="text-[11px] text-[#9a8b7a] mt-0.5">
-                        <span className="font-bold text-[#5C3317]">{item.forecast} pcs</span> <span className="opacity-80">({item.diff})</span>
-                      </p>
+                riskList.map((item, i) => {
+                  const recent = item.recentQty ?? (item.forecast - item.diff);
+                  return (
+                    <div key={i} className="flex items-center justify-between py-2.5 border-b border-[#f3ede4] last:border-0 gap-3 hover:bg-[#faf8f5] transition-colors rounded-lg px-2 -mx-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-[#3d2410] truncate">{item.name}</p>
+                        <p className="text-[11px] text-[#9a8b7a] mt-0.5">
+                          <span>Last {periodDays} days: {recent} pcs → Next {periodDays} days: </span>
+                          <span className="font-bold text-[#5C3317]">{item.forecast} pcs</span>{' '}
+                          <span className="opacity-80">({formatSigned(item.diff)})</span>
+                        </p>
+                      </div>
+                      <span className="shrink-0 w-12 text-right text-rose-600 text-[13px] font-bold tabular-nums">
+                        {formatSigned(item.pct)}%
+                      </span>
                     </div>
-                    {renderMiniSparkline('down')}
-                    <span className="shrink-0 w-12 text-right text-rose-600 text-[13px] font-bold tabular-nums">
-                      {item.pct}%
-                    </span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
