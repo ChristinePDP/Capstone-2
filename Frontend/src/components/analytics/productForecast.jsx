@@ -21,7 +21,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
   const formatSigned = (value) => `${value >= 0 ? '+' : ''}${value}`;
 
   return (
-    <div className="w-full bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col p-4 sm:p-5 h-full min-h-[350px]">
+    <div className="w-full bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col p-4 sm:p-5 h-[460px] min-h-0">
       <div className="flex items-center gap-2 mb-4 shrink-0">
         <Activity size={20} className="text-[#5C3317] shrink-0" />
         <div>
@@ -37,7 +37,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
           {message || 'Insufficient data for this timeframe.'}
         </div>
       ) : (
-        <div className="flex flex-col flex-1 gap-5">
+        <div className="flex flex-col flex-1 min-h-0 gap-5">
           {/* Fast Moving */}
           <div className="flex flex-col shrink-0">
             <h4 className="text-[11px] font-bold text-[#9a8b7a] uppercase tracking-wider mb-2 border-b border-[#e7ded4] pb-1.5 flex items-center gap-1.5">

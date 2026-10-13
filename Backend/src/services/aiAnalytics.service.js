@@ -1415,10 +1415,9 @@ function emptyProductPayload(timeframe) {
 function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDayForecast = false) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
+  const modelHorizonKey = horizonKey === "7d" && useThirtyDayForecast ? "30d" : horizonKey;
   const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
-  const modelHistoryDays = horizonKey === "7d" && useThirtyDayForecast
-    ? REQUIRED_HISTORY_DAYS["30d"]
-    : historyDays;
+  const modelHistoryDays = REQUIRED_HISTORY_DAYS[modelHorizonKey];
 
   // Keep enough history for the 30-day model when its first seven days are
   // also used by the 7-day comparison.
@@ -1509,14 +1508,14 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     accuracy: backtestProductHorizon(scoped, horizonKey, useThirtyDayForecast),
     method: {
       type: "recent run-rate + damped trend, like-for-like totals (computed in code, no AI)",
-      historyDays,
-      levelWindowDays: FORECAST_MODEL.levelWindowDays[horizonKey],
-      trendWindowDays: FORECAST_MODEL.trendWindowDays[horizonKey],
+      historyDays: modelHistoryDays,
+      levelWindowDays: FORECAST_MODEL.levelWindowDays[modelHorizonKey],
+      trendWindowDays: FORECAST_MODEL.trendWindowDays[modelHorizonKey],
       trendDamping: FORECAST_MODEL.trendDamping,
       rules,
       comparison: `forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
       ...(horizonKey === "7d" && useThirtyDayForecast
-        ? { sevenDayForecastSource: "first 7 days of the 30-day model when eligible; otherwise the 7-day model" }
+        ? { sevenDayForecastSource: "first 7 days of the 30-day model when the product is eligible; otherwise the 7-day model" }
         : {}),
     },
   };
