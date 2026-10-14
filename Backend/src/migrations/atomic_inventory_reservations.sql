@@ -83,6 +83,7 @@ CREATE OR REPLACE FUNCTION public.reserve_checkout_inventory(
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE line record; v_basis numeric; v_taken numeric; v_item_name text;
+  v_existing checkout_reservations; v_is_existing boolean := false;
 BEGIN
   IF p_reservation_id IS NULL OR p_order_type IS NULL OR p_pickup_date IS NULL
      OR p_expires_at IS NULL OR p_expires_at <= now()
@@ -99,30 +100,19 @@ BEGIN
   UPDATE checkout_reservations SET state = 'expired', updated_at = now()
   WHERE state = 'active' AND expires_at <= now();
 
-  IF EXISTS (SELECT 1 FROM checkout_reservations WHERE reservation_id = p_reservation_id) THEN
-    IF EXISTS (SELECT 1 FROM checkout_reservations WHERE reservation_id = p_reservation_id
-      AND state IN ('active','proof_submitted') AND order_id IS NULL
-      AND (state='proof_submitted' OR expires_at > now())
-      AND order_type = p_order_type AND pickup_date = p_pickup_date) THEN
-      IF EXISTS (
-        SELECT 1 FROM (
-          (SELECT x.product_id, x.material_id, sum(x.quantity)::integer AS quantity
-            FROM jsonb_to_recordset(p_items) AS x(product_id uuid, material_id uuid, quantity integer)
-            WHERE x.product_id IS NOT NULL AND x.quantity > 0 GROUP BY x.product_id, x.material_id
-            EXCEPT SELECT i.product_id, i.material_id, i.quantity FROM checkout_reservation_items i WHERE i.reservation_id=p_reservation_id)
-          UNION ALL
-          (SELECT i.product_id, i.material_id, i.quantity FROM checkout_reservation_items i WHERE i.reservation_id=p_reservation_id
-            EXCEPT SELECT x.product_id, x.material_id, sum(x.quantity)::integer AS quantity
-              FROM jsonb_to_recordset(p_items) AS x(product_id uuid, material_id uuid, quantity integer)
-              WHERE x.product_id IS NOT NULL AND x.quantity > 0 GROUP BY x.product_id, x.material_id)
-        ) AS cart_difference
-      ) THEN
-        RAISE EXCEPTION 'This reservation ID is already in use for a different cart.' USING ERRCODE = 'P0001';
-      END IF;
-      RETURN jsonb_build_object('reserved', true, 'reservation_id', p_reservation_id,
-        'expires_at', (SELECT expires_at FROM checkout_reservations WHERE reservation_id = p_reservation_id));
+  SELECT * INTO v_existing FROM checkout_reservations
+  WHERE reservation_id = p_reservation_id FOR UPDATE;
+  IF FOUND THEN
+    IF v_existing.state <> 'active' OR v_existing.order_id IS NOT NULL
+       OR v_existing.expires_at <= now()
+       OR v_existing.order_type <> p_order_type
+       OR v_existing.pickup_date <> p_pickup_date THEN
+      RAISE EXCEPTION 'This checkout reservation is no longer active. Please check availability again.' USING ERRCODE = 'P0001';
     END IF;
-    RAISE EXCEPTION 'This checkout reservation is no longer active. Please check availability again.' USING ERRCODE = 'P0001';
+    -- Keep this reservation's original deadline. Replace its item quantities
+    -- below in the same transaction, so a failed resize restores the old hold.
+    v_is_existing := true;
+    DELETE FROM checkout_reservation_items WHERE reservation_id = p_reservation_id;
   END IF;
 
   -- Lock every affected inventory row in stable order. Reservations for a
@@ -154,7 +144,13 @@ BEGIN
           WHERE old.product_id=line.product_id AND old.pickup_date=p_pickup_date AND old.state='active'
             AND (old.expires_at IS NULL OR old.expires_at>now())), 0);
         IF v_taken + line.quantity > v_basis THEN
-          RAISE EXCEPTION '"%" has no remaining availability for the selected pickup date. Please remove this item and try again.', v_item_name USING ERRCODE = 'P0001';
+          RAISE EXCEPTION 'Only % % available for "%" on this pickup date; your cart has %. Reduce the quantity to % or less, or choose another pickup date.',
+            GREATEST(v_basis - v_taken, 0),
+            CASE WHEN GREATEST(v_basis - v_taken, 0) = 1 THEN 'item is' ELSE 'items are' END,
+            v_item_name,
+            line.quantity,
+            GREATEST(v_basis - v_taken, 0)
+            USING ERRCODE = 'P0001';
         END IF;
       END IF;
     ELSIF line.material_id IS NOT NULL THEN
@@ -166,7 +162,13 @@ BEGIN
           AND r.state IN ('active','proof_submitted')
           AND (r.state = 'proof_submitted' OR r.expires_at > now());
       IF v_taken + line.quantity > v_basis THEN
-        RAISE EXCEPTION '"%" is out of stock. Please remove this item and try again.', v_item_name USING ERRCODE = 'P0001';
+        RAISE EXCEPTION 'Only % % available for "%"; your cart has %. Reduce the quantity to % or less.',
+          GREATEST(v_basis - v_taken, 0),
+          CASE WHEN GREATEST(v_basis - v_taken, 0) = 1 THEN 'item is' ELSE 'items are' END,
+          v_item_name,
+          line.quantity,
+          GREATEST(v_basis - v_taken, 0)
+          USING ERRCODE = 'P0001';
       END IF;
     ELSE
       SELECT name, stock_quantity INTO v_item_name, v_basis FROM products WHERE id = line.product_id FOR UPDATE;
@@ -177,19 +179,28 @@ BEGIN
           AND r.state IN ('active','proof_submitted')
           AND (r.state = 'proof_submitted' OR r.expires_at > now());
       IF v_taken + line.quantity > v_basis THEN
-        RAISE EXCEPTION '"%" is out of stock. Please remove this item and try again.', v_item_name USING ERRCODE = 'P0001';
+        RAISE EXCEPTION 'Only % % available for "%"; your cart has %. Reduce the quantity to % or less.',
+          GREATEST(v_basis - v_taken, 0),
+          CASE WHEN GREATEST(v_basis - v_taken, 0) = 1 THEN 'item is' ELSE 'items are' END,
+          v_item_name,
+          line.quantity,
+          GREATEST(v_basis - v_taken, 0)
+          USING ERRCODE = 'P0001';
       END IF;
     END IF;
   END LOOP;
 
-  INSERT INTO checkout_reservations (reservation_id, order_type, pickup_date, expires_at)
-  VALUES (p_reservation_id, p_order_type, p_pickup_date, p_expires_at);
+  IF NOT v_is_existing THEN
+    INSERT INTO checkout_reservations (reservation_id, order_type, pickup_date, expires_at)
+    VALUES (p_reservation_id, p_order_type, p_pickup_date, p_expires_at);
+  END IF;
   INSERT INTO checkout_reservation_items (reservation_id, product_id, material_id, quantity)
   SELECT p_reservation_id, x.product_id, x.material_id, sum(x.quantity)::integer
   FROM jsonb_to_recordset(p_items) AS x(product_id uuid, material_id uuid, quantity integer)
   WHERE x.product_id IS NOT NULL AND x.quantity > 0
   GROUP BY x.product_id, x.material_id;
-  RETURN jsonb_build_object('reserved', true, 'reservation_id', p_reservation_id, 'expires_at', p_expires_at);
+  RETURN jsonb_build_object('reserved', true, 'reservation_id', p_reservation_id,
+    'expires_at', CASE WHEN v_is_existing THEN v_existing.expires_at ELSE p_expires_at END);
 END; $$;
 
 CREATE OR REPLACE FUNCTION public.link_checkout_reservation(p_reservation_id uuid, p_order_id uuid)

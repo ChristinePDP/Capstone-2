@@ -172,6 +172,41 @@ const PAYMENT_PROOF_NAMESPACE = 'online-order-payment-proof';
 const CHECKOUT_RESERVATION_ID_KEY = 'aileen_cake_max_checkout_reservation_id';
 const CHECKOUT_RESERVATION_EXPIRY_KEY = 'aileen_cake_max_checkout_reservation_expiry';
 
+const buildCheckoutReservationPayload = (cart, reservationId, orderType, pickupDate) => ({
+  reservationId,
+  orderType,
+  pickup: { date: pickupDate },
+  items: cart.map(item => ({
+    productId: item.id ?? null,
+    name: item.name,
+    category: item.category,
+    quantity: item.qty,
+    unitPrice: item.price,
+    subtotal: item.price * item.qty,
+    selectedPriceOptions: item.selected_price_options || null,
+    type: item.type || (item.category === 'Package' ? 'package' : null),
+    bundleId: item.bundleId || null,
+    packageId: (item.type === 'package' || item.category === 'Package')
+      ? (item.packageId || item.id || null)
+      : null,
+  })),
+});
+
+const checkoutReservationCartSignature = (cart, orderType, pickupDate) => JSON.stringify({
+  orderType,
+  pickupDate,
+  items: cart.map(item => ({
+    productId: item.id ?? null,
+    type: item.type || (item.category === 'Package' ? 'package' : null),
+    bundleId: item.bundleId || null,
+    packageId: (item.type === 'package' || item.category === 'Package')
+      ? (item.packageId || item.id || null)
+      : null,
+    quantity: Number(item.qty || 0),
+    selectedPriceOptions: item.selected_price_options || null,
+  })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+});
+
 const ORDER_TYPE_STORAGE_KEY = 'aileen_cake_max_order_type';
 function readStoredOrderType() {
   try {
@@ -242,6 +277,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const [isReserving, setIsReserving] = useState(false);
   const [checkoutReservationId, setCheckoutReservationId] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '');
   const [reservationExpiresAt, setReservationExpiresAt] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_EXPIRY_KEY) || '');
+  const [paymentReservationState, setPaymentReservationState] = useState(() => paymentOnly ? 'checking' : 'idle');
+  const [paymentReservationMessage, setPaymentReservationMessage] = useState('');
+  const [validatedReservationCart, setValidatedReservationCart] = useState('');
+  const paymentReservationAttemptRef = useRef(0);
   const [uploadProgress, setUploadProgress] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [, setClockTick] = useState(0);
@@ -249,6 +288,83 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     const id = setInterval(() => setClockTick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
+  const reservationPickupDate = pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate;
+  const currentReservationCartSignature = useMemo(
+    () => checkoutReservationCartSignature(
+      cart,
+      pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
+      reservationPickupDate
+    ),
+    [cart, pickupType, reservationPickupDate]
+  );
+
+  // The payment URL can be revisited directly or restored by browser history.
+  // Reconfirm the exact visible cart against the existing server reservation
+  // before showing payment instructions; the RPC preserves its original expiry.
+  useEffect(() => {
+    if (!isPaymentStep) return undefined;
+    const attempt = ++paymentReservationAttemptRef.current;
+    const reservationId = sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '';
+    const storedExpiry = sessionStorage.getItem(CHECKOUT_RESERVATION_EXPIRY_KEY) || '';
+    if (!reservationId) {
+      setPaymentReservationState('unavailable');
+      setPaymentReservationMessage('We could not confirm a stock hold for this order. Return to order details and check availability before paying.');
+      return undefined;
+    }
+    if (!Number.isFinite(Date.parse(storedExpiry)) || Date.parse(storedExpiry) <= Date.now()) {
+      setPaymentReservationState('expired');
+      setPaymentReservationMessage('Your stock hold has expired. Return to order details and check availability again before paying.');
+      return undefined;
+    }
+
+    setPaymentReservationState('checking');
+    setPaymentReservationMessage('');
+    setValidatedReservationCart('');
+    const payload = buildCheckoutReservationPayload(
+      cart,
+      reservationId,
+      pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
+      reservationPickupDate
+    );
+    fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async response => ({ response, data: await response.json() }))
+      .then(({ response, data }) => {
+        if (paymentReservationAttemptRef.current !== attempt) return;
+        if (!response.ok || !data.success) {
+          const rawMessage = String(data.message || '');
+          const message = /reservation id|different cart/i.test(rawMessage)
+            ? 'The items in your cart do not match the stock currently held for you. Do not pay yet. Return to order details and check availability again.'
+            : rawMessage || 'We could not confirm that every item in your cart is held for you. Do not pay yet; return to order details and check availability again.';
+          setPaymentReservationState('unavailable');
+          setPaymentReservationMessage(message);
+          return;
+        }
+        const expiry = data.data?.expiresAt;
+        if (!expiry || Date.parse(expiry) <= Date.now()) {
+          setPaymentReservationState('expired');
+          setPaymentReservationMessage('Your stock hold has expired. Return to order details and check availability again before paying.');
+          return;
+        }
+        setReservationExpiresAt(expiry);
+        sessionStorage.setItem(CHECKOUT_RESERVATION_EXPIRY_KEY, expiry);
+        setValidatedReservationCart(currentReservationCartSignature);
+        setPaymentReservationState('ready');
+      })
+      .catch(error => {
+        console.error('Payment reservation check failed:', error);
+        if (paymentReservationAttemptRef.current !== attempt) return;
+        setPaymentReservationState('unavailable');
+        setPaymentReservationMessage('We could not verify your reserved items. Do not pay yet. Check your connection and try again from order details.');
+      });
+
+    return () => {
+      if (paymentReservationAttemptRef.current === attempt) paymentReservationAttemptRef.current += 1;
+    };
+  }, [isPaymentStep, currentReservationCartSignature]);
   const [errors, setErrors] = useState({});
   const proofHydratedRef = useRef(false);
 
@@ -659,27 +775,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       : crypto.randomUUID();
     setCheckoutReservationId(requestId);
     sessionStorage.setItem(CHECKOUT_RESERVATION_ID_KEY, requestId);
-    const reservationPayload = {
-      reservationId: requestId,
-      orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
-      pickup: {
-        date: pickupType === 'now' ? getLiveNow().dateStr : form.pickupDate,
-      },
-      items: cart.map(item => ({
-        productId: item.id ?? null,
-        name: item.name,
-        category: item.category,
-        quantity: item.qty,
-        unitPrice: item.price,
-        subtotal: item.price * item.qty,
-        selectedPriceOptions: item.selected_price_options || null,
-        type: item.type || (item.category === 'Package' ? 'package' : null),
-        bundleId: item.bundleId || null,
-        packageId: (item.type === 'package' || item.category === 'Package')
-          ? (item.packageId || item.id || null)
-          : null,
-      })),
-    };
+    const reservationPayload = buildCheckoutReservationPayload(
+      cart,
+      requestId,
+      pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
+      reservationPickupDate
+    );
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
         method: 'POST',
@@ -688,12 +789,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       });
       const data = await response.json();
       if (!response.ok || !data.success) {
-        if (response.status === 409) {
-          sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
-          sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
-          setCheckoutReservationId('');
-          setReservationExpiresAt('');
-        }
+        // Keep the current reservation ID and deadline after a failed cart
+        // resize. The database rolls back the resize and preserves the old
+        // hold, so retrying with a new ID would count the user's own hold twice.
         setToastMessage(data.message || 'Some items are no longer available. Please review your cart.');
         return;
       }
@@ -710,6 +808,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   };
 
   const handlePlaceOrder = async () => {
+    if (paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature) {
+      setToastMessage('We have not confirmed that the items currently shown are reserved for you. Do not pay yet. Return to order details and check availability again.');
+      return;
+    }
     if (reservationExpired) {
       setToastMessage('Your stock reservation has expired. Please check availability again before continuing to payment.');
       sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
@@ -902,10 +1004,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         navigate('/onlineOrdering/confirm', { state: { ...JSON.parse(sessionStorage.getItem('tempOrderData') || '{}'), order: data.order } });
       } else {
         if (response.status === 409) {
-          sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
-          sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
-          setCheckoutReservationId('');
-          setReservationExpiresAt('');
+          // A rejected order submission can leave the original active hold
+          // intact. Keep its ID and deadline so the customer does not create
+          // a second hold that counts their own stock twice.
+          setPaymentReservationState('unavailable');
+          setValidatedReservationCart('');
+          setPaymentReservationMessage('We could not complete the order with this checkout. Do not submit another payment. Return to order details and contact the shop if you have already transferred money.');
         }
         setToastMessage(getOrderErrorMessage(
           { message: data.message },
@@ -1184,12 +1288,24 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <h3 className="text-lg font-serif text-[#3B1F0A] leading-none">Payment</h3>
                   </div>
                   <div className="w-full h-px bg-[#EAE4E0] mb-3 shrink-0"></div>
-                  {reservationExpired ? (
+                  {reservationExpired || paymentReservationState === 'expired' ? (
                     <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
                       <p className="font-bold">Your stock reservation has expired.</p>
                       <p className="mt-1">Do not pay using this checkout. Go back and check availability again to reserve your items.</p>
                       <button type="button" onClick={() => navigate('/onlineOrdering/checkout')} className="mt-2 rounded-full bg-[#3B1F0A] px-3 py-1.5 font-semibold text-white">
                         Check Availability Again
+                      </button>
+                    </div>
+                  ) : paymentReservationState === 'checking' ? (
+                    <div role="status" aria-live="polite" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                      Checking that the items shown here are still reserved for you…
+                    </div>
+                  ) : paymentReservationState === 'unavailable' ? (
+                    <div role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-900">
+                      <p className="font-bold">We could not confirm this cart’s reservation.</p>
+                      <p className="mt-1">{paymentReservationMessage} Your previous hold remains subject to its original timer.</p>
+                      <button type="button" onClick={() => navigate('/onlineOrdering/checkout')} className="mt-2 rounded-full bg-[#3B1F0A] px-3 py-1.5 font-semibold text-white">
+                        Return to Order Details
                       </button>
                     </div>
                   ) : (
@@ -1238,7 +1354,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                   <div className="min-w-0 mt-4 lg:mt-0 lg:flex lg:flex-col lg:min-h-0">
                       <div className="rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col lg:items-center lg:justify-center lg:text-center">
                         <p className="text-xs font-semibold text-[#3B1F0A]">Pay via QR code</p>
-                        {reservationExpired ? (
+                        {paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature ? (
+                          <div role="status" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-center text-xs text-amber-900">
+                            <Lock size={22} />
+                            <span>The payment QR is hidden until we confirm that these exact items are reserved for you.</span>
+                          </div>
+                        ) : reservationExpired ? (
                           <div role="alert" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-center text-xs text-amber-900">
                             <Clock size={22} />
                             <span>The payment QR is hidden because this stock reservation has expired.</span>
@@ -1292,13 +1413,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           <p className="py-8 text-center text-xs text-red-700">Payment QR code is not configured.</p>
                         )}
                         <p className="text-[10px] text-[#8A7264]">After paying, upload a screenshot of your successful transaction.</p>
-                        <input
+                          <input
                           ref={proofInputRef}
                           id="payment-proof-upload"
                           type="file"
                           accept="image/*"
                           onChange={handleProofChange}
-                          className="sr-only"
+                            className="sr-only"
+                            disabled={paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature || reservationExpired}
                         />
                         {proofPreviewUrl ? (
                           <div className="mt-3 flex w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-lg border border-[#DED4CC] bg-white p-2 text-left">
@@ -1364,7 +1486,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
             <div className="min-w-0">
             <button
               onClick={handleProceedToOrder}
-              disabled={shopClosedNow || isProcessing || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
+              disabled={shopClosedNow || isProcessing || paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature || reservationExpired || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
               className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isProcessing ? 'Processing Payment...' : 'Proceed to Order'}

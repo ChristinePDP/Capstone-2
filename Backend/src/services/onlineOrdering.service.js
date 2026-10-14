@@ -520,6 +520,16 @@ export const resolveOrderItems = async (items = []) => {
   return resolved;
 };
 
+const checkoutReservationErrorMessage = cause => {
+  const message = String(cause?.message || '');
+  if (/reservation id is already in use for a different cart/i.test(message)) {
+    return 'Your cart has changed since your items were reserved. Your current hold is for the items you selected before. Restore those items to continue with that hold, or wait for its timer to expire before starting a different checkout.';
+  }
+  if (/checkout reservation is no longer active|reservation has expired/i.test(message)) {
+    return 'Your stock hold has expired. Please check availability and reserve your items again before paying.';
+  }
+  return message || 'Some items are no longer available. Please review your cart and try again.';
+};
 export const reserveResolvedCheckoutItems = async (reservationId, orderType, pickupDate, resolvedItems, expiresAt) => {
   const materialByProduct = new Map();
   const productIds = [...new Set(resolvedItems.map(item => item.product_id).filter(Boolean))];
@@ -537,7 +547,7 @@ export const reserveResolvedCheckoutItems = async (reservationId, orderType, pic
   try {
     return await CheckoutReservationModel.reserve(reservationId, orderType, pickupDate, reservationItems, expiresAt);
   } catch (cause) {
-    const error = new Error(cause.message || 'Some items are no longer available. Please review your cart.');
+    const error = new Error(checkoutReservationErrorMessage(cause));
     error.status = 409;
     error.code = 'CHECKOUT_RESERVATION';
     throw error;
@@ -565,7 +575,7 @@ export const reserveCheckoutOrder = async payload => {
   try {
     reservationResult = await reserveResolvedCheckoutItems(payload.reservationId, orderType, pickupDate, resolvedItems, expiresAt);
   } catch (cause) {
-    const error = new Error(cause.message || 'Some items are no longer available. Please review your cart.');
+    const error = new Error(checkoutReservationErrorMessage(cause));
     error.status = 409;
     error.code = 'CHECKOUT_RESERVATION';
     throw error;
