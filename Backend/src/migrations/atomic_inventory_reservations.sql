@@ -109,6 +109,31 @@ BEGIN
        OR v_existing.pickup_date <> p_pickup_date THEN
       RAISE EXCEPTION 'This checkout reservation is no longer active. Please check availability again.' USING ERRCODE = 'P0001';
     END IF;
+    -- An unchanged cart with a live reservation is already held in the
+    -- database. Confirm its exact item quantities before returning; browser
+    -- storage alone must never be treated as proof of a reservation.
+    IF NOT EXISTS (
+      SELECT product_id, material_id, quantity
+      FROM checkout_reservation_items
+      WHERE reservation_id = p_reservation_id
+      EXCEPT
+      SELECT x.product_id, x.material_id, sum(x.quantity)::integer
+      FROM jsonb_to_recordset(p_items) AS x(product_id uuid, material_id uuid, quantity integer)
+      WHERE x.product_id IS NOT NULL AND x.quantity > 0
+      GROUP BY x.product_id, x.material_id
+    ) AND NOT EXISTS (
+      SELECT x.product_id, x.material_id, sum(x.quantity)::integer
+      FROM jsonb_to_recordset(p_items) AS x(product_id uuid, material_id uuid, quantity integer)
+      WHERE x.product_id IS NOT NULL AND x.quantity > 0
+      GROUP BY x.product_id, x.material_id
+      EXCEPT
+      SELECT product_id, material_id, quantity
+      FROM checkout_reservation_items
+      WHERE reservation_id = p_reservation_id
+    ) THEN
+      RETURN jsonb_build_object('reserved', true, 'reservation_id', p_reservation_id,
+        'expires_at', v_existing.expires_at);
+    END IF;
     -- Keep this reservation's original deadline. Replace its item quantities
     -- below in the same transaction, so a failed resize restores the old hold.
     v_is_existing := true;

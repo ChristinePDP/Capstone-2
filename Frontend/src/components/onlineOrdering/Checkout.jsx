@@ -317,6 +317,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       return undefined;
     }
 
+    if (pickupType === 'later' && (!form.pickupDate || form.pickupDate < minPreOrderDate)) {
+      setPaymentReservationState('unavailable');
+      setPaymentReservationMessage(`Choose a pickup date on or after ${formatDateLong(minPreOrderDate)} before continuing to payment.`);
+      return undefined;
+    }
+
     setPaymentReservationState('checking');
     setPaymentReservationMessage('');
     setValidatedReservationCart('');
@@ -759,6 +765,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     else if (!phoneRegex.test(form.phone)) newErrors.phone = 'Enter a valid 11-digit contact number.';
     if (form.altPhone && !phoneRegex.test(form.altPhone)) newErrors.altPhone = 'Enter a valid 11-digit number.';
     if (needsPickupDate && !form.pickupDate) newErrors.pickupDate = 'Please select a pickup date.';
+    else if (needsPickupDate && form.pickupDate < minPreOrderDate) {
+      newErrors.pickupDate = `Please choose a date on or after ${formatDateLong(minPreOrderDate)}.`;
+    }
     if (!form.pickupTime) newErrors.pickupTime = 'Please select a pickup time.';
 
     if (Object.keys(newErrors).length > 0) {
@@ -768,11 +777,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
     setErrors({});
     const now = Date.now();
-    setIsReserving(true);
     const knownExpiry = Date.parse(reservationExpiresAt);
     const requestId = checkoutReservationId && (!Number.isFinite(knownExpiry) || knownExpiry > now)
       ? checkoutReservationId
       : crypto.randomUUID();
+    setIsReserving(true);
     setCheckoutReservationId(requestId);
     sessionStorage.setItem(CHECKOUT_RESERVATION_ID_KEY, requestId);
     const reservationPayload = buildCheckoutReservationPayload(

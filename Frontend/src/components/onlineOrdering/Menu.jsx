@@ -1393,9 +1393,10 @@ function OrderTypeSwitch({ value, forcedType, onChange, blockedReasons = {} }) {
 // Module-level cache
 // ─────────────────────────────────────────────────────────────
 let menuProductsFetchPromise = null;
-function getMenuProducts() {
+function getMenuProducts(forceRefresh = false) {
+  if (forceRefresh) menuProductsFetchPromise = null;
   if (!menuProductsFetchPromise) {
-    menuProductsFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products`)
+    menuProductsFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products`, { cache: 'no-store' })
       .then(res => res.json())
       .then(json => (json.success && Array.isArray(json.data))
         ? json.data.map(p => ({
@@ -1415,9 +1416,10 @@ function getMenuProducts() {
 }
 
 let menuBundlesFetchPromise = null;
-function getMenuBundles() {
+function getMenuBundles(forceRefresh = false) {
+  if (forceRefresh) menuBundlesFetchPromise = null;
   if (!menuBundlesFetchPromise) {
-    menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`)
+    menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`, { cache: 'no-store' })
       .then(res => res.json())
       .then(json => (json.success && Array.isArray(json.data)) ? json.data : [])
       .catch(err => {
@@ -1536,14 +1538,25 @@ export default function Menu({ cart, setCart }) {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([getMenuProducts(), getMenuBundles()]).then(([productsData, bundlesData]) => {
-      if (cancelled) return;
-      setRawProducts(productsData);
-      setRawBundles(bundlesData);
-      setIsLoading(false);
-    });
+    const refreshCatalog = () => {
+      Promise.all([getMenuProducts(true), getMenuBundles(true)]).then(([productsData, bundlesData]) => {
+        if (cancelled) return;
+        setRawProducts(productsData);
+        setRawBundles(bundlesData);
+        setIsLoading(false);
+      });
+    };
 
-    return () => { cancelled = true; };
+    refreshCatalog();
+    const refreshOnFocus = () => refreshCatalog();
+    window.addEventListener('focus', refreshOnFocus);
+    const refreshTimer = window.setInterval(refreshCatalog, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', refreshOnFocus);
+      window.clearInterval(refreshTimer);
+    };
   }, []);
 
   const products = useMemo(() => {
@@ -1656,6 +1669,69 @@ export default function Menu({ cart, setCart }) {
 
     return [...activeBundlesAndPackages, ...regularProducts];
   }, [rawProducts, rawBundles]);
+
+  // IndexedDB/Local storage preserves the cart between visits; it is not a
+  // stock source. Reconcile saved quantities against the latest catalog data
+  // whenever the menu refreshes, and again before checkout as a final guard.
+  useEffect(() => {
+    if (isLoading || !products.length || !cart.length) return;
+    const liveById = new Map(products.map(product => [String(product.id), product]));
+    const refreshedCart = cart.map(item => {
+      const live = liveById.get(String(item.id));
+      if (!live) return null;
+      return {
+        ...item,
+        name: live.name,
+        category: live.category,
+        order_type: live.order_type,
+        type: live.type || item.type,
+        bundleId: live.bundleId || item.bundleId,
+        packageId: live.packageId || item.packageId,
+        stock_quantity: live.stock_quantity,
+        daily_limit: live.daily_limit,
+        stock_basis_field: live.stock_basis_field,
+        available_stock: live.available_stock,
+        buy_now_available_stock: live.buy_now_available_stock,
+        pre_order_available_stock: live.pre_order_available_stock,
+        pre_order_unlimited: live.pre_order_unlimited,
+        is_tracked: live.is_tracked,
+        is_celebration_material: live.is_celebration_material,
+        celebration_material_id: live.celebration_material_id,
+      };
+    }).filter(Boolean);
+
+    const currentType = getForcedOrderType(refreshedCart) ?? selectedOrderType;
+    const remainingById = new Map();
+    let changedQty = false;
+    const reconciledCart = refreshedCart.map(item => {
+      if (!isQuantityTracked(item)) return item;
+      const id = String(item.id);
+      const remaining = remainingById.has(id)
+        ? remainingById.get(id)
+        : Math.max(0, Math.floor(Number(getQuantityLimit(item, currentType)) || 0));
+      const keptQty = Math.min(Math.max(0, Number(item.qty) || 0), remaining);
+      remainingById.set(id, Math.max(0, remaining - keptQty));
+      if (keptQty !== item.qty) changedQty = true;
+      return { ...item, qty: keptQty };
+    }).filter(item => item.qty > 0);
+
+    const removedItems = reconciledCart.length !== cart.length;
+    const metadataChanged = refreshedCart.some((item, index) => {
+      const old = cart[index];
+      return !old || old.available_stock !== item.available_stock
+        || old.buy_now_available_stock !== item.buy_now_available_stock
+        || old.pre_order_available_stock !== item.pre_order_available_stock
+        || old.stock_quantity !== item.stock_quantity
+        || old.order_type !== item.order_type
+        || old.name !== item.name
+        || old.is_tracked !== item.is_tracked;
+    });
+    if (!changedQty && !removedItems && !metadataChanged) return;
+    setCart(reconciledCart);
+    if (changedQty || removedItems) {
+      showToast('Your cart was updated to match the latest available stock. Please review the quantities.');
+    }
+  }, [cart, isLoading, products, selectedOrderType, setCart]);
 
   const categories = useMemo(() => {
     const base = ['Package', 'Cake', 'Pastry', 'Celebration Material'];
