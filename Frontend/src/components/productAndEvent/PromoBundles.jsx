@@ -1482,7 +1482,37 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
   }, []);
 
   useEffect(() => {
-    const handleDataChanged = () => fetchAll(true, true);
+    const handleDataChanged = async (event) => {
+      const change = event.detail || {};
+      if (change.table === 'products' || change.table === 'occasions') {
+        return fetchAll(true, true);
+      }
+      if (change.table !== 'promo_bundles' && change.table !== 'bundle_products') return;
+
+      const id = change.table === 'bundle_products'
+        ? (change.record?.bundle_id || change.relatedId)
+        : (change.record?.id || change.recordId);
+      if (!id) return fetchAll(true, true);
+      if (change.table === 'promo_bundles' && change.event === 'DELETE') {
+        setBundles(previous => previous.filter(bundle => String(bundle.id) !== String(id)));
+        if (bundlesPageCache) bundlesPageCache.bundles = bundlesPageCache.bundles.filter(bundle => String(bundle.id) !== String(id));
+        return;
+      }
+      try {
+        const response = await fetch(`${BUNDLES_API}/${encodeURIComponent(id)}`, { credentials: 'include' });
+        const bundle = await parseResponse(response);
+        setBundles(previous => previous.some(item => String(item.id) === String(id))
+          ? previous.map(item => String(item.id) === String(id) ? bundle : item)
+          : [...previous, bundle]);
+        if (bundlesPageCache) {
+          bundlesPageCache.bundles = bundlesPageCache.bundles.some(item => String(item.id) === String(id))
+            ? bundlesPageCache.bundles.map(item => String(item.id) === String(id) ? bundle : item)
+            : [...bundlesPageCache.bundles, bundle];
+        }
+      } catch (err) {
+        console.error('Refresh Bundle Error:', err);
+      }
+    };
     window.addEventListener('cake:data-changed', handleDataChanged);
     return () => {
       window.removeEventListener('cake:data-changed', handleDataChanged);

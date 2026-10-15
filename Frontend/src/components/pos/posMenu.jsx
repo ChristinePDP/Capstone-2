@@ -16,6 +16,12 @@ export function invalidatePosBundlesCache() {
   posBundlesCache = null;
 }
 
+function updatePosBundleCache(id, bundle) {
+  if (!posBundlesCache) return;
+  posBundlesCache = posBundlesCache.filter(item => String(item.id) !== String(id));
+  if (bundle) posBundlesCache.push(bundle);
+}
+
 async function fetchPosBundles() {
   if (posBundlesCache) return posBundlesCache;
   if (posBundlesPromise) return posBundlesPromise;
@@ -1112,6 +1118,45 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
       if (isMounted) setBundlesLoaded(true);
     });
     return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    const handleDataChanged = async (event) => {
+      const change = event.detail || {};
+      const { table } = change;
+      if (!['promo_bundles', 'bundle_products', 'products', 'occasions'].includes(table)) return;
+      if (table === 'promo_bundles' || table === 'bundle_products') {
+        const id = table === 'bundle_products' ? (change.record?.bundle_id || change.relatedId) : (change.record?.id || change.recordId);
+        if (!id) return;
+        if (table === 'promo_bundles' && change.event === 'DELETE') {
+          setBundles(previous => previous.filter(bundle => String(bundle.id) !== String(id)));
+          updatePosBundleCache(id, null);
+          return;
+        }
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles/${encodeURIComponent(id)}`, { credentials: 'include' });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || result.success === false || !result.data) throw new Error(result.message || 'Bundle refresh failed');
+          const bundle = result.data;
+          setBundles(previous => previous.some(item => String(item.id) === String(id))
+            ? previous.map(item => String(item.id) === String(id) ? bundle : item)
+            : [...previous, bundle]);
+          updatePosBundleCache(id, bundle);
+        } catch (error) {
+          console.error('[POS MENU] Failed to refresh changed bundle:', error);
+        }
+        return;
+      }
+      invalidatePosBundlesCache();
+      try {
+        const updated = await fetchPosBundles();
+        setBundles(updated);
+      } catch (error) {
+        console.error('[POS MENU] Failed to refresh changed bundles:', error);
+      }
+    };
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => window.removeEventListener('cake:data-changed', handleDataChanged);
   }, []);
 
   const bundleItems = useMemo(() => {

@@ -17,6 +17,20 @@ const watchedTables = [
   'bundle_products',
   'notifications',
 ];
+const tablesWithSafeRowPayload = new Set([
+  'raw_ingredients',
+  'celebration_materials',
+  'products',
+  'recipes',
+  'recipe_ingredients',
+  'production_logs',
+  'waste_logs',
+  'notifications',
+  'occasions',
+]);
+
+const safeOrderItemFields = ['id', 'order_id', 'product_id', 'bundle_id', 'package_id', 'quantity'];
+const safeBundleProductFields = ['id', 'bundle_id', 'product_id', 'quantity'];
 
 let channelStarted = false;
 
@@ -57,12 +71,25 @@ export function startRealtimeBridge() {
     channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table },
-      payload => broadcast({
-        table,
-        event: payload.eventType,
-        recordId: payload.new?.id || payload.old?.id || null,
-        at: new Date().toISOString(),
-      })
+      payload => {
+        const record = payload.eventType === 'DELETE' ? payload.old : payload.new;
+        const safeOrderItem = table === 'order_items' && record
+          ? Object.fromEntries(safeOrderItemFields.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
+          : null;
+        const safeBundleProduct = table === 'bundle_products' && record
+          ? Object.fromEntries(safeBundleProductFields.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
+          : null;
+        broadcast({
+          table,
+          event: payload.eventType,
+          recordId: record?.id || null,
+          relatedId: record?.order_id || record?.recipe_id || record?.bundle_id || null,
+          ...(tablesWithSafeRowPayload.has(table) ? { record } : {}),
+          ...(safeOrderItem ? { record: safeOrderItem } : {}),
+          ...(safeBundleProduct ? { record: safeBundleProduct } : {}),
+          at: new Date().toISOString(),
+        });
+      }
     );
   }
 

@@ -15,6 +15,10 @@ const ProductModel = {
       query = query.ilike('name', `%${filters.search}%`);
     }
 
+    if (filters.productId) {
+      query = query.eq('id', filters.productId);
+    }
+
     if (filters.activeOnly !== false) {
       // Treat NULL as active for legacy/new rows created before the
       // is_active default was enforced. Only an explicit false hides a

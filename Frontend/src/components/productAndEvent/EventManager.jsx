@@ -474,7 +474,31 @@ export default function EventManager() {
   }, []);
 
   useEffect(() => {
-    const handleDataChanged = () => fetchEvents(true, true);
+    const handleDataChanged = async (event) => {
+      const change = event.detail || {};
+      if (change.table !== 'occasions') return;
+      const id = change.record?.id || change.recordId;
+      if (!id) return fetchEvents(true, true);
+      if (change.event === 'DELETE') {
+        setEvents(previous => previous.filter(item => String(item.id) !== String(id)));
+        if (eventsCache) eventsCache = eventsCache.filter(item => String(item.id) !== String(id));
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE}/events/${encodeURIComponent(id)}`);
+        const updated = await parseResponse(response);
+        setEvents(previous => previous.some(item => String(item.id) === String(id))
+          ? previous.map(item => String(item.id) === String(id) ? updated : item)
+          : [...previous, updated]);
+        if (eventsCache) {
+          eventsCache = eventsCache.some(item => String(item.id) === String(id))
+            ? eventsCache.map(item => String(item.id) === String(id) ? updated : item)
+            : [...eventsCache, updated];
+        }
+      } catch (err) {
+        console.error('Refresh Event Error:', err);
+      }
+    };
     window.addEventListener('cake:data-changed', handleDataChanged);
     return () => {
       window.removeEventListener('cake:data-changed', handleDataChanged);

@@ -154,18 +154,65 @@ export default function PosPage() {
   }, [products, orderType, cartReady]);
 
   useEffect(() => {
-    const handleDataChanged = (event) => {
-      const table = event.detail?.table;
-      if (table !== 'products' && table !== 'celebration_materials' && table !== 'orders' && table !== 'order_items' && table !== 'promo_bundles' && table !== 'bundle_products') return;
+    const handleDataChanged = async (event) => {
+      const change = event.detail || {};
+      const { table, event: operation, record, recordId } = change;
+      if (table === 'promo_bundles' || table === 'bundle_products') {
+        invalidatePosBundlesCache();
+        return;
+      }
+      if (table !== 'products' && table !== 'celebration_materials' && table !== 'order_items' && table !== 'orders') return;
 
-      posProductsCache = null;
-      invalidatePosBundlesCache();
-      loadProducts(true, true).catch(error => console.error('Silent POS refresh failed:', error));
+      let productIds = table === 'celebration_materials'
+        ? [record?.product_id]
+        : table === 'order_items' ? [record?.product_id] : table === 'products' ? [record?.id || recordId] : [];
+      if (table === 'orders' && recordId && operation !== 'DELETE') {
+        try {
+          const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+          const response = await apiClient.get(`${API_BASE}/inventory/orders/${encodeURIComponent(recordId)}`);
+          const order = response.data?.data;
+          productIds = [...new Set((order?.items || order?.order_items || []).map(item => item.product_id).filter(Boolean))];
+        } catch (error) {
+          console.error('Silent POS order refresh failed:', error);
+          return;
+        }
+      }
+      productIds = [...new Set(productIds.filter(Boolean).map(String))];
+      if (productIds.length === 0) {
+        posProductsCache = null;
+        loadProducts(true, true).catch(error => console.error('Silent POS refresh failed:', error));
+        return;
+      }
+
+      try {
+        const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+        const refreshed = await Promise.all(productIds.map(async productId => {
+          const response = await apiClient.get(`${API_BASE}/pos/products`, { params: { productId } });
+          return { productId, updated: response.data?.data?.[0] || null };
+        }));
+        setProducts(previous => refreshed.reduce((next, { productId, updated }) => {
+          const normalized = updated && { ...updated, order_slip_fields: updated.order_slip_fields || [], pricing_mode: updated.pricing_mode || 'fixed', price_groups: updated.price_groups || [], price_matrix: updated.price_matrix || [] };
+          if (!normalized) return next.filter(product => String(product.id) !== productId);
+          return next.some(product => String(product.id) === productId)
+            ? next.map(product => String(product.id) === productId ? normalized : product)
+            : [...next, normalized];
+        }, previous));
+        const cache = [...(posProductsCache || products)];
+        for (const { productId, updated } of refreshed) {
+          const index = cache.findIndex(product => String(product.id) === productId);
+          if (!updated && index >= 0) cache.splice(index, 1);
+          else if (updated && index >= 0) cache[index] = updated;
+          else if (updated) cache.push(updated);
+        }
+        posProductsCache = cache;
+      } catch (error) {
+        console.error('Silent POS product refresh failed:', error);
+      }
     };
 
     window.addEventListener('cake:data-changed', handleDataChanged);
     return () => window.removeEventListener('cake:data-changed', handleDataChanged);
-  }, [products.length]);
+  }, [products]);
 
   // I-call ito pagkatapos ng successful na Place Order, para agad ma-reflect
   // sa cashier ang bagong stock/available_stock (bawas na dahil sa order na

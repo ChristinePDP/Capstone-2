@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AppContext.jsx
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '../services/apiClient';
 import { getProfile } from '../services/authService.js';
 
@@ -26,6 +26,67 @@ const REALTIME_API_URL = `${import.meta.env.VITE_API_URL}/realtime/events`;
 const FULFILLMENT_API_URL = `${import.meta.env.VITE_API_URL}/allOrders/pending-celebration-materials`;
 
 const normalizeName = (value = '') => String(value).trim().toLowerCase();
+
+const normalizeIngredientRow = item => ({
+  id: item.id,
+  name: item.name,
+  unit: item.unit,
+  stock: Number(item.stock_quantity ?? 0),
+  min: Number(item.minimum_stock ?? 0),
+  costPerUnit: Number(item.cost_per_unit ?? 0),
+  stock_quantity: Number(item.stock_quantity ?? 0),
+  minimum_stock: Number(item.minimum_stock ?? 0),
+  cost_per_unit: Number(item.cost_per_unit ?? 0),
+  category: item.category,
+});
+
+const normalizeMaterialRow = item => ({
+  id: item.id,
+  name: item.name,
+  productId: item.product_id || null,
+  product_id: item.product_id || null,
+  unit: item.unit,
+  stock: Number(item.stock_quantity ?? 0),
+  min: Number(item.minimum_stock ?? 0),
+  costPerUnit: Number(item.cost_per_unit ?? 0),
+  stock_quantity: Number(item.stock_quantity ?? 0),
+  minimum_stock: Number(item.minimum_stock ?? 0),
+  cost_per_unit: Number(item.cost_per_unit ?? 0),
+  category: item.category,
+  materialType: item.material_type,
+  material_type: item.material_type,
+});
+
+const normalizeProductRow = product => ({
+  ...product,
+  name: product.name || '',
+  stock: Number(product.stock_quantity ?? product.stock ?? 0),
+  stock_quantity: Number(product.stock_quantity ?? product.stock ?? 0),
+  normalizedName: normalizeName(product.name),
+});
+
+const normalizeProductionLogRow = log => ({
+  id: log.id,
+  dt: log.produced_at,
+  product: log.product_name,
+  produced: Number(log.total_produced ?? 0),
+  yieldUnit: log.yield_unit || 'pcs',
+  batches: Number(log.batches ?? 0),
+  recipeId: log.recipe_id,
+  productId: log.product_id,
+  notes: log.notes || '',
+});
+
+const normalizeWasteLogRow = log => ({
+  id: log.id,
+  dt: log.logged_at,
+  type: log.waste_type,
+  item: log.item_name,
+  qty: `${log.quantity} ${log.unit}`,
+  cost: Number(log.cost),
+  reason: log.reason,
+  notes: log.notes,
+});
 
 // Kinukuha ang error message mula sa axios error object
 const getErrMsg = (err, fallback) =>
@@ -93,6 +154,8 @@ export function AppProvider({ children }) {
   const [products,       setProducts]       = useState([]);
   const [orders,         setOrders]         = useState([]);
   const [pendingMaterialFulfillment, setPendingMaterialFulfillment] = useState([]);
+  const dashboardRowsRef = useRef({ ingredients: [], materials: [] });
+  dashboardRowsRef.current = { ingredients, materials };
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
@@ -247,9 +310,105 @@ export function AppProvider({ children }) {
     if (!isAuthed) return undefined;
 
     const source = new EventSource(REALTIME_API_URL, { withCredentials: true });
-    let refreshTimer = null;
+    let wasDisconnected = false;
+    const targetedRefreshTimers = new Map();
+    const scheduleTargetedRefresh = (key, callback) => {
+      if (targetedRefreshTimers.has(key)) return;
+      const timer = setTimeout(() => {
+        targetedRefreshTimers.delete(key);
+        callback();
+      }, 100);
+      targetedRefreshTimers.set(key, timer);
+    };
 
-    const refreshFromEvent = (event) => {
+    const updateList = (setter, rowId, row, normalize, eventType) => {
+      if (!rowId) return;
+      if (eventType === 'DELETE') {
+        setter(previous => previous.filter(item => String(item.id) !== String(rowId)));
+        return;
+      }
+      if (!row) return;
+      const normalized = normalize(row);
+      setter(previous => {
+        const index = previous.findIndex(item => String(item.id) === String(rowId));
+        if (index < 0) return [normalized, ...previous];
+        const next = [...previous];
+        next[index] = { ...next[index], ...normalized };
+        return next;
+      });
+    };
+
+    const refreshOrder = async (orderId, eventType) => {
+      if (!orderId) return;
+      if (eventType === 'DELETE') {
+        setOrders(previous => previous.filter(order => String(order.id) !== String(orderId)));
+        return;
+      }
+      try {
+        const response = await apiClient.get(`${ORDERS_API_URL}/${orderId}`);
+        const order = response.data?.data;
+        if (!order) return;
+        setOrders(previous => {
+          const index = previous.findIndex(item => String(item.id) === String(order.id));
+          if (index < 0) return [order, ...previous];
+          const next = [...previous];
+          next[index] = order;
+          return next;
+        });
+      } catch (err) {
+        console.error(`Realtime order refresh failed for ${orderId}:`, err);
+      }
+    };
+
+    const refreshRecipe = async (recipeId, eventType) => {
+      if (!recipeId) return;
+      if (eventType === 'DELETE') {
+        setRecipes(previous => previous.filter(recipe => String(recipe.id) !== String(recipeId)));
+        return;
+      }
+      try {
+        const response = await apiClient.get(`/recipes/${recipeId}`);
+        const recipe = response.data?.data;
+        if (!recipe) return;
+        const relatedProduct = Array.isArray(recipe.products) ? recipe.products[0] : recipe.products;
+        const { ingredients: currentIngredients, materials: currentMaterials } = dashboardRowsRef.current;
+        const normalized = {
+          id: recipe.id,
+          productId: recipe.product_id,
+          product: relatedProduct?.name || recipe.product_name || '',
+          estimatedCost: Number(recipe.estimated_cost ?? 0),
+          yield: Number(recipe.yield_quantity ?? 0),
+          yieldUnit: recipe.yield_unit || 'pcs',
+          ingredients: (recipe.recipe_ingredients || []).map(item => {
+            const linked = item.raw_ingredient_id
+              ? currentIngredients.find(row => row.id === item.raw_ingredient_id)
+              : item.material_id
+                ? currentMaterials.find(row => row.id === item.material_id)
+                : null;
+            return {
+              name: linked?.name || item.item_name,
+              qty: Number(item.quantity ?? 0),
+              unit: item.unit,
+              itemType: item.item_type,
+              rawIngredientId: item.raw_ingredient_id || null,
+              materialId: item.material_id || null,
+              inventoryItemId: item.raw_ingredient_id || item.material_id || null,
+            };
+          }),
+        };
+        setRecipes(previous => {
+          const index = previous.findIndex(item => String(item.id) === String(recipeId));
+          if (index < 0) return [normalized, ...previous];
+          const next = [...previous];
+          next[index] = normalized;
+          return next;
+        });
+      } catch (err) {
+        console.error(`Realtime recipe refresh failed for ${recipeId}:`, err);
+      }
+    };
+
+    const refreshFromEvent = event => {
       let change;
       try {
         change = JSON.parse(event.data);
@@ -258,36 +417,61 @@ export function AppProvider({ children }) {
       }
 
       window.dispatchEvent(new CustomEvent('cake:data-changed', { detail: change }));
-      if (refreshTimer) return;
-      refreshTimer = setTimeout(() => {
-        refreshTimer = null;
-        fetchAll({ silent: true }).catch(err => console.error('Realtime refresh failed:', err));
-      }, 150);
+      const { table, event: eventType, record, recordId, relatedId } = change;
+      switch (table) {
+        case 'raw_ingredients':
+          updateList(setIngredients, recordId, record, normalizeIngredientRow, eventType);
+          break;
+        case 'celebration_materials':
+          updateList(setMaterials, recordId, record, normalizeMaterialRow, eventType);
+          break;
+        case 'products':
+          updateList(setProducts, recordId, record, normalizeProductRow, eventType);
+          break;
+        case 'production_logs':
+          updateList(setProductionLogs, recordId, record, normalizeProductionLogRow, eventType);
+          break;
+        case 'waste_logs':
+          if (eventType === 'DELETE' || record?.voided_at) {
+            setWasteLogs(previous => previous.filter(item => String(item.id) !== String(recordId)));
+          } else {
+            updateList(setWasteLogs, recordId, record, normalizeWasteLogRow, eventType);
+          }
+          break;
+        case 'recipes':
+          if (eventType === 'DELETE') refreshRecipe(recordId, eventType);
+          else scheduleTargetedRefresh(`recipe:${recordId}`, () => refreshRecipe(recordId, eventType));
+          break;
+        case 'recipe_ingredients':
+          if (relatedId) scheduleTargetedRefresh(`recipe:${relatedId}`, () => refreshRecipe(relatedId, 'UPDATE'));
+          break;
+        case 'orders':
+          if (eventType === 'DELETE') refreshOrder(recordId, eventType);
+          else scheduleTargetedRefresh(`order:${recordId}`, () => refreshOrder(recordId, eventType));
+          break;
+        case 'order_items':
+          if (relatedId) scheduleTargetedRefresh(`order:${relatedId}`, () => refreshOrder(relatedId, 'UPDATE'));
+          break;
+        default:
+          break;
+      }
     };
 
     source.addEventListener('data-change', refreshFromEvent);
-    source.onerror = () => console.warn('[Realtime] Live updates disconnected; browser will retry automatically.');
+    source.onopen = () => {
+      if (!wasDisconnected) return;
+      wasDisconnected = false;
+      fetchAll({ silent: true }).catch(err => console.error('Realtime reconnect refresh failed:', err));
+    };
+    source.onerror = () => {
+      wasDisconnected = true;
+      console.warn('[Realtime] Live updates disconnected; browser will retry automatically.');
+    };
 
     return () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
       source.close();
-    };
-  }, [isAuthed, fetchAll]);
-
-  // Keep the dashboard current even when the realtime stream is temporarily
-  // unavailable or a change was made by another browser tab.
-  useEffect(() => {
-    if (!isAuthed) return undefined;
-
-    const refresh = () => {
-      fetchAll({ silent: true }).catch(err => console.error('Live data refresh failed:', err));
-    };
-    const intervalId = window.setInterval(refresh, 5000);
-    window.addEventListener('cake:data-changed', refresh);
-
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('cake:data-changed', refresh);
+      targetedRefreshTimers.forEach(timer => clearTimeout(timer));
+      targetedRefreshTimers.clear();
     };
   }, [isAuthed, fetchAll]);
 
@@ -329,21 +513,8 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  // FIX: BAGONG ORDERS = walang paraan noon ang frontend na malaman na
-  // may bagong order na pumasok sa backend/DB habang naka-login/naka-
-  // bukas lang ang page — isang beses lang tumatakbo ang fetch (sa
-  // login), kaya kailangan pang mag-refresh ng buong page para makita
-  // ang bago. Dalawang bagay ang ginawa dito para maayos ito:
-  //   1) POLLING — tahimik na tumatawag ng fetchOrders() bawat ilang
-  //      segundo habang naka-login (isAuthed), kaya kahit walang ginawa
-  //      ang user, lumalabas din agad ang bagong orders.
-  //   2) REFETCH-ON-FOCUS — sa sandaling bumalik ang user sa tab/window
-  //      na ito (hal. galing ibang tab, o galing ibang app sa phone),
-  //      agad ding nagre-refresh — para hindi na kailangang hintayin pa
-  //      ang susunod na poll interval.
-  // Ginamit ang `fetchOrders()` dito (hindi `fetchAll()`) dahil mas
-  // magaan ito — orders lang ang kinukuha nito, hindi lahat ng
-  // ingredients/materials/products/atbp.
+  // Hiwalay ang order fetch para sa manual refreshes. Ang live updates ay
+  // nagre-refresh ng isang order kada Realtime event sa bridge sa itaas.
   // Kinukuha ang isang order (with items + customer) — useful sa modal/detail view
   const fetchOrderById = useCallback(async (id) => {
     try {

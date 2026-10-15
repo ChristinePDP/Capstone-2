@@ -92,7 +92,23 @@ export default function Notification() {
   useEffect(() => {
     fetchNotifications();
     const handleDataChanged = (event) => {
-      if (event.detail?.table === 'notifications') fetchNotifications();
+      const change = event.detail;
+      if (change?.table !== 'notifications') return;
+      const id = change.recordId || change.record?.id;
+      if (!id) return;
+      if (change.event === 'DELETE') {
+        setItems(previous => previous.filter(item => String(item.id) !== String(id)));
+      } else if (change.record) {
+        setItems(previous => {
+          const index = previous.findIndex(item => String(item.id) === String(id));
+          if (index < 0) return [change.record, ...previous].slice(0, 50);
+          const next = [...previous];
+          next[index] = { ...next[index], ...change.record };
+          return next;
+        });
+      } else {
+        fetchNotifications();
+      }
     };
     window.addEventListener('cake:data-changed', handleDataChanged);
     return () => window.removeEventListener('cake:data-changed', handleDataChanged);

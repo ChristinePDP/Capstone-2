@@ -360,29 +360,100 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   }, []);
 
   useEffect(() => {
-    const handleDataChanged = async () => {
-      try {
-        const refreshedProducts = await fetchProductsFromApi(true);
-        setProducts(previousProducts => {
-          const refreshedById = new Map((refreshedProducts || []).map(product => [product.id, product]));
-          const mergedProducts = previousProducts.map(product => refreshedById.get(product.id) || product);
-          const existingIds = new Set(previousProducts.map(product => product.id));
-
-          return [
-            ...mergedProducts,
-            ...(refreshedProducts || []).filter(product => !existingIds.has(product.id)),
-          ].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    const handleDataChanged = async (event) => {
+      const change = event.detail || {};
+      const { table, event: operation, record, recordId } = change;
+      const refreshProduct = async (id) => {
+        if (!id) return;
+        const response = await apiClient.get(API_BASE, { params: { productId: id } });
+        const refreshed = unwrapData(response.data, 'Failed to refresh product.') || [];
+        const product = refreshed[0];
+        setProducts(previous => {
+          const next = previous.filter(item => String(item.id) !== String(id));
+          if (product) next.push(product);
+          return next.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
         });
+        if (productsCache) {
+          productsCache = productsCache.filter(item => String(item.id) !== String(id));
+          if (product) productsCache.push(product);
+        }
+      };
+      const refreshBundle = async (id) => {
+        if (!id) return;
+        if (operation === 'DELETE' && table === 'promo_bundles') {
+          setBundles(previous => previous.filter(item => String(item.id) !== String(id)));
+          if (bundlesListCache) bundlesListCache = bundlesListCache.filter(item => String(item.id) !== String(id));
+          return;
+        }
+        const response = await fetch(`${BUNDLES_API}/${encodeURIComponent(id)}`, { credentials: 'include' });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success === false || !result.data) throw new Error(result.message || 'Failed to refresh bundle.');
+        const bundle = result.data;
+        setBundles(previous => previous.some(item => String(item.id) === String(id))
+          ? previous.map(item => String(item.id) === String(id) ? bundle : item)
+          : [...previous, bundle]);
+        if (bundlesListCache) {
+          bundlesListCache = bundlesListCache.some(item => String(item.id) === String(id))
+            ? bundlesListCache.map(item => String(item.id) === String(id) ? bundle : item)
+            : [...bundlesListCache, bundle];
+        }
+      };
+
+      try {
+        if (table === 'products') {
+          const id = record?.id || recordId;
+          if (!id) return fetchProducts(true, true);
+          if (operation === 'DELETE') {
+            setProducts(previous => previous.filter(item => String(item.id) !== String(id)));
+            if (productsCache) productsCache = productsCache.filter(item => String(item.id) !== String(id));
+          } else {
+            await refreshProduct(id);
+          }
+          const dependentBundleIds = bundles
+            .filter(bundle => (bundle.product_ids || []).some(productId => String(productId) === String(id))
+              || (bundle.package_items || []).some(item => String(item.product_id) === String(id)))
+            .map(bundle => bundle.id);
+          await Promise.all(dependentBundleIds.map(refreshBundle));
+          clearBundlesPageCache();
+          return;
+        }
+        if (table === 'recipes' || table === 'recipe_ingredients') {
+          let productId = record?.product_id;
+          const recipeId = table === 'recipes' ? (record?.id || recordId) : (record?.recipe_id || change.relatedId);
+          if (!productId && recipeId && operation !== 'DELETE') {
+            const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
+            const response = await apiClient.get(`${API_BASE}/inventory/recipes/${encodeURIComponent(recipeId)}`);
+            productId = response.data?.data?.product_id;
+          }
+          if (productId) await refreshProduct(productId);
+          return;
+        }
+        if (table === 'promo_bundles') {
+          await refreshBundle(record?.id || recordId);
+          clearBundlesPageCache();
+          return;
+        }
+        if (table === 'bundle_products') {
+          await refreshBundle(record?.bundle_id || change.relatedId);
+          clearBundlesPageCache();
+          return;
+        }
+        if (table === 'occasions') {
+          const eventTag = record?.event_tag;
+          if (!eventTag) return fetchBundles(true, true);
+          const dependentBundleIds = bundles.filter(bundle => bundle.event_tag === eventTag).map(bundle => bundle.id);
+          await Promise.all(dependentBundleIds.map(refreshBundle));
+          clearBundlesPageCache();
+        }
       } catch (err) {
-        console.error('Refresh Products Error:', err);
+        console.error('Refresh Product Management Record Error:', err);
       }
-      fetchBundles(true, true);
     };
     window.addEventListener('cake:data-changed', handleDataChanged);
     return () => {
       window.removeEventListener('cake:data-changed', handleDataChanged);
     };
-  }, []);
+  }, [bundles]);
 
   const filtered = products.filter(p => {
     const catOk = category === 'All' || p.category === category;
