@@ -14,6 +14,57 @@ import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+// PH mobile numbers: 11 digits, must start with 09 (e.g. 09171234567).
+const PH_MOBILE_REGEX = /^09\d{9}$/;
+const PHONE_ERROR = 'Enter a valid mobile number starting with 09.';
+
+// Keeps digits only, converts +63 9XX... / 639XX... to 09XX..., caps at 11 digits.
+function normalizePhoneInput(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('639')) digits = '0' + digits.slice(2);
+  return digits.slice(0, 11);
+}
+
+// Full-number paste: also accepts 9171234567 (no leading 0). Returns null for short pastes so normal typing/paste behavior applies.
+function normalizePastedPhone(text) {
+  let digits = String(text || '').replace(/\D/g, '');
+  if (digits.startsWith('63') && digits.length >= 12) digits = '0' + digits.slice(2);
+  else if (digits.startsWith('9') && digits.length === 10) digits = '0' + digits;
+  return digits.length >= 10 ? digits.slice(0, 11) : null;
+}
+
+// Live check. Once a field shows an error it stays until the number is fully valid.
+// Before that, a wrong prefix is flagged immediately; an incomplete number with a valid
+// prefix is only flagged on blur (final). `required` fields also flag when emptied.
+function getPhoneError(digits, { final = false, hadError = false, required = false } = {}) {
+  if (!digits) return required && (final || hadError) ? 'Contact number is required.' : '';
+  if (PH_MOBILE_REGEX.test(digits)) return '';
+  const badPrefix = digits[0] !== '0' || (digits.length >= 2 && digits[1] !== '9');
+  if (badPrefix || digits.length === 11 || final || hadError) return PHONE_ERROR;
+  return '';
+}
+
+// Full name: letters (any language), spaces, hyphens, apostrophes and periods; at least 2 letters.
+// Same live behavior as phones: bad characters flag immediately, and once an error shows it
+// stays until the name is valid. Too-short is only flagged on blur/submit (final) or after an error.
+const NAME_REQUIRED_ERROR = 'Full name is required.';
+const NAME_INVALID_ERROR = 'Enter a valid full name (letters only).';
+function getNameError(value, { final = false, hadError = false } = {}) {
+  const name = String(value || '').trim();
+  if (!name) return final || hadError ? NAME_REQUIRED_ERROR : '';
+  const validChars = /^[\p{L}][\p{L}\s.'\u2019-]*$/u.test(name);
+  const letterCount = (name.match(/\p{L}/gu) || []).length;
+  if (!validChars) return NAME_INVALID_ERROR;
+  if (letterCount < 2) return final || hadError ? NAME_INVALID_ERROR : '';
+  return '';
+}
+
+// Display only: 09171234567 -> "0917 123 4567". Stored/submitted value stays raw digits.
+function formatPhone(digits) {
+  const d = String(digits || '');
+  return [d.slice(0, 4), d.slice(4, 7), d.slice(7, 11)].filter(Boolean).join(' ');
+}
+
 // Formats a 'YYYY-MM-DD' string as an unambiguous long date, e.g. "August 8, 2026".
 function formatDateLong(dateStr) {
   if (!dateStr) return '';
@@ -133,7 +184,10 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
               type="button"
               key={idx}
               disabled={isDisabled}
-              title={isUnavailable ? (unavailableDates[cell.dateStr].map(item => `${item.productName}: ${item.reason === 'no_limit' ? 'no daily pre-order limit set' : 'daily limit reached'}`).join(', ')) : undefined}
+              title={isUnavailable ? unavailableDates[cell.dateStr].map(item => item.reason === 'unavailable_for_date'
+                ? `${item.productName} is unavailable for pre-order on this date. Please choose another date.`
+                : `The quantity of ${item.productName} in your cart exceeds what's available for pre-order on this date. Please reduce its quantity or choose another date.`
+              ).join(' ') : undefined}
               onClick={() => { onSelect(cell.dateStr); onClose(); }}
               className={`text-[11px] text-center py-1.5 rounded-lg transition-colors
                 ${isUnavailable ? 'bg-red-50 text-red-400 cursor-not-allowed line-through' : isDisabled ? 'text-[#D8CFC9] cursor-not-allowed' : 'text-[#3B1F0A] hover:bg-[#F5EFEB] cursor-pointer'}
@@ -147,7 +201,9 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
         })}
       </div>
       <p className="mt-2 border-t border-[#EAE4E0] pt-2 text-[9px] leading-tight text-[#8A7264]">
-        {availabilityLoading ? 'Checking pickup date availability…' : 'Red dates are unavailable for at least one product in your cart. Pickup lead-time rules still apply.'}
+        {availabilityLoading
+          ? 'Checking pickup date availability…'
+          : 'Red dates are unavailable for one or more pre-order items in your cart. Pickup lead-time rules still apply.'}
       </p>
     </div>,
     document.body
@@ -706,21 +762,23 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     }
 
     const needsPickupDate = pickupType === 'later';
-    const phoneRegex = /^\d{11}$/;
+    const phoneRegex = PH_MOBILE_REGEX;
     const newErrors = {};
 
     if (!form.name.trim()) {
-      newErrors.name = 'Full name is required.';
+      newErrors.name = NAME_REQUIRED_ERROR;
+    } else if (getNameError(form.name, { final: true })) {
+      newErrors.name = NAME_INVALID_ERROR;
     }
 
     if (!form.phone) {
       newErrors.phone = 'Contact number is required.';
     } else if (!phoneRegex.test(form.phone)) {
-      newErrors.phone = 'Must be exactly 11 digits.';
+      newErrors.phone = PHONE_ERROR;
     }
 
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
-      newErrors.altPhone = 'Must be exactly 11 digits.';
+      newErrors.altPhone = PHONE_ERROR;
     }
 
     if (needsPickupDate && !form.pickupDate) {
@@ -729,7 +787,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       const blockedItems = unavailablePickupDates[form.pickupDate].map(item =>
         `${item.productName} (${item.reason === 'no_limit' ? 'no daily pre-order limit set' : 'daily limit reached'})`
       );
-      newErrors.pickupDate = `Unavailable for ${blockedItems.join(', ')} on this date. Please choose another pickup date.`;
+      newErrors.pickupDate = `Unavailable for ${blockedItems.join(', ')} on this date. Please reduce your item or choose another pickup date.`;
     }
 
     if (!form.pickupTime) {
@@ -757,13 +815,13 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     }
 
     const needsPickupDate = pickupType === 'later';
-    const phoneRegex = /^\d{11}$/;
+    const phoneRegex = PH_MOBILE_REGEX;
     const newErrors = {};
 
-    if (!form.name.trim()) newErrors.name = 'Full name is required.';
+    if (getNameError(form.name, { final: true })) newErrors.name = form.name.trim() ? NAME_INVALID_ERROR : NAME_REQUIRED_ERROR;
     if (!form.phone) newErrors.phone = 'Contact number is required.';
-    else if (!phoneRegex.test(form.phone)) newErrors.phone = 'Enter a valid 11-digit contact number.';
-    if (form.altPhone && !phoneRegex.test(form.altPhone)) newErrors.altPhone = 'Enter a valid 11-digit number.';
+    else if (!phoneRegex.test(form.phone)) newErrors.phone = PHONE_ERROR;
+    if (form.altPhone && !phoneRegex.test(form.altPhone)) newErrors.altPhone = PHONE_ERROR;
     if (needsPickupDate && !form.pickupDate) newErrors.pickupDate = 'Please select a pickup date.';
     else if (needsPickupDate && form.pickupDate < minPreOrderDate) {
       newErrors.pickupDate = `Please choose a date on or after ${formatDateLong(minPreOrderDate)}.`;
@@ -1066,7 +1124,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 shrink-0 lg:grow lg:grid-cols-[repeat(3,minmax(0,1fr))] lg:grid-rows-[repeat(3,minmax(auto,1fr))_auto_auto] lg:gap-x-5 lg:gap-y-5">
                       {/* LEFT: name, numbers, pickup date/time */}
                       <div className="contents">
-                          <div className="relative lg:col-start-1 lg:col-span-2 lg:row-start-1">
+                          <div className="relative self-start lg:col-start-1 lg:col-span-2 lg:row-start-1">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
@@ -1075,41 +1133,58 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   setForm({...form, name: e.target.value});
-                                  setErrors(prev => ({...prev, name: false}));
+                                  setErrors(prev => ({...prev, name: getNameError(e.target.value, { hadError: Boolean(prev.name) }) || false}));
                                 }} 
+                                onBlur={() => setErrors(prev => ({...prev, name: getNameError(form.name, { final: true }) || false}))}
                               />
                               {errors.name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.name}</span>}
                           </div>
                       <div className="contents">
-                          <div className="relative lg:col-start-1 lg:row-start-2">
+                          <div className="relative self-start lg:col-start-1 lg:row-start-2">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.phone ? 'text-red-500' : 'text-[#8A7264]'}`}>Contact Number <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
-                                placeholder="09xxxxxxxxx" 
-                                maxLength="11"
-                                value={form.phone}
+                                placeholder="09XX XXX XXXX" 
+                                inputMode="tel"
+                                onPaste={e => {
+                                  const pasted = normalizePastedPhone(e.clipboardData.getData('text'));
+                                  if (!pasted) return;
+                                  e.preventDefault();
+                                  setForm(f => ({...f, phone: pasted}));
+                                  setErrors(prev => ({...prev, phone: getPhoneError(pasted, { hadError: Boolean(prev.phone), required: true }) || false}));
+                                }}
+                                value={formatPhone(form.phone)}
                                 className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
-                                  const onlyNums = e.target.value.replace(/\D/g, '');
+                                  const onlyNums = normalizePhoneInput(e.target.value);
                                   setForm({...form, phone: onlyNums});
-                                  setErrors(prev => ({...prev, phone: false}));
+                                  setErrors(prev => ({...prev, phone: getPhoneError(onlyNums, { hadError: Boolean(prev.phone), required: true }) || false}));
                                 }} 
+                                onBlur={() => setErrors(prev => ({...prev, phone: getPhoneError(form.phone, { final: true, required: true }) || false}))}
                               />
                               {errors.phone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.phone}</span>}
                           </div>
-                      <div className="relative sm:col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-2">
+                      <div className="relative self-start sm:col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-2">
                           <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.altPhone ? 'text-red-500' : 'text-[#8A7264]'}`}>Alternative Number</label>
                           <input 
                             type="text" 
-                            placeholder="Optional (09xxxxxxxxx)" 
-                            maxLength="11"
-                            value={form.altPhone}
+                            placeholder="Optional (09XX XXX XXXX)" 
+                            inputMode="tel"
+                            onPaste={e => {
+                              const pasted = normalizePastedPhone(e.clipboardData.getData('text'));
+                              if (!pasted) return;
+                              e.preventDefault();
+                              setForm(f => ({...f, altPhone: pasted}));
+                              setErrors(prev => ({...prev, altPhone: getPhoneError(pasted, { hadError: Boolean(prev.altPhone) }) || false}));
+                            }}
+                            value={formatPhone(form.altPhone)}
                             className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                             onChange={e => {
-                                const onlyNums = e.target.value.replace(/\D/g, '');
+                                const onlyNums = normalizePhoneInput(e.target.value);
                                 setForm({...form, altPhone: onlyNums});
-                                setErrors(prev => ({...prev, altPhone: false}));
+                                setErrors(prev => ({...prev, altPhone: getPhoneError(onlyNums, { hadError: Boolean(prev.altPhone) }) || false}));
                             }} 
+                            onBlur={() => setErrors(prev => ({...prev, altPhone: getPhoneError(form.altPhone, { final: true }) || false}))}
                           />
                           {errors.altPhone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.altPhone}</span>}
                       </div>
@@ -1166,7 +1241,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 </>
                               )}
                           </div>
-                          <div ref={timeDropdownRef} className="relative lg:col-start-2 lg:row-start-3">
+                          <div ref={timeDropdownRef} className="relative self-start lg:col-start-2 lg:row-start-3">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupTime ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
                                 <button
@@ -1580,12 +1655,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[#B7A99F]">Contact</span>
-                    <span className="text-[#3B1F0A] font-semibold">{form.phone || '—'}</span>
+                    <span className="text-[#3B1F0A] font-semibold">{formatPhone(form.phone) || '—'}</span>
                   </div>
                   {form.altPhone && (
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[#B7A99F]">Alt Contact</span>
-                      <span className="text-[#3B1F0A] font-semibold">{form.altPhone}</span>
+                      <span className="text-[#3B1F0A] font-semibold">{formatPhone(form.altPhone)}</span>
                     </div>
                   )}
 

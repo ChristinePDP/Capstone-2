@@ -7,6 +7,7 @@ import { CustomersModel } from '../model/customers.model.js';
 import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
 import { MaterialModel } from '../model/material.model.js';
 import { createOrderError } from '../utils/orderError.js';
+import { emitRealtimeChange } from './realtime.service.js';
 // Same bundle-exploding / order-slip-resolving logic na ginagamit ng Online
 // Ordering (resolveBundleLineItem + resolveProductLineItem, na parehong
 // naka-wrap sa resolveOrderItems). Ito ang gumagawa ng maayos na product_id
@@ -409,6 +410,8 @@ export const createPosOrder = async (payload) => {
       throw createOrderError('order', err);
     }
   }
+
+  emitRealtimeChange({ table: 'orders', event: 'INSERT', recordId: newOrder.id });
 
   // BAGO: idinagdag ang receiptToken sa response. Ginagamit ito ng frontend
   // (PosCart.jsx -> PosEReceipt) para lagyan ng laman ang confirm QR sa e-receipt.

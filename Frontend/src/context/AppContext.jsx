@@ -321,6 +321,18 @@ export function AppProvider({ children }) {
       targetedRefreshTimers.set(key, timer);
     };
 
+    const handleLocalDataChanged = event => {
+      const change = event.detail || {};
+      if (change.source !== 'pos' || change.table !== 'orders') return;
+      if (change.recordId) {
+        scheduleTargetedRefresh(`order:${change.recordId}`, () => refreshOrder(change.recordId, 'INSERT'));
+      } else {
+        apiClient.get(ORDERS_API_URL)
+          .then(response => setOrders(response.data?.data || []))
+          .catch(err => console.error('POS order list refresh failed:', err));
+      }
+    };
+
     const updateList = (setter, rowId, row, normalize, eventType) => {
       if (!rowId) return;
       if (eventType === 'DELETE') {
@@ -344,19 +356,35 @@ export function AppProvider({ children }) {
         setOrders(previous => previous.filter(order => String(order.id) !== String(orderId)));
         return;
       }
+      const delays = [0, 300, 900];
+      for (const delay of delays) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        try {
+          const response = await apiClient.get(`${ORDERS_API_URL}/${orderId}`);
+          const order = response.data?.data;
+          if (!order) continue;
+          setOrders(previous => {
+            const index = previous.findIndex(item => String(item.id) === String(order.id));
+            if (index < 0) return [order, ...previous];
+            const next = [...previous];
+            next[index] = order;
+            return next;
+          });
+          return;
+        } catch (err) {
+          if (delay === delays[delays.length - 1]) {
+            console.error(`Realtime order refresh failed for ${orderId}; refreshing the orders list:`, err);
+          }
+        }
+      }
+
+      // Rare fallback for a transient/missed single-order read. This updates
+      // React state in place; it does not reload the page or close open modals.
       try {
-        const response = await apiClient.get(`${ORDERS_API_URL}/${orderId}`);
-        const order = response.data?.data;
-        if (!order) return;
-        setOrders(previous => {
-          const index = previous.findIndex(item => String(item.id) === String(order.id));
-          if (index < 0) return [order, ...previous];
-          const next = [...previous];
-          next[index] = order;
-          return next;
-        });
+        const response = await apiClient.get(ORDERS_API_URL);
+        setOrders(response.data?.data || []);
       } catch (err) {
-        console.error(`Realtime order refresh failed for ${orderId}:`, err);
+        console.error('Realtime orders-list fallback failed:', err);
       }
     };
 
@@ -458,6 +486,7 @@ export function AppProvider({ children }) {
     };
 
     source.addEventListener('data-change', refreshFromEvent);
+    window.addEventListener('cake:data-changed', handleLocalDataChanged);
     source.onopen = () => {
       if (!wasDisconnected) return;
       wasDisconnected = false;
@@ -470,6 +499,7 @@ export function AppProvider({ children }) {
 
     return () => {
       source.close();
+      window.removeEventListener('cake:data-changed', handleLocalDataChanged);
       targetedRefreshTimers.forEach(timer => clearTimeout(timer));
       targetedRefreshTimers.clear();
     };

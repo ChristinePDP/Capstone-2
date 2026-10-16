@@ -17,6 +17,7 @@ DECLARE
     'occasions',
     'promo_bundles',
     'bundle_products',
+    'payment_settings',
     'notifications'
   ];
 BEGIN

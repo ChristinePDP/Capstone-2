@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { History as HistoryIcon } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ConfirmModal, useToast, Pagination } from '../ui';
@@ -39,22 +39,26 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
     fetchRef.current = fetchInventoryHistory;
   });
 
-  const loadHistory = async () => {
+  const loadHistory = useCallback(async ({ silent = false } = {}) => {
     if (!itemName || !fetchRef.current) return;
-    setLoading(true);
-    setErrorMsg('');
+    if (!silent) {
+      setLoading(true);
+      setErrorMsg('');
+    }
     try {
       const data = await fetchRef.current(itemName, itemType, itemId);
       const restocksOnly = (Array.isArray(data) ? data : [])
         .filter(log => log.action === 'Restock');
       setLogs(restocksOnly);
     } catch (err) {
-      setErrorMsg(err.message || 'Hindi makuha ang history.');
-      setLogs([]);
+      if (!silent) {
+        setErrorMsg(err.message || 'Hindi makuha ang history.');
+        setLogs([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [itemName, itemId, itemType]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +90,23 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
     load();
     return () => { cancelled = true; };
   }, [itemName, itemType, itemId]);
+
+  useEffect(() => {
+    const handleDataChanged = (event) => {
+      const change = event.detail || {};
+      if (change.table !== 'inventory_logs') return;
+      const log = change.record;
+      if (!log) return;
+      const linkedId = itemType === 'raw' ? log.raw_ingredient_id : log.material_id;
+      const typeMatches = log.item_type === itemType;
+      if ((linkedId && String(linkedId) === String(itemId))
+        || (typeMatches && log.item_name === itemName)) {
+        loadHistory({ silent: true });
+      }
+    };
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => window.removeEventListener('cake:data-changed', handleDataChanged);
+  }, [itemId, itemName, itemType, loadHistory]);
 
   const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);

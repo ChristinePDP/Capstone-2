@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase.js';
+import { emitRealtimeChange } from '../services/realtime.service.js';
 
 export const NotificationsModel = {
   async create({ type, title, message, referenceId, referenceType }) {
@@ -8,6 +9,7 @@ export const NotificationsModel = {
       .select()
       .single();
     if (error) throw error;
+    emitRealtimeChange({ table: 'notifications', event: 'INSERT', recordId: data.id });
     return data;
   },
 

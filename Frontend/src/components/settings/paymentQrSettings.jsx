@@ -47,6 +47,22 @@ export default function PaymentQrSettings() {
   }, []);
 
   useEffect(() => {
+    const handleDataChanged = (event) => {
+      if (event.detail?.table !== 'payment_settings') return;
+      fetch(`${API_BASE}/settings/payment`)
+        .then(response => readResponse(response, 'Unable to refresh the payment QR code.'))
+        .then(data => {
+          const saved = data.data || {};
+          const url = saved.payment_qr_code_url || saved.url;
+          setCurrent(url ? { ...saved, payment_qr_code_url: addCacheBuster(url) } : null);
+        })
+        .catch(error => console.error('Payment settings realtime refresh failed:', error));
+    };
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => window.removeEventListener('cake:data-changed', handleDataChanged);
+  }, []);
+
+  useEffect(() => {
     if (!file) {
       setPreviewUrl(null);
       return undefined;

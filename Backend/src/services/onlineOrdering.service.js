@@ -11,6 +11,7 @@ import { CheckoutReservationModel } from '../model/checkoutReservation.model.js'
 import { MaterialModel } from '../model/material.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
 import { notifyNewOrder } from './notification.service.js';
+import { emitRealtimeChange } from './realtime.service.js';
 import { getBundleById } from './productAndEvent.service.js';
 
 // --- STOCK / DAILY LIMIT BASIS ---
@@ -630,7 +631,7 @@ const getPreOrderAvailabilityForResolvedItems = async (
         blockedItems.push({
           productId,
           productName: product?.name || 'Product',
-          reason: 'limit_reached',
+          reason: reserved >= limit ? 'unavailable_for_date' : 'quantity_exceeds_availability',
         });
       }
     }
@@ -655,7 +656,7 @@ export const validatePreOrderPickupDate = async (resolvedItems, pickupDate) => {
     const blockedItems = unavailableDates[0].blockedItems.map(item =>
       `${item.productName} (daily limit reached)`
     );
-    const error = new Error(`Pre-order is unavailable for ${pickupDate}: ${blockedItems.join(', ')}. Please choose another pickup date.`);
+    const error = new Error(`Pre-order is unavailable for ${pickupDate}: ${blockedItems.join(', ')}. Please reduce your item or choose another pickup date.`);
     error.code = 'PREORDER_CAPACITY';
     throw error;
   }
@@ -959,6 +960,7 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
     throw createOrderError('order', linkError);
   }
 
+  emitRealtimeChange({ table: 'orders', event: 'INSERT', recordId: newOrder.id });
   notifyNewOrder(newOrder, payload);
 
   return newOrder;

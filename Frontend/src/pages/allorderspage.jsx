@@ -14,7 +14,7 @@ function loadSaved(locKey) {
 }
 
 export default function AllOrdersPage() {
-  const { orders, updateOrderStatus, verifyOrderPayment, loading } = useApp();
+  const { orders, fetchOrders, updateOrderStatus, verifyOrderPayment, loading } = useApp();
   const { show: showToast } = useToast();
   
   const location = useLocation();
@@ -25,6 +25,10 @@ export default function AllOrdersPage() {
 // Kapag ibang page ang pinuntahan at bumalik via link, bagong location.key na — hindi na ito ibabalik.
 const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)?.order ?? null);
   const [detailOpen, setDetailOpen] = useState(() => !!loadSaved(location.key));
+
+  useEffect(() => {
+    fetchOrders().catch(err => console.error('Orders page refresh failed:', err));
+  }, [fetchOrders]);
 
   useEffect(() => {
     try {

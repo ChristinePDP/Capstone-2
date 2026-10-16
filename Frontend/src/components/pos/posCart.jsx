@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Pencil
+  ShoppingCart, Minus, Plus, ChevronDown, ChevronUp, Tag, X, Pencil, Trash2
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, isSlotPast, TIME_SLOTS } from './orderSum';
@@ -12,13 +12,6 @@ import { getOrderErrorMessage } from '../../services/orderErrorMessage';
 
 const POS_CHECKOUT_RESERVATION_KEY = 'aileen_cake_max_pos_checkout_reservation_id';
 
-// ─────────────────────────────────────────────────────────────
-// Quantity tracking helpers — same rule used across Menu.jsx, posMenu.jsx,
-// and the backend: `daily_limit` is the basis for Pre-order "slots";
-// `stock_quantity` is the basis for Pick-up Today produced stock.
-// If daily_limit is set (not null, > 0), it wins even when stock_quantity
-// is also set.
-// ─────────────────────────────────────────────────────────────
 function hasDailyLimitSet(item) {
   return item?.daily_limit !== null && item?.daily_limit !== undefined && Number(item.daily_limit) > 0;
 }
@@ -32,7 +25,6 @@ function isQuantityTracked(item, orderType = 'Buy Now') {
 
 function getQuantityLimit(item, orderType = 'Buy Now') {
   if (orderType === 'Pre-Order' && item.pre_order_unlimited) return Infinity;
-  // Bundle/Package: limit galing sa components (kinuwenta sa posMenu.jsx).
   if (item.type === 'bundle' || item.type === 'package') {
     if (orderType === 'Buy Now' && item.order_type === 'Pre-order') return 0;
     return orderType === 'Pre-Order'
@@ -43,8 +35,6 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
 
-// Unang line ng cart na lumalagpas sa limit ng isang order type (total qty kada
-// product id). Ginagamit sa order type toggle at sa huling check bago mag-place order.
 function findStockIssue(cartItems = [], type) {
   const qtyById = {};
   cartItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
@@ -66,12 +56,10 @@ function stockIssueMessage(issue, type) {
     : `${issue.name} is not available in that quantity for ${type}.`;
 }
 
-// In-accept na natin ang isCartOpen at onClose galing sa magulang (PosPage)
-export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
+export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onRemoveItem, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
   const [editingSlipIndex, setEditingSlipIndex] = useState(null);
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  // { phase: 'uploading', done, total } | { phase: 'saving' } | null — para sa upload progress note
   const [uploadProgress, setUploadProgress] = useState(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [ereceiptData, setEreceiptData] = useState(null); 
@@ -79,14 +67,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const submissionLockRef = useRef(false);
   const checkoutReservationIdRef = useRef(sessionStorage.getItem(POS_CHECKOUT_RESERVATION_KEY) || null);
 
-  // FIX (toast): iisang LOCAL na toast bar na ito (walang bagong/hiwalay
-  // na file) — ginagamit na ito ngayon PARA SA LAHAT ng dating alert()/
-  // blocking-modal na mensahe dito sa loob ng cart (validation errors,
-  // checkout errors, stock-limit warning, at order-success message).
-  // Simpleng banner sa taas ng screen, walang backdrop/overlay — hindi
-  // ito modal, kaya hindi na ito humaharang sa screen tulad ng dating
-  // native `alert()` ("localhost says ...").
-  const [toast, setToast] = useState(null); // { message, type: 'error' | 'success' | 'info' }
+  const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
 
   const showToast = (message, type = 'error') => {
@@ -112,15 +93,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const isPreOrderOnly = hasPreOrder && !hasBuyNow;
   const isBuyNowOnly = hasBuyNow && !hasPreOrder;
 
-  // Alin sa dalawang order type ang hindi kaya ng kasalukuyang cart (stock / pre-order limit)
   const buyNowIssue = cart.length > 0 ? findStockIssue(cart, 'Buy Now') : null;
   const preOrderIssue = cart.length > 0 ? findStockIssue(cart, 'Pre-Order') : null;
   const currentTypeIssue = orderType === 'Buy Now' ? buyNowIssue : preOrderIssue;
 
   const prevCartLength = useRef(cart.length);
 
-  // Ginagamit ng handleUpdateQty (stock/daily-limit warning) ang parehong
-  // LOCAL na toast bar sa itaas.
   const showLimitToast = (message) => showToast(message, 'error');
 
   const toggleCartItemExpanded = (index) => {
@@ -132,15 +110,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     });
   };
 
-  // Prevent the background POS screen from scrolling while the Order
-  // Summary modal (a `fixed inset-0` overlay) is open — now handled inside
-  // OrderSummaryModal (orderSum.jsx) itself since the modal owns its own
-  // `show` lifecycle.
-
-
-  // Kapag pinapataas ang quantity (delta > 0) ng isang tracked item
-  // (may daily_limit o stock_quantity), i-block bago pa lumagpas sa
-  // available limit — kasama ang ibang cart lines ng parehong product id.
   const handleUpdateQty = (idx, delta) => {
     const item = cart[idx];
 
@@ -159,7 +128,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     onUpdateQty(idx, delta);
   };
 
-
   useEffect(() => {
     if (cart.length > prevCartLength.current || cart.length === 0) {
       if (cart.length === 0) {
@@ -175,10 +143,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     prevCartLength.current = cart.length;
   }, [cart.length, hasPreOrder, hasBuyNow, isPreOrderOnly, isBuyNowOnly, setOrderType]);
 
-  // Kapag Pre-order lang (o Buy Now lang) ang order type ng laman ng cart,
-  // laging naka-force ang order type ng cart — hindi lang kapag nagdagdag ng
-  // item (halimbawa kapag nag-restore ang cart/orderType mula localStorage o
-  // kapag nagbago ang orderType). Kapag both, same pa rin ang dating logic.
   useEffect(() => {
     if (isPreOrderOnly && orderType !== 'Pre-Order') {
       setOrderType('Pre-Order');
@@ -218,10 +182,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     }
   }, [orderType]);
 
-  // FIX (stale pickupDate): dati, isang beses lang kinukuha ang petsa ng
-  // Buy Now (pag-mount / pagpalit ng orderType). Kapag naiwang bukas ang POS
-  // lagpas hatinggabi, kahapon pa rin ang laman ng form. Chine-check na ito
-  // kada 30 segundo, at muli sa mismong pag-submit (handlePlaceOrder).
   useEffect(() => {
     if (orderType !== 'Buy Now') return;
     const sync = () => {
@@ -233,25 +193,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     return () => clearInterval(id);
   }, [orderType]);
 
-  // Review Order simply opens the Order Summary modal now — the Customer
-  // Details fields (Name, Contact, Pick-up Date/Time) live inside that
-  // modal (orderSum.jsx) as an editable form.
   const handleProceedToOrder = () => {
     if (cart.length === 0) return;
     setShowSummaryModal(true);
   };
 
-  // FIX: validation ng required Customer Details fields — hiniwalay ito
-  // mula sa pag-submit (handlePlaceOrder). Tinatawag na ito ng
-  // OrderSummaryModal (orderSum.jsx) BAGO pa man magpakita ng "Are you
-  // sure?" confirm dialog — kaya kapag may kulang pa sa required fields,
-  // ang lalabas muna ay ang "Please complete all required fields (*)"
-  // toast, hindi ang confirm dialog. Bumabalik ng `true` kung pwede nang
-  // magpatuloy, `false` kung may error (may toast na ring lumabas dito).
-  // FIX (inline validation): hindi na toast ang ginagamit para sa required
-  // Customer Details. Ang bawat field na may mali ay may sariling pulang
-  // border + maliit na error message mismo sa ilalim ng field.
-  // `computeFormErrors` ay pure function: bumabalik ng { fieldName: message }.
   const computeFormErrors = () => {
     const errors = {};
     const phoneRegex = /^\d{11}$/;
@@ -268,8 +214,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     if (form.altPhone && !phoneRegex.test(form.altPhone)) {
       errors.altPhone = 'Must be exactly 11 digits.';
     }
-    // Pwedeng 9:25 PM nang piliin ang slot pero 9:35 PM na nang pinindot ang
-    // Place Order — i-recheck dito para hindi makalusot ang lipas na slot.
     if (orderType === 'Buy Now' && form.pickupTime) {
       const chosen = TIME_SLOTS.find(s => s.value === form.pickupTime);
       if (isSlotPast(chosen, orderType)) {
@@ -281,8 +225,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   const [formErrors, setFormErrors] = useState({});
 
-  // Habang nagta-type ang cashier, mawawala agad ang error ng field na
-  // naayos na (at mananatili ang sa mga field na mali pa rin).
   useEffect(() => {
     setFormErrors(prev => {
       if (Object.keys(prev).length === 0) return prev;
@@ -295,8 +237,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, orderType]);
 
-  // Tinatawag ng OrderSummaryModal bago ang "Are you sure?" confirm dialog.
-  // `true` = pwede nang magpatuloy, `false` = may field na may error.
   const validateOrderForm = () => {
     const errors = computeFormErrors();
     setFormErrors(errors);
@@ -307,8 +247,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     if (submissionLockRef.current || isProcessing) return;
     submissionLockRef.current = true;
 
-    // Huling stock / pre-order limit check ayon sa napiling order type
-    // (nahuhuli rin ang cart na luma na ang limit).
     const stockIssue = findStockIssue(cart, orderType);
     if (stockIssue) {
       submissionLockRef.current = false;
@@ -316,7 +254,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       return;
     }
 
-    // Required na Multi-image field na nabura na ang lahat ng larawan sa cart.
     const missingImages = cart.flatMap(item =>
       findMissingRequiredSlipImages(item).map(label => `${item.name}: ${label}`)
     );
@@ -328,7 +265,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     setIsProcessing(true);
 
-    // Bilangin ang lahat ng larawang ia-upload para sa progress ("2 of 4").
     const totalUploads = cart.reduce(
       (n, it) => n + countReferenceFiles(it.inspiration_image) + countSlipFiles(it.order_slip_details), 0
     );
@@ -339,14 +275,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     };
     setUploadProgress(totalUploads > 0 ? { phase: 'uploading', done: 0, total: totalUploads } : null);
 
-    // FIX: dati'y wala talagang upload step dito kaya kahit may na-attach
-    // na larawan ang cashier sa "Upload Reference Image", hindi ito
-    // na-uupload sa storage bucket at walang laman ang customer_reference_url
-    // sa DB. Same pattern na gaya ng ginagamit ng Online Ordering
-    // (Checkout.jsx): i-upload muna ang bawat File sa
-    // `/online-ordering/upload-inspiration` bago gawin ang payload — regular
-    // product ay iisang File (`inspiration_image`), bundle naman ay
-    // `{ [productId]: File }` (isa per component).
     const updatedCart = [...cart];
     for (let i = 0; i < updatedCart.length; i++) {
       const img = updatedCart[i].inspiration_image;
@@ -393,8 +321,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       }
     }
 
-    // Multi-image order slip fields: i-upload ang bawat File at palitan ng URL
-    // sa loob ng order_slip_details (array of URLs, JSONB sa DB).
     try {
       for (let i = 0; i < updatedCart.length; i++) {
         const slip = updatedCart[i].order_slip_details;
@@ -413,13 +339,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
     if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
-    // FIX: dating ang product ID at price lang ang ipinapasa dito — nawawala
-    // ang order_slip_details / selected_price_options na kinukuha na ng
-    // PosProductModal (kaya wala talagang na-se-save sa DB kahit may
-    // sinasagot na fields ang cashier). Bundle items ay may sariling shape
-    // (`type`, `bundleId`) para ma-explode ito ng backend (resolveOrderItems)
-    // papunta sa kani-kanilang component product rows — parehong contract
-    // gaya ng ginagamit ng Online Ordering checkout.
     const formattedItems = updatedCart.map(item => {
       if (item.type === 'bundle') {
         return {
@@ -428,17 +347,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           quantity: item.qty,
           orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
           specialInstructions: item.details || '',
-          // FIX: idinagdag — per-component image URLs, binabasa na ng
-          // resolveBundleLineItem sa backend.
           inspirationUrls: item.inspiration_urls || null
         };
       }
-      // FIX: dating walang branch para dito, kaya kahit "Package" ang
-      // category (may sariling components), nahuhulog ito sa generic
-      // branch sa ibaba — walang `type`/`packageId`, kaya hindi ito
-      // ine-explode ng backend (resolvePackageLineItem) papunta sa mga
-      // component product rows nito, at laging walang laman ang
-      // order_slip_details ng bawat component.
       if (item.type === 'package') {
         return {
           type: 'package',
@@ -458,8 +369,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || null,
         selectedPriceOptions: item.selected_price_options || null,
         specialInstructions: item.details || '',
-        // FIX: idinagdag — dating wala kaya laging null ang
-        // customer_reference_url ng POS orders.
         inspirationUrl: item.inspiration_url || null
       };
     });
@@ -478,11 +387,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     } : {};
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
-    // FIX: laging bagong petsa ang gamit ng Buy Now sa mismong pag-submit,
-    // hindi ang posibleng lumang laman ng form.
     const livePickupDate = orderType === 'Buy Now' ? getLiveNow().dateStr : form.pickupDate;
-    // Walk-in (Buy Now na walang piniling slot): kinukuha agad ng customer.
-    // Ang pickup_time ay inilalagay ng server (pos.service.js) = oras ng order.
     const isWalkIn = orderType === 'Buy Now' && !form.pickupTime;
 
     const payload = {
@@ -500,16 +405,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       },
       pickup: {
         date: livePickupDate,
-        // Walk-in: blangko ang time dito — ang server (Asia/Manila) ang naglalagay ng oras ng order.
         time: selectedSlot?.start || '',
         timeEnd: selectedSlot?.end || '',
         timeSlot: form.pickupTime,
         timeLabel: isWalkIn ? 'Walk-in' : (selectedSlot?.label || '')
       },
-      // FIX: order-level Special Instructions (one field, buong order) —
-      // katulad ng payload.specialInstructions na ginagamit na ng Online
-      // Ordering (Checkout.jsx / onlineOrdering.service.js), hindi na per
-      // product/item.
       specialInstructions: form.instructions || '',
       items: formattedItems
     };
@@ -531,25 +431,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         throw error;
       }
 
-      // FIX (req #4): laging isinasara muna ang Order Summary/Checkout
-      // modal BAGO magpasya kung magbubukas ng E-Receipt, kaya hindi
-      // kailanman magkasabay na naka-open ang dalawang modal — ang
-      // setShowSummaryModal(false) dito ay tumatakbo bago pa man ang
-      // if/else sa ibaba, kahit anong resulta (e-receipt man o toast
-      // na lang ang lalabas).
       setShowSummaryModal(false);
 
-      // FIX (req #5): ang E-Receipt ay dapat lumabas LANG kapag:
-      //   a) Pre-Order (talagang may pickup schedule na dapat i-confirm
-      //      pag-uwi ng customer), o
-      //   b) Buy Now PERO may kumpletong customer details (name + phone)
-      //      AT pumili ng isang Pick-up Time slot — ibig sabihin,
-      //      "pick-up later" na order pa rin kahit same-day/"Buy Now",
-      //      hindi basta't walk-in na dinadala agad ng customer.
-      // Kung Buy Now na walang customer details/pickup time (regular na
-      // instant/walk-in sale), toast na lang ang success message — walang
-      // dahilan para bigyan pa ito ng QR/e-receipt na wala namang
-      // babalikan pang pick-up schedule.
       const isScheduledBuyNow = orderType === 'Buy Now' && Boolean(form.name) && Boolean(form.phone) && Boolean(form.pickupTime);
       const shouldShowEreceipt = orderType === 'Pre-Order' || isScheduledBuyNow;
 
@@ -572,14 +455,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       checkoutReservationIdRef.current = null;
       sessionStorage.removeItem(POS_CHECKOUT_RESERVATION_KEY);
       window.dispatchEvent(new CustomEvent('cake:data-changed', {
-        detail: { table: 'orders', action: 'created', source: 'pos' }
+        detail: { table: 'orders', event: 'INSERT', recordId: result.data.id, action: 'created', source: 'pos' }
       }));
 
-      // FIX: dati'y hindi nirerefresh ang product list pagkatapos mag-order,
-      // kaya kahit nabawasan na ang stock sa DB, tama pa rin ang lumang
-      // bilang na nakikita ng cashier hangga't hindi niya ni-reload / lumipat
-      // pabalik sa POS page. I-invalidate + i-refetch (force) ang cached
-      // products dito para agad ma-reflect ang bagong available_stock.
       if (typeof onOrderPlaced === 'function') onOrderPlaced();
 
       setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '', instructions: '' });
@@ -636,7 +514,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         </div>
       )}
 
-      {/* Mobile Overlay Background kapag bukas ang Cart */}
       {isCartOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-[1000] lg:hidden transition-opacity"
@@ -644,14 +521,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         />
       )}
 
-      {/* Binago ang outermost wrapper: Dinagdagan ng Off-canvas behaviors para sa mobile.
-          FIX: dati'y `h-full` (= 100%) ang gamit dito habang `fixed` ang position — sa
-          ibang mobile browsers (lalo na kapag nagbabago ang laki ng address bar), mali
-          ang nako-compute na height nito kaya lumalabas ng screen ang footer/Review Order
-          button (parang "na-stretch"/nasa labas ng view). Ginamit natin ang `100dvh`
-          (dynamic viewport height) na sumusunod sa TALAGANG visible na height ng device,
-          plus `max-h-[100dvh]` bilang safety net para hindi na kailanman lumabas ng frame
-          ang panel kahit anong mobile device/browser chrome behavior. */}
       <div className={`
         fixed inset-y-0 right-0 z-[1010] w-[85%] max-w-[400px] sm:w-[400px] bg-white shadow-2xl flex flex-col shrink-0 h-[100dvh] max-h-[100dvh] overflow-hidden 
         transform transition-transform duration-300 ease-in-out will-change-transform
@@ -659,7 +528,6 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         lg:static lg:translate-x-0 lg:w-[400px] lg:min-w-[400px] lg:max-w-[400px] lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:z-auto lg:h-full lg:max-h-full
       `}>
         
-        {/* Header Title & Close Button (Exclusive for Mobile) */}
         <div className="flex items-center justify-between p-4 border-b border-[#F1EBE6] lg:hidden shrink-0 bg-white">
           <h2 className="font-serif text-lg text-[#3B1F0A] font-bold">Your Order</h2>
           <button 
@@ -784,58 +652,62 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             ) : (
               cart.map((item, idx) => (
                 <div key={idx} className="relative overflow-hidden rounded-xl border-b border-[#F1EBE6] last:border-0">
-                  <div
-                    className="relative flex justify-between items-start gap-3 pb-4 last:pb-0 bg-white transition-transform duration-200 ease-out touch-pan-y"
-                  >
-                  <div className="flex-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => toggleCartItemExpanded(idx)}
-                      className="w-full flex items-center justify-between gap-2 text-left"
-                    >
-                      <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
-                      {expandedCartIndexes.has(idx) ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
-                    </button>
-                    {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
-                    {expandedCartIndexes.has(idx) && item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
+                  <div className="flex justify-between items-start gap-3 pb-4 last:pb-0 bg-white">
+                    <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleCartItemExpanded(idx)}
+                        className="w-full flex items-center justify-between gap-2 text-left"
+                      >
+                        <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
+                        {expandedCartIndexes.has(idx) ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
+                      </button>
+                      {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
+                      {expandedCartIndexes.has(idx) && item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
 
-                    {expandedCartIndexes.has(idx) && item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
-                      <p key={`opt-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
-                        <span className="font-medium">{key}:</span> {val}
-                      </p>
-                    ))}
+                      {expandedCartIndexes.has(idx) && item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
+                        <p key={`opt-${key}`} className="text-[11px] text-[#8A7264] mt-0.5 leading-snug">
+                          <span className="font-medium">{key}:</span> {val}
+                        </p>
+                      ))}
 
-                    {/* FIX (cart declutter): dati, nakalista dito ang BAWAT field ng
-                        order slip (per component product pa) — sobrang dami kapag
-                        madami ang customized items sa isang package. Makikita naman
-                        ito nang buo sa Order Summary bago i-Place Order, kaya dito sa
-                        Cart, "Includes: ..." na lang na compact list ng mga product
-                        (para sa bundle/package) o "Customized" tag na lang (para sa
-                        single item na may sariling slip). */}
-                    {expandedCartIndexes.has(idx) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
-                      <p className="text-[11px] text-[#8A7264] mt-0.5 leading-snug line-clamp-2">
-                        <span className="font-medium">Includes:</span>{' '}
-                        {Object.keys(item.order_slip_details)
-                          .map(prodId => item.products?.find(p => p.id === prodId)?.name || 'Item')
-                          .join(', ')}
-                      </p>
-                    ) : (
-                      expandedCartIndexes.has(idx) && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
-                        <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
-                      )
-                    )}
+                      {expandedCartIndexes.has(idx) && (item.type === 'bundle' || item.type === 'package') && item.order_slip_details ? (
+                        <p className="text-[11px] text-[#8A7264] mt-0.5 leading-snug line-clamp-2">
+                          <span className="font-medium">Includes:</span>{' '}
+                          {Object.keys(item.order_slip_details)
+                            .map(prodId => item.products?.find(p => p.id === prodId)?.name || 'Item')
+                            .join(', ')}
+                        </p>
+                      ) : (
+                        expandedCartIndexes.has(idx) && item.order_slip_details && Object.keys(item.order_slip_details).length > 0 && (
+                          <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">Customized</p>
+                        )
+                      )}
 
-                    {expandedCartIndexes.has(idx) && (item.order_slip_fields?.length > 0 || item.allow_file_upload || item.products?.some(p => p.order_slip_fields?.length || p.allow_file_upload) || item.package_components?.some(p => p.order_slip_fields?.length || p.allow_file_upload)) && onUpdateItem && (
-                      <button type="button" onClick={() => setEditingSlipIndex(idx)} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#DED4CC] px-3 py-1.5 text-[11px] font-semibold text-[#5A453C] hover:bg-[#F5EFEB]"><Pencil size={12}/>Edit order slip</button>
-                    )}
+                      {expandedCartIndexes.has(idx) && (item.order_slip_fields?.length > 0 || item.allow_file_upload || item.products?.some(p => p.order_slip_fields?.length || p.allow_file_upload) || item.package_components?.some(p => p.order_slip_fields?.length || p.allow_file_upload)) && onUpdateItem && (
+                        <button type="button" onClick={() => setEditingSlipIndex(idx)} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#DED4CC] px-3 py-1.5 text-[11px] font-semibold text-[#5A453C] hover:bg-[#F5EFEB]"><Pencil size={12}/>Edit order slip</button>
+                      )}
 
-                    <div className="flex items-center gap-2 mt-2">
-                      <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
-                      <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
-                      <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
+                      <div className="flex items-center gap-2 mt-2">
+                        <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
+                        <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
+                        <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
+                      </div>
                     </div>
-                  </div>
-                  <span className="font-semibold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+
+                    {/* Presyo sa itaas, Delete Button sa mismong BABA ng presyo */}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="font-semibold text-sm text-[#5A453C]">₱{(item.price * item.qty).toLocaleString()}</span>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveItem?.(idx)}
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 transition-colors"
+                        aria-label={`Remove ${item.name}`}
+                        title="Remove item"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))

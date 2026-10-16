@@ -284,6 +284,10 @@ export default function PosPage() {
     });
   };
 
+  const handleRemoveCartItem = (index) => {
+    setCart(prev => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const handleClearCart = () => {
     // Clear the persisted snapshot before updating React state so a
     // successful checkout cannot restore the previous cart on remount.
@@ -322,6 +326,7 @@ export default function PosPage() {
         orderType={orderType}
         setOrderType={setOrderType}
         onUpdateQty={handleUpdateQty}
+        onRemoveItem={handleRemoveCartItem}
         onUpdateItem={handleUpdateItem}
         onClearCart={handleClearCart}
         isCartOpen={isCartOpen}

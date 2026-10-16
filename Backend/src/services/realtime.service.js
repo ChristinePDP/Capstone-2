@@ -15,6 +15,7 @@ const watchedTables = [
   'occasions',
   'promo_bundles',
   'bundle_products',
+  'payment_settings',
   'notifications',
 ];
 const tablesWithSafeRowPayload = new Set([
@@ -25,6 +26,7 @@ const tablesWithSafeRowPayload = new Set([
   'recipe_ingredients',
   'production_logs',
   'waste_logs',
+  'inventory_logs',
   'notifications',
   'occasions',
 ]);
@@ -60,6 +62,14 @@ function broadcast(change) {
       clients.delete(client);
     }
   }
+}
+
+// Direct application events complement the Supabase database subscription.
+// Useful for writes made by this backend even if the Realtime channel is
+// reconnecting; payload contains identifiers only, never customer details.
+export function emitRealtimeChange({ table, event, recordId, relatedId = null }) {
+  if (!table || !event || !recordId) return;
+  broadcast({ table, event, recordId, relatedId, at: new Date().toISOString() });
 }
 
 export function startRealtimeBridge() {
