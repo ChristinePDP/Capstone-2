@@ -3,6 +3,7 @@ import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lu
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
+import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
@@ -271,6 +272,7 @@ export default function IngredientsTab() {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         ingredient={currentEditIng}
+        existingIngredients={ingredients}
         onSave={handleSave}
       />
 
@@ -287,7 +289,7 @@ export default function IngredientsTab() {
   );
 }
 
-function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
+function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = [], onSave }) {
   const [name, setName]               = useState(ingredient?.name ?? '');
   const [unit, setUnit]               = useState(ingredient?.unit ?? 'kg');
   const [stock, setStock]             = useState(ingredient?.id ? '' : '0');
@@ -298,7 +300,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const [savedDetails, setSavedDetails] = useState({ name: ingredient?.name ?? '', unit: ingredient?.unit ?? 'kg', min: ingredient?.min ?? '', costPerUnit: ingredient?.costPerUnit ?? '' });
   const [currentStock, setCurrentStock] = useState(Number(ingredient?.stock ?? 0));
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     if (ingredient?.id) setCurrentStock(Number(ingredient.stock ?? 0));
@@ -313,6 +314,14 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const [serverError, setServerError] = useState(null);
 
   const isEdit = !!ingredient?.id;
+  const exactNameMatch = findExactNameMatch(name, existingIngredients, { excludeId: ingredient?.id });
+  const exactNameError = exactNameMatch ? `An ingredient named "${exactNameMatch.name}" already exists.` : '';
+  const similarNameSuggestions = getSimilarNameSuggestions(name, existingIngredients, { excludeId: ingredient?.id });
+  const similarNameWarning = !exactNameMatch && similarNameSuggestions.length > 0 && (
+    <p role="status" aria-live="polite" title={`Name suggestion only: similar to ${similarNameSuggestions.join(', ')}. Keep your name if this is a different item.`} className="mt-1.5 max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-brand-100 bg-brand-50 px-2 py-1 text-[10px] text-brand-600">
+      FYI: Similar to <strong>{similarNameSuggestions.join(', ')}</strong>. Your name is fine for a different item.
+    </p>
+  );
 
   const finalizedStock = parseFractionInput(stock);
   const addedQty       = parseFloat(finalizedStock) || 0;
@@ -332,6 +341,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const computeDetailsErrors = () => {
     const next = {};
     if (!name.trim()) next.name = 'Name is required.';
+    else if (exactNameError) next.name = exactNameError;
     if (minError) next.min = minError;
     if (detailsCostError) next.detailsCost = detailsCostError;
     return next;
@@ -343,6 +353,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
     if (!isEdit) {
       if (!name.trim()) next.name = 'Ingredient name is required.';
+      else if (exactNameError) next.name = exactNameError;
 
       if (stock && parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
       else if (stock && qtyError) next.stock = qtyError;
@@ -405,7 +416,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
 
   // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
   const fieldErr = {
-    name:        errors.name,
+    name:        errors.name || exactNameError,
     stock:       errors.stock || qtyError,
     min:         errors.min || minError,
     cost:        errors.cost || costError,
@@ -540,7 +551,6 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     try {
       await onSave(confirmPayload);
       if (isEdit) {
-        setHistoryRefreshKey(key => key + 1);
         setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost });
         setCurrentStock((confirmPayload.stockAfterUnitChange ?? currentStock) + (confirmPayload.restockPayload?.added_qty ?? 0));
         setEditingDetails(false);
@@ -596,13 +606,13 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
       <Modal
         isOpen={isOpen}
         onClose={() => !isSaving && onClose()}
-        title={isEdit ? `Manage Stock — ${name}` : 'Add New Ingredient'}
+        title={isEdit ? <><span className="text-sm font-semibold text-brand-400 block">Manage Stock</span><span className="text-xl font-extrabold text-brand-900">{name}</span></> : 'Add New Ingredient'}
         subtitle={isEdit ? `Unit: ${unit}` : 'Record a newly purchased sack or bulk ingredient.'}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={isSaving} onClick={handleValidate}>
+            <Button variant="primary" disabled={isSaving || Boolean(exactNameMatch)} onClick={handleValidate}>
               {isEdit ? 'Save Changes' : 'Save Ingredient'}
             </Button>
           </div>
@@ -640,14 +650,17 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">1. Basic Information</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
-                  <FormInput
-                    label="Ingredient Name"
-                    required
-                    error={fieldErr.name}
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="e.g. Wash Sugar"
-                  />
+                  <div className="min-w-0">
+                    <FormInput
+                      label="Ingredient Name"
+                      required
+                      error={fieldErr.name}
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      placeholder="e.g. Wash Sugar"
+                    />
+                    {similarNameWarning}
+                  </div>
                   <FormSelect
                     label="Unit of Measurement"
                     required
@@ -799,13 +812,16 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     </>
                   ) : (
                     <>
-                      <FormInput
-                        label="Name"
-                        required
-                        error={fieldErr.name}
-                        value={name}
-                        onChange={e => { setName(e.target.value); setUnitConversionConfirmed(false); }}
-                      />
+                      <div className="min-w-0">
+                        <FormInput
+                          label="Name"
+                          required
+                          error={fieldErr.name}
+                          value={name}
+                          onChange={e => { setName(e.target.value); setUnitConversionConfirmed(false); }}
+                        />
+                        {similarNameWarning}
+                      </div>
                       <FormSelect label="Unit" required value={unit} onChange={e => {
                         const nextUnit = e.target.value;
                         const convertedMin = convertToBase(Number(min || 0), unit, nextUnit);
@@ -875,7 +891,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" itemId={ingredient?.id} refreshKey={historyRefreshKey} onVoided={() => { setServerError(null); setErrors({}); }} />}
+          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" itemId={ingredient?.id} onVoided={() => { setServerError(null); setErrors({}); }} />}
         </div>
       </Modal>
 

@@ -625,8 +625,26 @@ export function AppProvider({ children }) {
   };
   const restockIngredient = async (id, data) => {
     try {
-      await apiClient.patch(`/ingredients/${id}/restock`, data);
-      await fetchAll();
+      const res = await apiClient.patch(`/ingredients/${id}/restock`, data);
+      const ingredient = res?.data?.data;
+      if (ingredient) {
+        const normalized = normalizeIngredientRow(ingredient);
+        setIngredients(previous => previous.map(item =>
+          String(item.id) === String(id) ? { ...item, ...normalized } : item
+        ));
+      }
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: {
+          table: 'inventory_logs',
+          event: 'INSERT',
+          action: 'created',
+          record: ingredient?.inventory_log ?? {
+            item_type: 'raw',
+            raw_ingredient_id: id,
+            item_name: ingredient?.name ?? '',
+          },
+        },
+      }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to restock ingredient'), { cause: err });
     }
@@ -659,8 +677,26 @@ export function AppProvider({ children }) {
   };
   const restockMaterial = async (id, data) => {
     try {
-      await apiClient.patch(`/materials/${id}/restock`, data);
-      await fetchAll();
+      const res = await apiClient.patch(`/materials/${id}/restock`, data);
+      const material = res?.data?.data;
+      if (material) {
+        const normalized = normalizeMaterialRow(material);
+        setMaterials(previous => previous.map(item =>
+          String(item.id) === String(id) ? { ...item, ...normalized } : item
+        ));
+      }
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: {
+          table: 'inventory_logs',
+          event: 'INSERT',
+          action: 'created',
+          record: material?.inventory_log ?? {
+            item_type: 'material',
+            material_id: id,
+            item_name: material?.name ?? '',
+          },
+        },
+      }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to restock'), { cause: err });
     }

@@ -4,6 +4,7 @@ import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingC
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
+import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
@@ -513,6 +514,7 @@ export default function CelebrationTab() {
         key={currentEditMat?.id ?? (currentEditMat?.productId ? `new-product-${currentEditMat.productId}` : `new-${materialView}`)}
         isOpen={modalOpen}
         material={currentEditMat}
+        existingMaterials={materials}
         celebrationProducts={celebrationProducts.filter(p => !needsNoStock(p))}
         regularProducts={regularProducts}
         productsById={productsById}
@@ -655,7 +657,7 @@ function ProductLinkedNameField({ label = 'Material Name', value, onChange, prod
   );
 }
 
-function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
+function MaterialModal({ isOpen, onClose, material, existingMaterials = [], celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
   const [name, setName] = useState(material?.name ?? '');
   const [unit, setUnit] = useState(material?.unit ?? 'pcs');
   const [stock, setStock] = useState(material?.id ? '' : '0');
@@ -668,6 +670,14 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   // modal was opened in (defaultView); for an existing one it comes from the
   // saved material_type. The user no longer picks or changes it.
   const materialType = material?.id ? getMaterialViewKey(material) : defaultView;
+  const exactNameMatch = findExactNameMatch(name, existingMaterials, { excludeId: material?.id });
+  const exactNameError = exactNameMatch ? `A material named "${exactNameMatch.name}" already exists.` : '';
+  const similarMaterialNames = getSimilarNameSuggestions(name, existingMaterials, { excludeId: material?.id });
+  const similarNameWarning = !exactNameMatch && similarMaterialNames.length > 0 && (
+    <p role="status" aria-live="polite" title={`Name suggestion only: similar to ${similarMaterialNames.join(', ')}. Keep your name if this is a different item.`} className="mt-1.5 max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-brand-100 bg-brand-50 px-2 py-1 text-[10px] text-brand-600">
+      FYI: Similar to <strong>{similarMaterialNames.join(', ')}</strong>. Your name is fine for a different item.
+    </p>
+  );
 
   // Name-suggestion source depende sa uri: Celebration Materials ay
   // naka-link sa Celebration Material products, samantalang Product
@@ -679,7 +689,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   const [savedDetails, setSavedDetails] = useState({ name: material?.name ?? '', unit: material?.unit ?? 'pcs', min: material?.min ?? '', costPerUnit: material?.costPerUnit ?? '', productId: material?.productId || material?.product_id || '' });
   const [currentStock, setCurrentStock] = useState(Number(material?.stock ?? 0));
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
-  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     if (material?.id) setCurrentStock(Number(material.stock ?? 0));
@@ -712,6 +721,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   const computeDetailsErrors = () => {
     const next = {};
     if (!name.trim()) next.name = 'Name is required.';
+    else if (exactNameError) next.name = exactNameError;
     if (minError) next.min = minError;
     if (detailsCostError) next.detailsCost = detailsCostError;
     return next;
@@ -723,6 +733,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
     if (!isEdit) {
       if (!name.trim()) next.name = 'Material name is required.';
+      else if (exactNameError) next.name = exactNameError;
 
       if (stock && parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
       else if (stock && qtyError) next.stock = qtyError;
@@ -785,7 +796,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
   const fieldErr = {
-    name:        errors.name,
+    name:        errors.name || exactNameError,
     stock:       errors.stock || qtyError,
     min:         errors.min || minError,
     cost:        errors.cost || costError,
@@ -925,7 +936,6 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     try {
       await onSave(confirmPayload);
       if (isEdit) {
-        setHistoryRefreshKey(key => key + 1);
         setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost, productId });
         setCurrentStock((confirmPayload.stockAfterUnitChange ?? currentStock) + (confirmPayload.restockPayload?.added_qty ?? 0));
         setEditingDetails(false);
@@ -980,32 +990,35 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   // Name field: celebration = may product suggestions, product = plain input.
   const renderNameField = (label, placeholder) => (
-    materialType === 'celebration' ? (
-      <ProductLinkedNameField
-        label={label}
-        value={name}
-        error={fieldErr.name}
-        onChange={(nextName, linkedId) => {
-          setName(nextName);
-          setProductId(linkedId ?? '');
-          setUnitConversionConfirmed(false);
-        }}
-        products={products}
-        placeholder={placeholder}
-      />
-    ) : (
-      <FormInput
-        label={label}
-        required
-        error={fieldErr.name}
-        value={name}
-        onChange={e => {
-          setName(e.target.value);
-          setProductId('');
-        }}
-        placeholder={placeholder}
-      />
-    )
+    <div>
+      {materialType === 'celebration' ? (
+        <ProductLinkedNameField
+          label={label}
+          value={name}
+          error={fieldErr.name}
+          onChange={(nextName, linkedId) => {
+            setName(nextName);
+            setProductId(linkedId ?? '');
+            setUnitConversionConfirmed(false);
+          }}
+          products={products}
+          placeholder={placeholder}
+        />
+      ) : (
+        <FormInput
+          label={label}
+          required
+          error={fieldErr.name}
+          value={name}
+          onChange={e => {
+            setName(e.target.value);
+            setProductId('');
+          }}
+          placeholder={placeholder}
+        />
+      )}
+      {similarNameWarning}
+    </div>
   );
 
   const unitOptions = STOCK_UNIT_CATEGORIES.map(cat => (
@@ -1016,13 +1029,13 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? `Manage Stock — ${name}` : `Add New ${viewLabel ?? 'Material'}`}
+      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? <><span className="text-sm font-semibold text-brand-400 block">Manage Stock</span><span className="text-xl font-extrabold text-brand-900">{name}</span></> : `Add New ${viewLabel ?? 'Material'}`}
         subtitle={isEdit ? `Unit: ${unit}` : `Record a new batch of ${viewLabel?.toLowerCase() ?? 'material'}.`}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
-            <Button variant="primary" disabled={isSaving} onClick={handleValidate}>
+            <Button variant="primary" disabled={isSaving || Boolean(exactNameMatch)} onClick={handleValidate}>
               {isEdit ? 'Save Changes' : 'Save Material'}
             </Button>
           </div>
@@ -1273,7 +1286,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" itemId={material?.id} refreshKey={historyRefreshKey} onVoided={() => { setServerError(null); setErrors({}); }} />}
+          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" itemId={material?.id} onVoided={() => { setServerError(null); setErrors({}); }} />}
         </div>
       </Modal>
 

@@ -149,7 +149,7 @@ const IngredientService = {
     const logResult = await InventoryLogModel.logHistory(logPayload);
     if (!logResult) throw new AppError('Stock quantity was updated, but its history entry could not be saved. Check the server log before retrying.', 500);
 
-    return data;
+    return { ...data, inventory_log: logResult };
   },
 
   delete: async (id) => {
@@ -326,7 +326,7 @@ const MaterialService = {
     const logResult = await InventoryLogModel.logHistory(logPayload);
     if (!logResult) throw new AppError('Stock quantity was updated, but its history entry could not be saved. Check the server log before retrying.', 500);
 
-    return data;
+    return { ...data, inventory_log: logResult };
   },
 
   delete: async (id) => {

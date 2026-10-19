@@ -18,7 +18,7 @@ const PAGE_SIZE = 5;
 const isVoidableStockEntry = (log) => ['Restock', 'Initial Stock'].includes(log.action);
 
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
-export function RestockHistoryPanel({ itemName, itemType, itemId, refreshKey, onVoided }) {
+export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
   const { fetchInventoryHistory, voidRestockLog } = useApp() || {};
   const { show } = useToast();
   const [logs, setLogs] = useState([]);
@@ -64,10 +64,6 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, refreshKey, on
   }, [itemName, itemId, itemType]);
 
   useEffect(() => {
-    if (refreshKey) loadHistory();
-  }, [refreshKey, loadHistory]);
-
-  useEffect(() => {
     setPage(1);
     setSelectedIds([]);
     setSelectionMode(false);
@@ -84,7 +80,16 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, refreshKey, on
       const typeMatches = log.item_type === itemType;
       if ((linkedId && String(linkedId) === String(itemId))
         || (typeMatches && log.item_name === itemName)) {
-        loadHistory({ silent: true });
+        if (log.id && ['Initial Stock', 'Restock'].includes(log.action)) {
+          historyRequestRef.current += 1;
+          setLoading(false);
+          setErrorMsg('');
+          setPage(1);
+          setLogs(previous => [log, ...previous.filter(entry => String(entry.id) !== String(log.id))]
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+        } else {
+          loadHistory({ silent: true });
+        }
       }
     };
     window.addEventListener('cake:data-changed', handleDataChanged);
