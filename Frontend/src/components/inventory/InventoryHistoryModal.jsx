@@ -15,9 +15,10 @@ const formatDT = (iso) => {
 };
 
 const PAGE_SIZE = 5;
+const isVoidableStockEntry = (log) => ['Restock', 'Initial Stock'].includes(log.action);
 
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
-export function RestockHistoryPanel({ itemName, itemType, itemId }) {
+export function RestockHistoryPanel({ itemName, itemType, itemId, refreshKey, onVoided }) {
   const { fetchInventoryHistory, voidRestockLog } = useApp() || {};
   const { show } = useToast();
   const [logs, setLogs] = useState([]);
@@ -33,6 +34,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
   const [voidingId, setVoidingId] = useState(null);
 
   const [page, setPage] = useState(1);
+  const historyRequestRef = useRef(0);
 
   const fetchRef = useRef(fetchInventoryHistory);
   useEffect(() => {
@@ -41,55 +43,36 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
 
   const loadHistory = useCallback(async ({ silent = false } = {}) => {
     if (!itemName || !fetchRef.current) return;
+    const requestId = ++historyRequestRef.current;
     if (!silent) {
       setLoading(true);
       setErrorMsg('');
     }
     try {
       const data = await fetchRef.current(itemName, itemType, itemId);
-      const restocksOnly = (Array.isArray(data) ? data : [])
-        .filter(log => log.action === 'Restock');
-      setLogs(restocksOnly);
+      const stockEntries = (Array.isArray(data) ? data : [])
+        .filter(log => ['Initial Stock', 'Restock'].includes(log.action));
+      if (requestId === historyRequestRef.current) setLogs(stockEntries);
     } catch (err) {
-      if (!silent) {
+      if (requestId === historyRequestRef.current && !silent) {
         setErrorMsg(err.message || 'Hindi makuha ang history.');
         setLogs([]);
       }
     } finally {
-      if (!silent) setLoading(false);
+      if (requestId === historyRequestRef.current) setLoading(false);
     }
   }, [itemName, itemId, itemType]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (refreshKey) loadHistory();
+  }, [refreshKey, loadHistory]);
 
-    async function load() {
-      if (!itemName || !fetchRef.current) return;
-      setLoading(true);
-      setErrorMsg('');
-      try {
-      const data = await fetchRef.current(itemName, itemType, itemId);
-        const restocksOnly = (Array.isArray(data) ? data : [])
-          .filter(log => log.action === 'Restock');
-        if (!cancelled) {
-          setLogs(restocksOnly);
-          setPage(1);
-          setSelectedIds([]);
-          setSelectionMode(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMsg(err.message || 'Hindi makuha ang history.');
-          setLogs([]);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => { cancelled = true; };
-  }, [itemName, itemType, itemId]);
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds([]);
+    setSelectionMode(false);
+    loadHistory();
+  }, [itemName, itemType, itemId, loadHistory]);
 
   useEffect(() => {
     const handleDataChanged = (event) => {
@@ -116,8 +99,8 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
     [logs, safePage]
   );
 
-  const activeLogs = useMemo(() => logs.filter(l => !l.voided_at), [logs]);
-  const activeIdsOnPage = pagedLogs.filter(l => !l.voided_at).map(l => l.id);
+  const activeLogs = useMemo(() => logs.filter(l => !l.voided_at && isVoidableStockEntry(l)), [logs]);
+  const activeIdsOnPage = pagedLogs.filter(l => !l.voided_at && isVoidableStockEntry(l)).map(l => l.id);
   const allSelectedOnPage = activeIdsOnPage.length > 0 && activeIdsOnPage.every(id => selectedIds.includes(id));
 
   const toggleSelect = (id) => {
@@ -142,7 +125,8 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
     setVoidingId(log.id);
     try {
       await voidRestockLog(log.id, force);
-      show('Na-void na ang restock entry.', 'success');
+      onVoided?.();
+      show('Stock entry voided.', 'success');
       setConfirmLog(null);
       setInsufficientLog(null);
       setSelectedIds([]);
@@ -152,9 +136,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
       if (err.cause?.response?.status === 409) {
         setConfirmLog(null);
         setInsufficientLog(log);
-        setInsufficientDetail(err.cause?.response?.data?.message || err.message);
+        setInsufficientDetail('The entry is larger than the remaining stock. Some quantity may have been used in production or waste.');
       } else {
-        show(err.message || 'Hindi ma-void ang restock entry.', 'error');
+        show(err.message || 'Could not void the stock entry.', 'error');
         setConfirmLog(null);
       }
     } finally {
@@ -179,8 +163,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
       }
     }
 
-    if (successCount > 0) show(`Na-void na ang ${successCount} entry(ies).`, 'success');
-    if (failCount > 0) show(`May ${failCount} entry(ies) na hindi na-void (insufficient stock / conflict).`, 'error');
+    if (successCount > 0) show(`Voided ${successCount} stock entr${successCount === 1 ? 'y' : 'ies'}.`, 'success');
+    if (successCount > 0) onVoided?.();
+    if (failCount > 0) show(`Could not void ${failCount} entr${failCount === 1 ? 'y' : 'ies'} because of insufficient stock or a conflict.`, 'error');
 
     setSelectedIds([]);
     setSelectionMode(false);
@@ -205,7 +190,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
       <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
         <div className="flex items-center gap-1.5">
           <HistoryIcon size={13} className="text-brand-400" />
-          <span className="text-[11px] font-bold uppercase tracking-wide text-brand-400">Restock History</span>
+          <span className="text-[11px] font-bold uppercase tracking-wide text-brand-400">Stock History</span>
           {logs.length > 0 && (
             <span className="text-[10px] text-brand-400 font-medium">({logs.length})</span>
           )}
@@ -256,7 +241,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
 
         {!loading && !errorMsg && !logs.length && (
           <div className="py-6 text-center text-xs text-brand-400 font-medium">
-            Wala pang restock history para dito.
+            Wala pang stock history para dito.
           </div>
         )}
 
@@ -272,7 +257,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
                     key={log.id ?? `${log.created_at}-${idx}`}
                     className={`p-3 flex items-start gap-2.5 ${isVoided ? 'opacity-50' : isSelected ? 'bg-red-50/40' : ''}`}
                   >
-                    {selectionMode && !isVoided && (
+                    {selectionMode && !isVoided && isVoidableStockEntry(log) && (
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -286,7 +271,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
                           {isVoided ? (
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-red-100 text-red-600">Voided</span>
                           ) : (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">Restock</span>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">{log.action}</span>
                           )}
                         </div>
                         <p className="text-[11px] text-brand-500">{formatDT(log.created_at)}</p>
@@ -321,11 +306,11 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
                       />
                     </th>
                   )}
-                  <th className="px-3 py-2 font-bold">Petsa at Oras</th>
+                  <th className="px-3 py-2 font-bold">Date &amp; Time</th>
                   <th className="px-3 py-2 font-bold">Action</th>
                   <th className="px-3 py-2 font-bold">Expiration</th>
                   <th className="px-3 py-2 font-bold text-right">Qty</th>
-                  <th className="px-3 py-2 font-bold text-right">Halaga</th>
+                  <th className="px-3 py-2 font-bold text-right">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-brand-100 bg-white">
@@ -336,7 +321,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
                     <tr key={log.id ?? `${log.created_at}-${idx}`} className={`transition-colors ${isVoided ? 'opacity-50 bg-gray-50/50' : isSelected ? 'bg-red-50/40' : 'hover:bg-brand-50/50'}`}>
                       {selectionMode && (
                         <td className="px-3 py-2 text-center">
-                          {!isVoided && (
+                          {!isVoided && isVoidableStockEntry(log) && (
                             <input
                               type="checkbox"
                               checked={isSelected}
@@ -351,7 +336,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
                         {isVoided ? (
                           <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-red-100 text-red-600">Voided</span>
                         ) : (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">Restock</span>
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold bg-green-100 text-green-700">{log.action}</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-[11px] font-medium text-amber-600 whitespace-nowrap">
@@ -365,7 +350,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
               </tbody>
             </table>
 
-            <Pagination page={safePage} total="restock entries" perPage={PAGE_SIZE} count={logs.length} onChange={setPage} />
+            <Pagination page={safePage} total="stock entries" perPage={PAGE_SIZE} count={logs.length} onChange={setPage} />
           </>
         )}
       </div>
@@ -375,9 +360,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
         isOpen={Boolean(confirmLog)}
         onClose={() => setConfirmLog(null)}
         onConfirm={() => runVoid(confirmLog, false)}
-        title="I-void ang restock na ito?"
-        message={confirmLog ? `Ibabawas ang ${confirmLog.quantity} ${confirmLog.unit || ''} na dati'y naidagdag sa "${itemName}". Mananatili ang record bilang audit trail, pero babalik ang stock sa dati.` : ''}
-        confirmLabel={voidingId ? 'Inaalis...' : 'Oo, i-void'}
+        title="Void this stock entry?"
+        message={confirmLog ? `This will remove ${confirmLog.quantity} ${confirmLog.unit || ''} recorded as ${confirmLog.action} from the current stock for "${itemName}". The entry will remain in the audit history.` : ''}
+        confirmLabel={voidingId ? 'Voiding...' : 'Void entry'}
         variant="danger"
       />
 
@@ -385,9 +370,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
         isOpen={isBulkConfirmOpen}
         onClose={() => setIsBulkConfirmOpen(false)}
         onConfirm={runBulkVoid}
-        title={`I-void ang ${selectedIds.length} napiling restock entry?`}
-        message={`Ibabawas ang mga idinagdag na stock para sa ${selectedIds.length} entry na ito sa "${itemName}".`}
-        confirmLabel="Oo, i-void lahat"
+        title={`Void ${selectedIds.length} selected stock ${selectedIds.length === 1 ? 'entry' : 'entries'}?`}
+        message={`This will remove the quantities from the ${selectedIds.length} selected entries from current stock for "${itemName}".`}
+        confirmLabel="Void selected"
         variant="danger"
       />
 
@@ -395,9 +380,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId }) {
         isOpen={Boolean(insufficientLog)}
         onClose={() => setInsufficientLog(null)}
         onConfirm={() => runVoid(insufficientLog, true)}
-        title="Kulang na ang kasalukuyang stock"
-        message={`${insufficientDetail} Ituloy pa rin ang pag-void? (Mapupunta sa 0 ang stock sa halip na eksaktong tumugma sa dati.)`}
-        confirmLabel="Ituloy pa rin"
+        title="Current stock is insufficient"
+        message={`${insufficientDetail} Continue anyway? The stock will be set to zero instead of being reversed exactly.`}
+        confirmLabel="Continue anyway"
         variant="danger"
       />
     </div>

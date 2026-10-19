@@ -27,7 +27,8 @@ const IngredientService = {
   },
 
   create: async (body) => {
-    const { data, error } = await IngredientModel.create(body);
+    const { expiration_date, ...ingredientData } = body;
+    const { data, error } = await IngredientModel.create(ingredientData);
     if (error) throw error;
 
     // AUDIT LOG: ang raw_ingredients table ay walang `created_at` at
@@ -44,7 +45,7 @@ const IngredientService = {
     const initialCost = parseFloat((Number(data.cost_per_unit || 0) * initialQty).toFixed(2));
 
     if (initialQty > 0) {
-      await InventoryLogModel.logHistory({
+      const entry = await InventoryLogModel.logHistory({
         item_type: 'raw',
         item_name: data.name,
         raw_ingredient_id: data.id,
@@ -55,8 +56,9 @@ const IngredientService = {
         cost: initialCost,
         action: 'Initial Stock',
         remaining_quantity: initialQty,
-        expiration_date: body.expiration_date || null,
+        expiration_date: expiration_date || null,
       });
+      if (!entry) throw new AppError('Ingredient was created, but its initial stock history could not be saved. Check the server log before retrying.', 500);
     }
 
     return data;
@@ -144,7 +146,8 @@ const IngredientService = {
     };
     console.log('DATA NA IPAPASA SA SUPABASE:', logPayload);
 
-    await InventoryLogModel.logHistory(logPayload);
+    const logResult = await InventoryLogModel.logHistory(logPayload);
+    if (!logResult) throw new AppError('Stock quantity was updated, but its history entry could not be saved. Check the server log before retrying.', 500);
 
     return data;
   },
@@ -198,7 +201,8 @@ const MaterialService = {
     if (body.material_type === 'celebration') {
       await assertProductNeedsStock(body.product_id);
     }
-    const { data, error } = await MaterialModel.create(body);
+    const { expiration_date, ...materialData } = body;
+    const { data, error } = await MaterialModel.create(materialData);
     if (error) throw error;
 
     // AUDIT LOG: kaparehong dahilan ng IngredientService.create() —
@@ -208,7 +212,7 @@ const MaterialService = {
     const initialCost = parseFloat((Number(data.cost_per_unit || 0) * initialQty).toFixed(2));
 
     if (initialQty > 0) {
-      await InventoryLogModel.logHistory({
+      const entry = await InventoryLogModel.logHistory({
         item_type: 'material',
         item_name: data.name,
         material_id: data.id,
@@ -219,8 +223,9 @@ const MaterialService = {
         cost: initialCost,
         action: 'Initial Stock',
         remaining_quantity: initialQty,
-        expiration_date: body.expiration_date || null,
+        expiration_date: expiration_date || null,
       });
+      if (!entry) throw new AppError('Material was created, but its initial stock history could not be saved. Check the server log before retrying.', 500);
     }
 
     return data;
@@ -304,9 +309,8 @@ const MaterialService = {
       throw new AppError(`Failed to update material: ${error.message}`, 500);
     }
 
-    // 5. I-save sa logs nang LIGTAS (Hindi magka-crash kahit undefined ang return)
-    try {
-      const logPayload = {
+    // Keep the inventory history in sync with the quantity update.
+    const logPayload = {
         item_type: 'material',
         item_name: current.name,
         material_id: current.id,
@@ -318,19 +322,9 @@ const MaterialService = {
         action: 'Restock',
         remaining_quantity: addedQty, 
         expiration_date: body.expiration_date || null
-      };
-
-      const logResult = await InventoryLogModel.logHistory(logPayload);
-      
-      // Fallback check kung sakaling object nga ang ibinato at may error
-      if (logResult && logResult.error) {
-        console.error("SUPABASE LOG ERROR:", logResult.error);
-        throw new AppError(`Failed to save log: ${logResult.error.message}`, 500);
-      }
-    } catch (logErr) {
-      // Kung mag-throw man ang logHistory function mo internally, hindi mada-damage ang restock natin
-      console.error("LIGTAS NA NASALO ANG LOGGING ERROR:", logErr);
-    }
+    };
+    const logResult = await InventoryLogModel.logHistory(logPayload);
+    if (!logResult) throw new AppError('Stock quantity was updated, but its history entry could not be saved. Check the server log before retrying.', 500);
 
     return data;
   },
@@ -353,9 +347,9 @@ const InventoryLogService = {
   // ang log (hindi totoong "delete", audit trail pa rin).
   voidRestock: async (logId, force = false) => {
     const log = await InventoryLogModel.findById(logId);
-    if (!log) throw new AppError('Restock log not found', 404);
-    if (log.voided_at) throw new AppError('Naka-void na ang restock entry na ito.', 400);
-    if (log.action !== 'Restock' || log.transaction_type !== 'IN') {
+    if (!log) throw new AppError('Stock log not found', 404);
+    if (log.voided_at) throw new AppError('Naka-void na ang stock entry na ito.', 400);
+    if (!['Restock', 'Initial Stock'].includes(log.action) || log.transaction_type !== 'IN') {
       throw new AppError('Hindi ito isang restock entry — hindi ito puwedeng i-void dito.', 400);
     }
 
@@ -399,7 +393,7 @@ const InventoryLogService = {
       transaction_type: 'OUT',
       quantity: log.quantity,
       cost: 0,
-      action: 'Void Restock (Pagtatama)',
+      action: log.action === 'Initial Stock' ? 'Void Initial Stock (Pagtatama)' : 'Void Restock (Pagtatama)',
     });
 
     return { voided: true, newStock: result.newStock };

@@ -4,7 +4,7 @@ import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingC
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
-import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
+import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { useIsCompact } from '../../hooks/useIsCompact';
@@ -658,8 +658,8 @@ function ProductLinkedNameField({ label = 'Material Name', value, onChange, prod
 function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
   const [name, setName] = useState(material?.name ?? '');
   const [unit, setUnit] = useState(material?.unit ?? 'pcs');
-  const [stock, setStock] = useState('');
-  const [min, setMin] = useState(material?.min ?? '');
+  const [stock, setStock] = useState(material?.id ? '' : '0');
+  const [min, setMin] = useState(material?.min ?? '0');
   const [cost, setCost] = useState('');
   const [expiry, setExpiry] = useState('');
   const [productId, setProductId] = useState(material?.productId || material?.product_id || '');
@@ -679,6 +679,11 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
   const [savedDetails, setSavedDetails] = useState({ name: material?.name ?? '', unit: material?.unit ?? 'pcs', min: material?.min ?? '', costPerUnit: material?.costPerUnit ?? '', productId: material?.productId || material?.product_id || '' });
   const [currentStock, setCurrentStock] = useState(Number(material?.stock ?? 0));
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (material?.id) setCurrentStock(Number(material.stock ?? 0));
+  }, [material?.id, material?.stock]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
@@ -719,15 +724,16 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     if (!isEdit) {
       if (!name.trim()) next.name = 'Material name is required.';
 
-      if (!stock) next.stock = 'Initial stock is required.';
-      else if (parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
-      else if (qtyError) next.stock = qtyError;
+      if (stock && parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
+      else if (stock && qtyError) next.stock = qtyError;
 
       if (!min) next.min = 'Minimum stock is required.';
       else if (minError) next.min = minError;
 
-      if (!cost) next.cost = 'Total amount is required.';
-      else if (costError) next.cost = costError;
+      if (addedQty > 0) {
+        if (!cost) next.cost = 'Total amount is required when initial stock is greater than zero.';
+        else if (costError) next.cost = costError;
+      }
 
       return next;
     }
@@ -858,14 +864,14 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
           unit,
           stock_quantity: addedQty,
           minimum_stock: parseFloat(min),
-          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0,
+          cost_per_unit: addedQty > 0 && cost ? parseFloat(cost) / addedQty : 0,
           material_type: defaultView, // 'celebration' | 'product' - taken from the active tab
-          expiration_date: expiry || null
+          expiration_date: addedQty > 0 ? (expiry || null) : null
         },
         addedQty,
         itemName: name.trim(),
         itemUnit: unit,
-        totalCost: cost ? parseFloat(cost) : 0,
+        totalCost: addedQty > 0 && cost ? parseFloat(cost) : 0,
       });
       return;
     }
@@ -918,14 +924,30 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
     setIsSaving(true);
     try {
       await onSave(confirmPayload);
-      setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost, productId });
-      setCurrentStock(confirmPayload.stockAfterUnitChange ?? currentStock);
+      if (isEdit) {
+        setHistoryRefreshKey(key => key + 1);
+        setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost, productId });
+        setCurrentStock((confirmPayload.stockAfterUnitChange ?? currentStock) + (confirmPayload.restockPayload?.added_qty ?? 0));
+        setEditingDetails(false);
+        setErrors({});
+        setServerError(null);
+      } else {
+        setName('');
+        setUnit('pcs');
+        setMin('0');
+        setDetailsCost('');
+        setProductId('');
+        setSavedDetails({ name: '', unit: 'pcs', min: '', costPerUnit: '', productId: '' });
+        setCurrentStock(0);
+        setErrors({});
+        setServerError(null);
+      }
       setUnitConversionConfirmed(false);
       setConfirmPayload(null);
-      setStock('');
+      setStock(isEdit ? '' : '0');
       setCost('');
       setExpiry('');
-      onClose();
+      if (!isEdit) onClose();
     } catch (err) {
       // Ipinapakita sa loob ng modal (hindi toast sa labas)
       setServerError(err.message || 'Failed to save');
@@ -1017,14 +1039,15 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
-                <Wallet size={16} className="text-brand-500" />
+                <Package size={16} className="text-brand-500" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
-                <p className="text-lg font-black text-brand-800 leading-tight">
-                  ₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}
-                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({currentStock} {savedDetails.unit})</span>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Current Stock</p>
+                <p className="text-2xl font-black text-brand-900 leading-tight">
+                  {Number(currentStock || 0).toLocaleString('en-PH', { maximumFractionDigits: 4 })}
+                  <span className="text-sm font-bold text-brand-500 ml-1.5">{savedDetails.unit}</span>
                 </p>
+                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}</span></p>
               </div>
             </div>
           )}
@@ -1057,15 +1080,15 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                   <FormInput
                     label="Initial Stock Quantity"
-                    required
                     error={fieldErr.stock}
+                    hint={!isEdit && addedQty <= 0 ? 'Leave blank or enter 0 if you have no initial stock.' : undefined}
                     type="text"
                     inputMode="decimal"
                     suffix={unit}
                     value={stock}
-                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onChange={e => { if (/[-−]/.test(e.target.value)) return; setStock(sanitizeNumericText(e.target.value)); }}
                     onBlur={() => setStock(current => parseFractionInput(current))}
-                    placeholder="e.g. 0.5 or 1/2"
+                    placeholder="e.g. 0.5"
                   />
                   <FormInput
                     label="Minimum Safety Stock"
@@ -1088,10 +1111,15 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
+                {!isEdit && addedQty <= 0 && (
+                  <p className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-[11px] text-brand-600">
+                    No initial stock: you can skip the receipt cost. It will be saved as ₱0.00.
+                  </p>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                   <FormInput
                     label="Total Amount / Receipt"
-                    required
+                    required={isEdit ? Boolean(stock) : addedQty > 0}
                     error={fieldErr.cost}
                     hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ₱${(parseFloat(cost) / addedQty).toFixed(2)} per ${unit} (${addedQty} ${unit})` : undefined}
                     type="text"
@@ -1104,7 +1132,9 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                     label="Expiration Date (Optional)"
                     type="date"
                     value={expiry}
+                    disabled={addedQty <= 0}
                     onChange={e => setExpiry(e.target.value)}
+                    hint={addedQty <= 0 ? 'Add initial stock to record an expiration date.' : undefined}
                   />
                 </div>
               </div>
@@ -1217,7 +1247,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
                     inputMode="decimal"
                     suffix={unit}
                     value={stock}
-                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onChange={e => { if (/[-−]/.test(e.target.value)) return; setStock(sanitizeNumericText(e.target.value)); }}
                     onBlur={() => setStock(current => parseFractionInput(current))}
                     placeholder="e.g. 0.5 or 1/2"
                   />
@@ -1243,7 +1273,7 @@ function MaterialModal({ isOpen, onClose, material, celebrationProducts = [], re
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" itemId={material?.id} />}
+          {isEdit && <RestockHistoryPanel itemName={material?.name} itemType="material" itemId={material?.id} refreshKey={historyRefreshKey} onVoided={() => { setServerError(null); setErrors({}); }} />}
         </div>
       </Modal>
 

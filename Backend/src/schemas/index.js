@@ -127,6 +127,10 @@ const StockItemSchema = z.object({
   cost_per_unit:  z.coerce.number().min(0),
 });
 
+const IngredientCreateSchema = StockItemSchema.extend({
+  expiration_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+});
+
 const UpdateStockItemSchema = StockItemSchema.partial();
 
 // Materials only (celebration_materials table). material_type is required
@@ -137,6 +141,7 @@ const MaterialTypeSchema = z.enum(['celebration', 'product']);
 
 const MaterialCreateSchema = StockItemSchema.extend({
   material_type: MaterialTypeSchema,
+  expiration_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 const RestockSchema = z.object({
@@ -205,6 +210,7 @@ export {
   CreateOrderSchema,
   UpdateOrderStatusSchema,
   StockItemSchema,
+  IngredientCreateSchema,
   UpdateStockItemSchema,
   MaterialTypeSchema,
   MaterialCreateSchema,

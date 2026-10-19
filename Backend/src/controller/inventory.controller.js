@@ -1,5 +1,5 @@
 import { ok, created } from '../utils/response.js';
-import { StockItemSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema, MaterialCreateSchema } from '../schemas/index.js';
+import { IngredientCreateSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema, MaterialCreateSchema } from '../schemas/index.js';
 import { MaterialService, ProductService, ProductionService, RecipeService, WasteService, IngredientService, InventoryLogService } from '../services/inventory.service.js';
 
 const IngredientController = {
@@ -9,7 +9,7 @@ const IngredientController = {
   },
   create: async (req, res, next) => {
     try {
-      const body = StockItemSchema.parse(req.body);
+      const body = IngredientCreateSchema.parse(req.body);
       created(res, await IngredientService.create(body), 'Ingredient added');
     } catch (err) { next(err); }
   },

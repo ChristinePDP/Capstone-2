@@ -44,7 +44,6 @@ const loadInitialState = () => {
   let main = 'stocks';
   if (oldMain === 'waste') main = 'waste';
   else if (oldMain === 'production') main = 'production';
-  else if (oldMain === 'stocks' && isValidSub('production', oldSub)) main = 'production';
 
   return { main, subs };
 };

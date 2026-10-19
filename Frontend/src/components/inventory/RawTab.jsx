@@ -3,7 +3,7 @@ import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lu
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
-import { sanitizeNumericText, sanitizeQtyText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
+import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
@@ -290,14 +290,19 @@ export default function IngredientsTab() {
 function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
   const [name, setName]               = useState(ingredient?.name ?? '');
   const [unit, setUnit]               = useState(ingredient?.unit ?? 'kg');
-  const [stock, setStock]             = useState('');
-  const [min, setMin]                 = useState(ingredient?.min ?? '');
+  const [stock, setStock]             = useState(ingredient?.id ? '' : '0');
+  const [min, setMin]                 = useState(ingredient?.min ?? '0');
   const [cost, setCost]               = useState('');
   const [expiry, setExpiry]           = useState('');
   const [detailsCost, setDetailsCost] = useState(String(ingredient?.costPerUnit ?? ''));
   const [savedDetails, setSavedDetails] = useState({ name: ingredient?.name ?? '', unit: ingredient?.unit ?? 'kg', min: ingredient?.min ?? '', costPerUnit: ingredient?.costPerUnit ?? '' });
   const [currentStock, setCurrentStock] = useState(Number(ingredient?.stock ?? 0));
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (ingredient?.id) setCurrentStock(Number(ingredient.stock ?? 0));
+  }, [ingredient?.id, ingredient?.stock]);
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [isSaving, setIsSaving]             = useState(false);
@@ -339,15 +344,16 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     if (!isEdit) {
       if (!name.trim()) next.name = 'Ingredient name is required.';
 
-      if (!stock) next.stock = 'Stock quantity is required.';
-      else if (parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
-      else if (qtyError) next.stock = qtyError;
+      if (stock && parseFloat(finalizedStock) < 0) next.stock = 'Stock quantity cannot be negative.';
+      else if (stock && qtyError) next.stock = qtyError;
 
       if (!min) next.min = 'Minimum stock is required.';
       else if (minError) next.min = minError;
 
-      if (!cost) next.cost = 'Total amount is required.';
-      else if (costError) next.cost = costError;
+      if (addedQty > 0) {
+        if (!cost) next.cost = 'Total amount is required when initial stock is greater than zero.';
+        else if (costError) next.cost = costError;
+      }
 
       return next;
     }
@@ -478,14 +484,14 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
           unit,
           stock_quantity: addedQty,
           minimum_stock: parseFloat(min),
-          cost_per_unit: cost ? parseFloat(cost) / addedQty : 0,
+          cost_per_unit: addedQty > 0 && cost ? parseFloat(cost) / addedQty : 0,
           category: 'Raw Material',
-          expiration_date: expiry || null
+          expiration_date: addedQty > 0 ? (expiry || null) : null
         },
         addedQty,
         itemName: name.trim(),
         itemUnit: unit,
-        totalCost: cost ? parseFloat(cost) : 0
+        totalCost: addedQty > 0 && cost ? parseFloat(cost) : 0
       });
       return;
     }
@@ -533,14 +539,29 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
     setIsSaving(true);
     try {
       await onSave(confirmPayload);
-      setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost });
-      setCurrentStock(confirmPayload.stockAfterUnitChange ?? currentStock);
+      if (isEdit) {
+        setHistoryRefreshKey(key => key + 1);
+        setSavedDetails({ name: name.trim(), unit, min: parseFloat(min) || 0, costPerUnit: detailsCost });
+        setCurrentStock((confirmPayload.stockAfterUnitChange ?? currentStock) + (confirmPayload.restockPayload?.added_qty ?? 0));
+        setEditingDetails(false);
+        setErrors({});
+        setServerError(null);
+      } else {
+        setName('');
+        setUnit('kg');
+        setMin('0');
+        setDetailsCost('');
+        setSavedDetails({ name: '', unit: 'kg', min: '', costPerUnit: '' });
+        setCurrentStock(0);
+        setErrors({});
+        setServerError(null);
+      }
       setUnitConversionConfirmed(false);
       setConfirmPayload(null);
-      setStock('');
+      setStock(isEdit ? '' : '0');
       setCost('');
       setExpiry('');
-      onClose();
+      if (!isEdit) onClose();
     } catch (err) {
       // Ipinapakita sa loob ng modal (hindi toast sa labas)
       setServerError(err.message || 'Failed to save');
@@ -598,14 +619,15 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
           {isEdit && (
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-50 border border-brand-100">
               <div className="w-9 h-9 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 shadow-sm">
-                <Wallet size={16} className="text-brand-500" />
+                <Package size={16} className="text-brand-500" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Total Cost of Current Stock</p>
-                <p className="text-lg font-black text-brand-800 leading-tight">
-                  ₱{((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0)).toFixed(2)}
-                  <span className="text-xs font-semibold text-brand-400 ml-1.5">({currentStock} {savedDetails.unit})</span>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Current Stock</p>
+                <p className="text-2xl font-black text-brand-900 leading-tight">
+                  {Number(currentStock || 0).toLocaleString('en-PH', { maximumFractionDigits: 4 })}
+                  <span className="text-sm font-bold text-brand-500 ml-1.5">{savedDetails.unit}</span>
                 </p>
+                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">₱{((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0)).toFixed(2)}</span></p>
               </div>
             </div>
           )}
@@ -652,15 +674,15 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                   <FormInput
                     label="Initial Stock Quantity"
-                    required
                     error={fieldErr.stock}
+                    hint={!isEdit && addedQty <= 0 ? 'Leave blank or enter 0 if you have no initial stock.' : undefined}
                     type="text"
                     inputMode="decimal"
                     suffix={unit}
                     value={stock}
-                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onChange={e => { if (/[-−]/.test(e.target.value)) return; setStock(sanitizeNumericText(e.target.value)); }}
                     onBlur={() => setStock(current => parseFractionInput(current))}
-                    placeholder="e.g. 0.25 or 1/4"
+                    placeholder="e.g. 0.25"
                   />
                   <FormInput
                     label="Minimum Safety Stock"
@@ -683,10 +705,15 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                   <Wallet size={13} className="text-brand-400" />
                   <span className="text-[10px] font-bold uppercase tracking-widest text-brand-400">3. Cost & Financials</span>
                 </div>
+                {!isEdit && addedQty <= 0 && (
+                  <p className="rounded-lg border border-brand-100 bg-brand-50/60 px-3 py-2 text-[11px] text-brand-600">
+                    No initial stock: you can skip the receipt cost. It will be saved as ₱0.00.
+                  </p>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-6">
                   <FormInput
                     label="Total Amount / Receipt"
-                    required
+                    required={isEdit ? Boolean(stock) : addedQty > 0}
                     error={fieldErr.cost}
                     type="text"
                     inputMode="decimal"
@@ -698,7 +725,9 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     label="Expiration Date (Optional)"
                     type="date"
                     value={expiry}
+                    disabled={addedQty <= 0}
                     onChange={e => setExpiry(e.target.value)}
+                    hint={addedQty <= 0 ? 'Add initial stock to record an expiration date.' : undefined}
                   />
                 </div>
               </div>
@@ -821,7 +850,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
                     inputMode="decimal"
                     suffix={unit}
                     value={stock}
-                    onChange={e => setStock(sanitizeQtyText(e.target.value))}
+                    onChange={e => { if (/[-−]/.test(e.target.value)) return; setStock(sanitizeNumericText(e.target.value)); }}
                     onBlur={() => setStock(current => parseFractionInput(current))}
                     placeholder="e.g. 0.25 or 1/4"
                   />
@@ -846,7 +875,7 @@ function IngredientModal({ isOpen, onClose, ingredient, onSave }) {
             </div>
           )}
 
-          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" itemId={ingredient?.id} />}
+          {isEdit && <RestockHistoryPanel itemName={ingredient?.name} itemType="raw" itemId={ingredient?.id} refreshKey={historyRefreshKey} onVoided={() => { setServerError(null); setErrors({}); }} />}
         </div>
       </Modal>
 
