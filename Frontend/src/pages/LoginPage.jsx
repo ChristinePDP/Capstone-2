@@ -61,6 +61,48 @@ function passwordIssues(v) {
   return issues;
 }
 
+// ── Password Strength Meter ──────────────────────────────────
+function PasswordStrength({ value }) {
+  if (!value) return null;
+
+  const missing = passwordIssues(value);
+  let score = 1; // Weak: kulang pa sa required rules
+  if (missing.length === 0) {
+    score = 2; // Fair: pasok na sa lahat ng rules
+    if (value.length >= 12) score++;             // bonus: mahaba
+    if (/[^A-Za-z0-9]/.test(value)) score++;     // bonus: may special char
+  }
+
+  const levels = [
+    null,
+    { label: 'Weak',   color: '#EF4444' },
+    { label: 'Fair',   color: '#F59E0B' },
+    { label: 'Good',   color: '#84CC16' },
+    { label: 'Strong', color: '#16A34A' },
+  ];
+  const { label, color } = levels[score];
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} style={{
+            flex: 1, height: 4, borderRadius: 2,
+            background: i <= score ? color : '#E2E8F0',
+            transition: 'background 0.2s',
+          }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 12 }}>
+        <span style={{ color, fontWeight: 600 }}>{label}</span>
+        {missing.length > 0 && (
+          <span style={{ color: '#94A3B8' }}>Need: {missing.join(', ')}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Shared Input Field ────────────────────────────────────────
 function InputField({ icon: Icon, type, value, onChange, placeholder, autoComplete, error, inputMode, maxLength, children }) {
   return (
@@ -750,6 +792,7 @@ export default function LoginPage({ onLogin }) {
                   >
                     <TogglePwBtn shown={showNewPw} onToggle={() => setShowNewPw(v => !v)} />
                   </InputField>
+                  <PasswordStrength value={newPassword} />
                 </Field>
 
                 <Field label="Confirm New Password" error={resetErrors.confirmPassword}>

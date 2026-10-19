@@ -65,6 +65,9 @@ async function changePassword(adminId, currentPassword, newPassword) {
 async function requestPasswordReset(email) {
   const { error } = await AuthModel.requestPasswordReset(email);
   if (error) {
+    // 🔴 DITO MAKIKITA ANG EKSAKTONG SANHI NG ERROR SA SERVER TERMINAL
+    console.error('ACTUAL ERROR DETAILS:', error);
+
     const err = new Error('Unable to send reset code. Please try again.');
     err.statusCode = 400;
     throw err;
