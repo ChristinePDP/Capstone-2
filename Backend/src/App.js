@@ -20,6 +20,9 @@ import { authMiddlewareJwt } from './middleware/auth.middleware.js';
 
 const app = express(); 
 
+// I-trust ang first proxy (Render) para makuha ang totoong client IP sa req.ip
+app.set('trust proxy', 1); 
+
 // FIXED: dating `origin: true` ay nag-a-allow ng credentials mula kahit saang site.
 // Ngayon, isang tiyak na domain lang (galing env var) ang pinapayagan.
 app.use(cors({

@@ -21,10 +21,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 // 2. I-setup ang Rate Limiter (Max 5 requests every 10 minutes per IP)
 const checkoutLimiter = rateLimit({
   windowMs: 3 * 60 * 1000, // 10 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  max: 50, // Limit each IP to 50 requests per windowMs (safe for classroom/defense shared Wi-Fi)
   message: { 
     success: false, 
-    message: 'Masyadong maraming checkout attempts. Subukan ulit pagkalipas ng 10 minuto.' 
+    message: 'Too many checkout attempts. Subukan ulit pagkalipas ng ilang minuto.' 
   },
   standardHeaders: true, // I-return ang rate limit info sa `RateLimit-*` headers
   legacyHeaders: false, // I-disable ang `X-RateLimit-*` headers
@@ -34,7 +34,7 @@ const checkoutLimiter = rateLimit({
 // proof. Keep its availability checks from consuming the proof-upload quota.
 const reservationLimiter = rateLimit({
   windowMs: 3 * 60 * 1000,
-  max: 10,
+  max: 100, // Safe for multiple concurrent testers on shared Wi-Fi
   message: {
     success: false,
     message: 'Too many availability checks. Please wait a moment and try again.',

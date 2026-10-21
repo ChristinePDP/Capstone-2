@@ -571,7 +571,7 @@ export const reserveCheckoutOrder = async payload => {
   }
   await validateProductionFormulaAvailability(resolvedItems);
   if (orderType === 'Pre-Order') await validatePreOrderPickupDate(resolvedItems, pickupDate);
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   let reservationResult;
   try {
     reservationResult = await reserveResolvedCheckoutItems(payload.reservationId, orderType, pickupDate, resolvedItems, expiresAt);
@@ -811,7 +811,7 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
         payload.orderType,
         payload.pickup?.date || new Date().toISOString().slice(0, 10),
         resolvedItems,
-        new Date(Date.now() + 15 * 60 * 1000).toISOString()
+        new Date(Date.now() + 10 * 60 * 1000).toISOString()
       );
     }
     if (!suppliedReservationId) {
@@ -821,7 +821,7 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
         payload.orderType,
         payload.pickup?.date || new Date().toISOString().slice(0, 10),
         resolvedItems,
-        new Date(Date.now() + 15 * 60 * 1000).toISOString()
+        new Date(Date.now() + 10 * 60 * 1000).toISOString()
       );
     }
   } catch (itemsError) {
