@@ -27,6 +27,11 @@ const FULFILLMENT_API_URL = `${import.meta.env.VITE_API_URL}/allOrders/pending-c
 
 const normalizeName = (value = '') => String(value).trim().toLowerCase();
 
+// Compact, searchable labels for inventory activity in the browser DevTools.
+const logInventoryCrud = (operation, resource, details = {}) => {
+  console.info(`[Inventory CRUD] ${operation.toUpperCase()} ${resource}`, details);
+};
+
 const normalizeIngredientRow = item => ({
   id: item.id,
   name: item.name,
@@ -186,6 +191,13 @@ export function AppProvider({ children }) {
         safeFetch(ORDERS_API_URL), // /api/allOrders, hindi /inventory/orders
         safeFetch(FULFILLMENT_API_URL),
       ]);
+
+      logInventoryCrud('read', 'stocks.ingredients', { count: (ing.data || []).length });
+      logInventoryCrud('read', 'stocks.materials', { count: (mat.data || []).length });
+      logInventoryCrud('read', 'production', { count: (prodLog.data || []).length });
+      logInventoryCrud('read', 'waste', { count: (wst.data || []).length });
+      logInventoryCrud('read', 'recipes', { count: (rec.data || []).length });
+      logInventoryCrud('read', 'products', { count: (prd.data || []).length });
 
       const normalizedIngredients = (ing.data || []).map(item => ({
         id: item.id,
@@ -586,6 +598,7 @@ export function AppProvider({ children }) {
   const updateProduct = async (id, data) => {
     try {
       await apiClient.put(`/products/${id}`, data);
+      logInventoryCrud('update', 'products', { id, name: data?.name });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to update product'), { cause: err });
@@ -602,6 +615,7 @@ export function AppProvider({ children }) {
   const addIngredient = async (data) => {
     try {
       await apiClient.post('/ingredients', data);
+      logInventoryCrud('create', 'stocks.ingredients', { name: data?.name });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to add ingredient'), { cause: err });
@@ -610,6 +624,7 @@ export function AppProvider({ children }) {
   const updateIngredient = async (id, data) => {
     try {
       await apiClient.put(`/ingredients/${id}`, data);
+      logInventoryCrud('update', 'stocks.ingredients', { id, name: data?.name });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to update ingredient'), { cause: err });
@@ -618,6 +633,7 @@ export function AppProvider({ children }) {
   const deleteIngredient = async (id) => {
     try {
       await apiClient.delete(`/ingredients/${id}`);
+      logInventoryCrud('delete', 'stocks.ingredients', { id });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to delete ingredient'), { cause: err });
@@ -627,6 +643,7 @@ export function AppProvider({ children }) {
     try {
       const res = await apiClient.patch(`/ingredients/${id}/restock`, data);
       const ingredient = res?.data?.data;
+      logInventoryCrud('update', 'stocks.ingredients.restock', { id, name: ingredient?.name, quantity: data?.quantity });
       if (ingredient) {
         const normalized = normalizeIngredientRow(ingredient);
         setIngredients(previous => previous.map(item =>
@@ -654,6 +671,7 @@ export function AppProvider({ children }) {
   const addMaterial = async (data) => {
     try {
       await apiClient.post('/materials', data);
+      logInventoryCrud('create', 'stocks.materials', { name: data?.name });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to add material'), { cause: err });
@@ -662,6 +680,7 @@ export function AppProvider({ children }) {
   const updateMaterial = async (id, data) => {
     try {
       await apiClient.put(`/materials/${id}`, data);
+      logInventoryCrud('update', 'stocks.materials', { id, name: data?.name });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to update material'), { cause: err });
@@ -670,6 +689,7 @@ export function AppProvider({ children }) {
   const deleteMaterial = async (id) => {
     try {
       await apiClient.delete(`/materials/${id}`);
+      logInventoryCrud('delete', 'stocks.materials', { id });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to delete material'), { cause: err });
@@ -679,6 +699,7 @@ export function AppProvider({ children }) {
     try {
       const res = await apiClient.patch(`/materials/${id}/restock`, data);
       const material = res?.data?.data;
+      logInventoryCrud('update', 'stocks.materials.restock', { id, name: material?.name, quantity: data?.quantity });
       if (material) {
         const normalized = normalizeMaterialRow(material);
         setMaterials(previous => previous.map(item =>
@@ -706,6 +727,7 @@ export function AppProvider({ children }) {
   const addRecipe = async (data) => {
     try {
       await apiClient.post('/recipes', data);
+      logInventoryCrud('create', 'recipes', { name: data?.product_name, product_id: data?.product_id });
       await fetchAll();
       window.dispatchEvent(new CustomEvent('cake:data-changed', {
         detail: { table: 'recipes', action: 'created' },
@@ -718,6 +740,7 @@ export function AppProvider({ children }) {
   const updateRecipe = async (id, data) => {
     try {
       await apiClient.put(`/recipes/${id}`, data);
+      logInventoryCrud('update', 'recipes', { id, name: data?.product_name });
       await fetchAll();
       window.dispatchEvent(new CustomEvent('cake:data-changed', {
         detail: { table: 'recipes', action: 'updated', id },
@@ -729,6 +752,7 @@ export function AppProvider({ children }) {
   const deleteRecipe = async (id) => {
     try {
       await apiClient.delete(`/recipes/${id}`);
+      logInventoryCrud('delete', 'recipes', { id });
       await fetchAll();
       window.dispatchEvent(new CustomEvent('cake:data-changed', {
         detail: { table: 'recipes', action: 'deleted', id },
@@ -750,6 +774,7 @@ export function AppProvider({ children }) {
         yield_unit: payload.yield_unit,
         notes: payload.notes || '',
       });
+      logInventoryCrud('create', 'production', { product: payload?.product_name, batches: payload?.batches, total_produced: payload?.total_produced });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to confirm batch production'), { cause: err });
@@ -763,6 +788,7 @@ export function AppProvider({ children }) {
   const producePreOrder = async (payload) => {
     try {
       await apiClient.post('/production', { type: 'pre-order', ...payload });
+      logInventoryCrud('create', 'production.pre-order', { order_id: payload?.order_id, product: payload?.product_name });
     } catch (err) {
       fetchAll().catch(() => {}); // may bahagi na baka na-save na kahit pumalya
       throw new Error(getErrMsg(err, 'Failed to produce pre-order'), { cause: err });
@@ -775,6 +801,7 @@ export function AppProvider({ children }) {
   const fetchInventoryHistory = useCallback(async (itemName, itemType, itemId) => {
     try {
       const res = await apiClient.get('/logs', { params: { item_name: itemName, item_type: itemType, item_id: itemId } });
+      logInventoryCrud('read', 'history', { item: itemName, type: itemType, id: itemId, count: (res.data?.data || []).length });
       return res.data?.data || [];
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to fetch inventory history'), { cause: err });
@@ -785,6 +812,7 @@ export function AppProvider({ children }) {
   const logWaste = async (data) => {
     try {
       await apiClient.post('/waste', data);
+      logInventoryCrud('create', 'waste', { item: data?.item_name, type: data?.waste_type, quantity: data?.quantity });
       await fetchAll(); // Refresh data from DB
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to log waste'), { cause: err });
@@ -794,6 +822,7 @@ export function AppProvider({ children }) {
   const voidWasteLog = async (id) => {
     try {
       await apiClient.patch(`/waste/${id}/void`);
+      logInventoryCrud('delete', 'waste', { id, action: 'void' });
       await fetchAll(); // Refresh data from DB
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to void waste log'), { cause: err });
@@ -804,6 +833,7 @@ export function AppProvider({ children }) {
   const voidRestockLog = async (logId, force = false) => {
     try {
       await apiClient.patch(`/logs/${logId}/void${force ? '?force=true' : ''}`);
+      logInventoryCrud('delete', 'inventory_history', { id: logId, action: 'void', force });
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to void restock log'), { cause: err });
