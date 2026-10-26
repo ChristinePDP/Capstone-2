@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, forwardRef } from 'react';
 import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
+import { useUnsavedChanges } from '../ui';
 
 const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Celebration Material'];
 
@@ -517,13 +518,33 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     }
   };
 
+  const closeProductModal = onClose || (() => window.history.back());
+  const initialFields = product?.order_slip_fields?.map(f => ({ ...f, options: Array.isArray(f.options) ? f.options.join(', ') : (f.options || '') })) || [];
+  const closeGuard = useUnsavedChanges({
+    isOpen,
+    values: { form, fields, exceptions, dailyLimitEnabled, exceptionDate, exceptionSlots: String(exceptionSlots), hasSelectedFile: !!selectedFile },
+    initialValues: {
+      form: initialFormState,
+      fields: initialFields,
+      exceptions: product?.dateExceptions || [],
+      dailyLimitEnabled: Number(product?.daily_limit || 0) > 0,
+      exceptionDate: '',
+      exceptionSlots: '0',
+      hasSelectedFile: false,
+    },
+    onClose: closeProductModal,
+    onSave: handleSave,
+    isSaving: isSubmitting,
+  });
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose || (() => window.history.back())} title={isEditing ? `Edit Product` : 'Add Product'} size="lg"
+    <>
+    <Modal isOpen={isOpen} onClose={closeGuard.requestClose} title={isEditing ? `Edit Product` : 'Add Product'} size="lg"
       footer={
         <div className="flex items-center gap-2 sm:gap-3 w-full">
           {isEditing && <Button variant="danger" className="flex-1 sm:flex-none px-2 sm:px-4" onClick={handleDeleteClick} disabled={isSubmitting}>Delete<span className="hidden sm:inline">&nbsp;Product</span></Button>}
           <div className="flex flex-[2] sm:flex-none gap-2 sm:gap-3 sm:ml-auto">
-            <Button variant="secondary" className="flex-1 sm:flex-none px-2 sm:px-4" onClick={onClose || (() => window.history.back())} disabled={isSubmitting}>Close</Button>
+            <Button variant="secondary" className="flex-1 sm:flex-none px-2 sm:px-4" onClick={closeGuard.requestClose} disabled={isSubmitting}>Close</Button>
             <Button variant="dark" className="flex-[1.4] sm:flex-none px-2 sm:px-4" onClick={handleSave} disabled={isSubmitting}>
                 {isSubmitting ? <><Loader2 size={16} className="animate-spin" /> Saving...</> : <>Save<span className="hidden sm:inline">&nbsp;Changes</span></>}
             </Button>
@@ -736,5 +757,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
       </div>
     </Modal>
+    {closeGuard.confirmation}
+    </>
   );
 }

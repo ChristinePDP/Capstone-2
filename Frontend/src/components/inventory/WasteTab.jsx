@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
@@ -456,6 +456,15 @@ export default function WasteTab() {
     }
   };
 
+  const closeGuard = useUnsavedChanges({
+    isOpen: modalOpen,
+    values: { logType, ingName, ingQty, ingUnit, productName, productQty, productUnit, matName, matQty, matUnit, reason, notes },
+    initialValues: { logType, ingName: '', ingQty: '', ingUnit: 'kg', productName: '', productQty: '', productUnit: 'pcs', matName: '', matQty: '', matUnit: 'pcs', reason: REASONS[logType][0], notes: '' },
+    onClose: () => setModalOpen(false),
+    onSave: handleLog,
+    isSaving,
+  });
+
   const totalCostFiltered = useMemo(() => {
     return filteredLogs.reduce((acc, curr) => acc + (curr.cost || 0), 0);
   }, [filteredLogs]);
@@ -760,11 +769,11 @@ export default function WasteTab() {
       {/* MODAL */}
       <Modal 
         isOpen={modalOpen} 
-        onClose={() => !isSaving && setModalOpen(false)} 
+        onClose={closeGuard.requestClose}
         title="Log Waste"
         footer={
           <div className="flex gap-2 justify-end w-full sm:w-auto">
-            <Button variant="secondary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="secondary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={closeGuard.requestClose}>Cancel</Button>
             <Button variant="primary" className="flex-1 sm:flex-none" disabled={isSaving} onClick={handleLog}>{isSaving ? 'Saving...' : 'Confirm Log'}</Button>
           </div>
         }
@@ -889,6 +898,7 @@ export default function WasteTab() {
           )}
         </div>
       </Modal>
+      {closeGuard.confirmation}
 
       <ConfirmModal
         isOpen={showBulkVoidConfirm}

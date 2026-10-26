@@ -1320,10 +1320,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       {/* RIGHT: special instructions + actions */}
                       <div className="contents">
                       <div className="min-w-0 sm:col-span-2 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-3 lg:flex lg:flex-col lg:relative">
-                          <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions</label>
+                          <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions (Optional)</label>
                           <textarea
                             rows={5}
-                            placeholder="Anything else we should know?"
+                            placeholder="Anything else we should know? (optional)"
                             maxLength={300}
                             value={form.instructions}
                             onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Plus, Trash2, CheckCircle2, Search, CalendarDays, AlertTriangle, ShoppingCart, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Card, CardSkeleton, ConfirmModal } from '../../components/ui/index';
+import { useToast, Button, Modal, Card, CardSkeleton, ConfirmModal, useUnsavedChanges } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, convertToBase } from '../../utils/unitUtils';
 
@@ -412,6 +412,15 @@ function PreOrderProduction({ tabBar }) {
     }
   };
 
+  const closeProduceGuard = useUnsavedChanges({
+    isOpen: !!produceTarget,
+    values: expenseRows,
+    initialValues: [{ label: '', amount: '' }],
+    onClose: closeProduce,
+    onSave: handleProduce,
+    isSaving: isProducing,
+  });
+
   const today = getManilaDate();
   const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
   const tomorrowDate = new Date(Date.UTC(todayYear, todayMonth - 1, todayDay + 1, 12));
@@ -666,13 +675,13 @@ function PreOrderProduction({ tabBar }) {
 
       <Modal
         isOpen={!!produceTarget}
-        onClose={closeProduce}
+        onClose={closeProduceGuard.requestClose}
         title={`Produce ${produceTarget?.number || ''}`}
         subtitle="Add any theme or other expenses for this order."
         size="md"
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isProducing} onClick={closeProduce}>Cancel</Button>
+            <Button variant="secondary" disabled={isProducing} onClick={closeProduceGuard.requestClose}>Cancel</Button>
             <Button variant="primary" disabled={isProducing} onClick={handleProduce}>
               {isProducing ? 'Saving...' : 'Confirm Production'}
             </Button>
@@ -753,6 +762,7 @@ function PreOrderProduction({ tabBar }) {
           </div>
         )}
       </Modal>
+      {closeProduceGuard.confirmation}
     </Card>
   );
 }

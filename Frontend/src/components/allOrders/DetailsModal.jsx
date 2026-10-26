@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 import { ConfirmModal } from '../ui';
 
 // ── formatting helpers ──────────────────────────────────────────
@@ -46,7 +46,7 @@ const STATUS_BUTTON_STYLES = {
 
 const BTN_BASE = 'items-center justify-center gap-1.5 min-h-[44px] px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
 const BTN_CLOSE  = 'border border-[#DED4CC] bg-white text-[#5A453C] hover:bg-[#F5EFEB] focus-visible:ring-[#5A453C]';
-const BTN_CANCEL = 'border border-red-300 bg-white text-red-700 hover:bg-red-50 focus-visible:ring-red-500';
+const BTN_CANCEL = 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 focus-visible:ring-red-500';
 const BTN_DANGER = 'bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-700';
 
 function StatusBadge({ status }) {
@@ -769,32 +769,32 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
             </div>
           ) : (
             <div className="flex items-center gap-2.5 sm:justify-between">
-              {/* Sa mobile, hidden ang Close kapag may action buttons (dahil may header X naman). Sa desktop, lalabas ang Close sa kaliwa. */}
-              <button
-                type="button"
-                onClick={onClose}
-                className={`${hasActions ? 'hidden sm:inline-flex' : 'inline-flex flex-1 sm:flex-none'} ${BTN_BASE} ${BTN_CLOSE}`}
-              >
-                <X size={15} />
-                Close
-              </button>
+              {canCancel && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(true)}
+                  className={`inline-flex ${BTN_BASE} ${BTN_CANCEL} min-w-0 flex-1 sm:flex-none whitespace-nowrap px-2.5 sm:px-5`}
+                >
+                  <XCircle size={15} />
+                  Cancel Order
+                </button>
+              )}
 
-              {hasActions && (
-                <div className="flex flex-1 sm:flex-none gap-2.5 w-full sm:w-auto">
-                  {canCancel && (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmCancel(true)}
-                      className={`inline-flex ${BTN_BASE} ${BTN_CANCEL} flex-1 sm:flex-none whitespace-nowrap`}
-                    >
-                      Cancel Order
-                    </button>
-                  )}
+              {hasActions ? (
+                <div className="flex flex-1 sm:flex-none flex-nowrap gap-2.5 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className={`hidden sm:inline-flex ${BTN_BASE} ${BTN_CLOSE}`}
+                  >
+                    <X size={15} />
+                    Close
+                  </button>
                   {next && (
                     <button
                       type="button"
                       onClick={() => setStatusAction(next)}
-                      className={`inline-flex ${BTN_BASE} text-white shadow-sm flex-1 sm:flex-none whitespace-nowrap ${
+                      className={`inline-flex ${BTN_BASE} text-white shadow-sm min-w-0 flex-[1.3] sm:flex-none whitespace-nowrap px-2.5 sm:px-5 ${
                         STATUS_BUTTON_STYLES[next] || 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-700'
                       }`}
                     >
@@ -802,6 +802,15 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                     </button>
                   )}
                 </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`${BTN_BASE} ${BTN_CLOSE} inline-flex flex-1 sm:flex-none`}
+                >
+                  <X size={15} />
+                  Close
+                </button>
               )}
             </div>
           )}

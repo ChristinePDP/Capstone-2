@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
@@ -696,6 +696,7 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
 
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
+  const closeAfterSaveRef = useRef(false);
 
   // Inline validation: ang error ng bawat field ay lumalabas mismo sa field (EventManager style).
   const [errors, setErrors] = useState({});
@@ -855,14 +856,14 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
   };
 
   const handleValidate = () => {
-    if (isSaving) return;
+    if (isSaving) return false;
     setServerError(null);
 
     const found = computeErrors();
     if (Object.keys(found).length > 0) {
       setErrors(found);
       scrollToFirstInvalid();
-      return;
+      return false;
     }
     setErrors({});
 
@@ -884,18 +885,18 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
         itemUnit: unit,
         totalCost: addedQty > 0 && cost ? parseFloat(cost) : 0,
       });
-      return;
+      return true;
     }
 
     if (unit !== savedDetails.unit && !unitConversionConfirmed) {
       setErrors({ general: 'Confirm the unit conversion using the Save button in Material Details first.' });
-      return;
+      return false;
     }
     const unitChanged = unit !== savedDetails.unit;
     const convertedStock = unitChanged ? convertToBase(currentStock, savedDetails.unit, unit) : currentStock;
     if (unitChanged && !Number.isFinite(convertedStock)) {
       setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
-      return;
+      return false;
     }
     const detailsPayload = isDetailsModified || editingDetails
       ? {
@@ -922,6 +923,12 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
       itemUnit: unit,
       totalCost: cost ? parseFloat(cost) : 0,
     });
+    return true;
+  };
+
+  const handleGuardSave = () => {
+    const valid = handleValidate();
+    if (valid) closeAfterSaveRef.current = true;
   };
 
   const executeSave = async () => {
@@ -957,11 +964,14 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
       setStock(isEdit ? '' : '0');
       setCost('');
       setExpiry('');
-      if (!isEdit) onClose();
+      const closeAfterSave = closeAfterSaveRef.current;
+      closeAfterSaveRef.current = false;
+      if (!isEdit || closeAfterSave) onClose();
     } catch (err) {
       // Ipinapakita sa loob ng modal (hindi toast sa labas)
       setServerError(err.message || 'Failed to save');
       setConfirmPayload(null);
+      closeAfterSaveRef.current = false;
     } finally {
       setIsSaving(false);
     }
@@ -986,6 +996,17 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
       : `Save the new details for "${confirmPayload?.itemName}"?`;
 
   const bannerMessage = serverError || errors.general;
+
+  const closeGuard = useUnsavedChanges({
+    isOpen,
+    values: { name, unit, stock, min: String(min), cost, expiry, productId, detailsCost, editingDetails, unitConversionConfirmed },
+    initialValues: isEdit
+      ? { name: savedDetails.name, unit: savedDetails.unit, stock: '', min: String(savedDetails.min ?? 0), cost: '', expiry: '', productId: savedDetails.productId || '', detailsCost: String(savedDetails.costPerUnit ?? ''), editingDetails: false, unitConversionConfirmed: false }
+      : { name: '', unit: 'pcs', stock: '0', min: '0', cost: '', expiry: '', productId: '', detailsCost: '', editingDetails: false, unitConversionConfirmed: false },
+    onClose,
+    onSave: handleGuardSave,
+    isSaving,
+  });
   const viewLabel = MATERIAL_VIEWS.find(v => v.key === defaultView)?.label;
 
   // Name field: celebration = may product suggestions, product = plain input.
@@ -1029,12 +1050,12 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={() => !isSaving && onClose()} title={isEdit ? <><span className="text-sm font-semibold text-brand-400 block">Manage Stock</span><span className="text-xl font-extrabold text-brand-900">{name}</span></> : `Add New ${viewLabel ?? 'Material'}`}
+      <Modal isOpen={isOpen} onClose={closeGuard.requestClose} title={isEdit ? <><span className="text-sm font-semibold text-brand-400 block">Manage Stock</span><span className="text-xl font-extrabold text-brand-900">{name}</span></> : `Add New ${viewLabel ?? 'Material'}`}
         subtitle={isEdit ? `Unit: ${unit}` : `Record a new batch of ${viewLabel?.toLowerCase() ?? 'material'}.`}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
+            <Button variant="secondary" disabled={isSaving} onClick={closeGuard.requestClose}>Cancel</Button>
             <Button variant="primary" disabled={isSaving || Boolean(exactNameMatch)} onClick={handleValidate}>
               {isEdit ? 'Save Changes' : 'Save Material'}
             </Button>
@@ -1290,9 +1311,10 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
         </div>
       </Modal>
 
+      {closeGuard.confirmation}
       <ConfirmModal
         isOpen={!!confirmPayload}
-        onClose={() => !isSaving && setConfirmPayload(null)}
+        onClose={() => { closeAfterSaveRef.current = false; if (!isSaving) setConfirmPayload(null); }}
         onConfirm={executeSave}
         title={confirmTitle}
         message={confirmMessage}

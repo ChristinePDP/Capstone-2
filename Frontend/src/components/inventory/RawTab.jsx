@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
@@ -308,6 +308,7 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
   const [editingDetails, setEditingDetails] = useState(false);
   const [isSaving, setIsSaving]             = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
+  const closeAfterSaveRef = useRef(false);
 
   // Inline validation: ang error ng bawat field ay lumalabas mismo sa field (EventManager style).
   const [errors, setErrors]           = useState({});
@@ -476,14 +477,14 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
   };
 
   const handleValidate = () => {
-    if (isSaving) return;
+    if (isSaving) return false;
     setServerError(null);
 
     const found = computeErrors();
     if (Object.keys(found).length > 0) {
       setErrors(found);
       scrollToFirstInvalid();
-      return;
+      return false;
     }
     setErrors({});
 
@@ -504,18 +505,18 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
         itemUnit: unit,
         totalCost: addedQty > 0 && cost ? parseFloat(cost) : 0
       });
-      return;
+      return true;
     }
 
     if (unit !== savedDetails.unit && !unitConversionConfirmed) {
       setErrors({ general: 'Confirm the unit conversion using the Save button in Ingredient Details first.' });
-      return;
+      return false;
     }
     const unitChanged = unit !== savedDetails.unit;
     const convertedStock = unitChanged ? convertToBase(currentStock, savedDetails.unit, unit) : currentStock;
     if (unitChanged && !Number.isFinite(convertedStock)) {
       setErrors({ general: `Cannot convert ${savedDetails.unit} to ${unit}. Choose a compatible unit.` });
-      return;
+      return false;
     }
     const detailsPayload = isDetailsModified || editingDetails
       ? { name: name.trim(), unit, minimum_stock: parseFloat(min) || 0 }
@@ -537,6 +538,12 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
       itemUnit: unit,
       totalCost: cost ? parseFloat(cost) : 0,
     });
+    return true;
+  };
+
+  const handleGuardSave = () => {
+    const valid = handleValidate();
+    if (valid) closeAfterSaveRef.current = true;
   };
 
   const executeSave = async () => {
@@ -571,11 +578,14 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
       setStock(isEdit ? '' : '0');
       setCost('');
       setExpiry('');
-      if (!isEdit) onClose();
+      const closeAfterSave = closeAfterSaveRef.current;
+      closeAfterSaveRef.current = false;
+      if (!isEdit || closeAfterSave) onClose();
     } catch (err) {
       // Ipinapakita sa loob ng modal (hindi toast sa labas)
       setServerError(err.message || 'Failed to save');
       setConfirmPayload(null);
+      closeAfterSaveRef.current = false;
     } finally {
       setIsSaving(false);
     }
@@ -601,17 +611,28 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
 
   const bannerMessage = serverError || errors.general;
 
+  const closeGuard = useUnsavedChanges({
+    isOpen,
+    values: { name, unit, stock, min: String(min), cost, expiry, detailsCost, editingDetails, unitConversionConfirmed },
+    initialValues: isEdit
+      ? { name: savedDetails.name, unit: savedDetails.unit, stock: '', min: String(savedDetails.min ?? 0), cost: '', expiry: '', detailsCost: String(savedDetails.costPerUnit ?? ''), editingDetails: false, unitConversionConfirmed: false }
+      : { name: '', unit: 'kg', stock: '0', min: '0', cost: '', expiry: '', detailsCost: '', editingDetails: false, unitConversionConfirmed: false },
+    onClose,
+    onSave: handleGuardSave,
+    isSaving,
+  });
+
   return (
     <>
       <Modal
         isOpen={isOpen}
-        onClose={() => !isSaving && onClose()}
+        onClose={closeGuard.requestClose}
         title={isEdit ? <><span className="text-sm font-semibold text-brand-400 block">Manage Stock</span><span className="text-xl font-extrabold text-brand-900">{name}</span></> : 'Add New Ingredient'}
         subtitle={isEdit ? `Unit: ${unit}` : 'Record a newly purchased sack or bulk ingredient.'}
         size="lg"
         footer={
           <div className="flex gap-3 justify-end">
-            <Button variant="secondary" disabled={isSaving} onClick={onClose}>Cancel</Button>
+            <Button variant="secondary" disabled={isSaving} onClick={closeGuard.requestClose}>Cancel</Button>
             <Button variant="primary" disabled={isSaving || Boolean(exactNameMatch)} onClick={handleValidate}>
               {isEdit ? 'Save Changes' : 'Save Ingredient'}
             </Button>
@@ -895,9 +916,10 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
         </div>
       </Modal>
 
+      {closeGuard.confirmation}
       <ConfirmModal
         isOpen={!!confirmPayload}
-        onClose={() => !isSaving && setConfirmPayload(null)}
+        onClose={() => { closeAfterSaveRef.current = false; if (!isSaving) setConfirmPayload(null); }}
         onConfirm={executeSave}
         title={confirmTitle}
         message={confirmMessage}

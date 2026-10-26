@@ -219,7 +219,7 @@ export const createPosOrder = async (payload) => {
       payload.orderType,
       payload.pickup?.date || getManilaNow().date,
       resolvedItems,
-      new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      new Date(Date.now() + 10 * 60 * 1000).toISOString()
     );
   } catch (itemsError) {
     if (payload.checkoutReservationId) {

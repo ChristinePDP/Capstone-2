@@ -367,3 +367,67 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
     document.body // Inilabas din sa body[cite: 13]
   );
 }
+
+export function UnsavedChangesModal({ isOpen, onSave, onDiscard, onKeepEditing, isSaving = false }) {
+  const [isProcessing, setIsProcessing] = useState(false);
+  if (!isOpen) return null;
+  const handleSave = async () => {
+    if (isProcessing || isSaving) return;
+    setIsProcessing(true);
+    try {
+      await onSave();
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+  const busy = isSaving || isProcessing;
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-brand-900/60 backdrop-blur-sm" role="presentation">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl p-6" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-changes-title">
+        <h3 id="unsaved-changes-title" className="text-lg font-bold text-brand-800 mb-2">Unsaved changes</h3>
+        <p className="text-sm text-brand-500 mb-6 leading-relaxed">You have unsaved changes. Would you like to save them before closing?</p>
+        <div className="flex flex-row gap-2 justify-end">
+          <Button aria-label="Keep editing" variant="secondary" disabled={busy} onClick={onKeepEditing} className="min-w-0 flex-1 whitespace-nowrap px-1.5 text-[11px] sm:px-4 sm:text-sm">
+            <span className="sm:hidden">Keep</span><span className="hidden sm:inline">Keep editing</span>
+          </Button>
+          <Button aria-label="Discard changes" variant="danger" disabled={busy} onClick={onDiscard} className="min-w-0 flex-1 whitespace-nowrap px-1.5 text-[11px] sm:px-4 sm:text-sm">
+            <span className="sm:hidden">Discard</span><span className="hidden sm:inline">Discard changes</span>
+          </Button>
+          <Button aria-label="Save and close" variant="primary" disabled={busy} onClick={handleSave} className="min-w-0 flex-1 whitespace-nowrap px-1.5 text-[11px] sm:px-4 sm:text-sm">
+            {busy ? 'Saving...' : <><span className="sm:hidden">Save</span><span className="hidden sm:inline">Save and close</span></>}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+export function useUnsavedChanges({ isOpen, values, initialValues, onClose, onSave, isSaving = false }) {
+  const [confirming, setConfirming] = useState(false);
+  const dirty = isOpen && JSON.stringify(values) !== JSON.stringify(initialValues);
+  const requestClose = () => {
+    if (isSaving) return;
+    if (dirty) setConfirming(true);
+    else onClose();
+  };
+  const discard = () => {
+    setConfirming(false);
+    onClose();
+  };
+  const keepEditing = () => setConfirming(false);
+  const saveAndClose = async () => {
+    await onSave();
+    setConfirming(false);
+  };
+  return {
+    requestClose,
+    confirmation: <UnsavedChangesModal
+      isOpen={confirming}
+      onSave={saveAndClose}
+      onDiscard={discard}
+      onKeepEditing={keepEditing}
+      isSaving={isSaving}
+    />,
+  };
+}

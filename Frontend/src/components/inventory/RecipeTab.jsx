@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } fr
 import { createPortal } from 'react-dom';
 import { Plus, Trash2, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 import { useIsCompact } from '../../hooks/useIsCompact';
@@ -303,6 +303,7 @@ export default function RecipeTab() {
   const [yldUnit, setYldUnit] = useState('pcs');
   const [formErrors, setFormErrors] = useState({}); // inline field errors ng formula modal
   const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
+  const [initialDraft, setInitialDraft] = useState({ productId: '', yld: '', yldUnit: 'pcs', rows: [{ itemId: '', qty: '', unit: '' }], addonRows: [] });
 
   const [containerRef, isCompact] = useIsCompact();
   const [search, setSearch] = useState('');
@@ -435,6 +436,7 @@ export default function RecipeTab() {
     setYldUnit('pcs');
     setRows([{ itemId: '', qty: '', unit: '' }]);
     setAddonRows([]);
+    setInitialDraft({ productId: '', yld: '', yldUnit: 'pcs', rows: [{ itemId: '', qty: '', unit: '' }], addonRows: [] });
     setFormErrors({});
     setServerError(null);
     setModalOpen(true);
@@ -469,6 +471,13 @@ export default function RecipeTab() {
 
     setRows(savedIngredientRows.length ? savedIngredientRows : [{ itemId: '', qty: '', unit: '' }]);
     setAddonRows(savedAddonRows);
+    setInitialDraft({
+      productId: r.productId || products.find(p => normalizeText(p.name) === normalizeText(r.product))?.id || '',
+      yld: r.yield,
+      yldUnit: r.yieldUnit || 'pcs',
+      rows: savedIngredientRows.length ? savedIngredientRows : [{ itemId: '', qty: '', unit: '' }],
+      addonRows: savedAddonRows,
+    });
     setFormErrors({});
     setServerError(null);
     setModalOpen(true);
@@ -630,6 +639,15 @@ export default function RecipeTab() {
       setIsSaving(false);
     }
   };
+
+  const closeGuard = useUnsavedChanges({
+    isOpen: modalOpen,
+    values: { productId, yld, yldUnit, rows, addonRows },
+    initialValues: initialDraft,
+    onClose: () => setModalOpen(false),
+    onSave: handleSave,
+    isSaving,
+  });
 
   // Isang row ng ingredient/material picker (item + qty + unit). Ang error ay
   // pulang border sa mismong control + mensahe sa ilalim ng row.
@@ -833,13 +851,13 @@ export default function RecipeTab() {
       {/* PRODUCTION FORMULA MODAL */}
       <Modal
         isOpen={modalOpen}
-        onClose={() => !isSaving && setModalOpen(false)}
+        onClose={closeGuard.requestClose}
         title={editRecipe ? `Edit Formula — ${editRecipe.product}` : 'Add New Formula'}
         subtitle="Set the recipe and product materials needed per batch."
         size="lg"
         footer={
           <div className="flex gap-2 sm:gap-3 sm:justify-end">
-            <Button variant="secondary" className="flex-1 sm:flex-none justify-center" disabled={isSaving} onClick={() => setModalOpen(false)}>Cancel</Button>
+            <Button variant="secondary" className="flex-1 sm:flex-none justify-center" disabled={isSaving} onClick={closeGuard.requestClose}>Cancel</Button>
             <Button variant="primary" className="flex-1 sm:flex-none justify-center" disabled={isSaving} onClick={handleSave}>
               {isSaving ? 'Saving...' : editRecipe ? 'Save Changes' : 'Save Formula'}
             </Button>
@@ -968,6 +986,7 @@ export default function RecipeTab() {
           </div>
         </div>
       </Modal>
+      {closeGuard.confirmation}
 
       {/* DELETE FORMULA CONFIRMATION MODAL */}
       <ConfirmModal

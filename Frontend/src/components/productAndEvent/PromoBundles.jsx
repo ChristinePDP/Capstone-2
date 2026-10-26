@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
+import { useUnsavedChanges } from '../ui';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 const PRODUCTS_API = `${API_BASE}/catalog`;
@@ -575,6 +576,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formError, setFormError] = useState(null);
+  const initialFormRef = useRef(null);
 
   // Mga URL na na-upload sa modal session na ito pero hindi pa nase-save.
   // Pag-upload agad ang nangyayari sa pagpili ng file, kaya kapag pinalitan,
@@ -686,8 +688,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
         quantity: Number(pi.quantity) || 1,
       }));
 
+      let initialForm;
       if (isBundleAsPackage) {
-        setForm({
+        initialForm = {
           ...emptyForm,
           category: 'Package',
           bundle_name: bundle.bundle_name || '',
@@ -696,9 +699,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
           orderType: bundle.order_type || 'Both',
           price: bundle.discounted_price ?? bundle.bundle_price ?? '',
           packageItems: initialPackageItems,
-        });
+        };
       } else if (editPackageProduct) {
-        setForm({
+        initialForm = {
           ...emptyForm,
           category: 'Package',
           bundle_name: editPackageProduct.name || '',
@@ -707,9 +710,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
           orderType: editPackageProduct.order_type || 'Both',
           price: editPackageProduct.price ?? '',
           packageItems: initialPackageItems,
-        });
+        };
       } else if (bundle) {
-        setForm({
+        initialForm = {
           ...emptyForm,
           category: 'Bundle',
           bundle_name: bundle.bundle_name || '',
@@ -724,10 +727,12 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
           end_month: bundle.end_month || 12,
           end_day: bundle.end_day || 31,
           orderType: bundle.order_type || 'Both',
-        });
+        };
       } else {
-        setForm(emptyForm);
+        initialForm = emptyForm;
       }
+      setForm(initialForm);
+      initialFormRef.current = JSON.stringify(initialForm);
       setProductSearch('');
       setProductListOpen(false);
       setPendingPackageProductId('');
@@ -738,6 +743,10 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       setImageError(null);
     }
   }, [isOpen, bundle, editPackageProduct]);
+
+  useEffect(() => {
+    if (!isOpen) initialFormRef.current = null;
+  }, [isOpen]);
 
   // Component products na puwedeng idagdag sa Package Contents — hindi
   // kasama ang ibang Package products (iwas package-within-package) at ang
@@ -1023,6 +1032,15 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
     return form.category === 'Package' ? handleSubmitPackage() : handleSubmitBundle();
   };
 
+  const closeGuard = useUnsavedChanges({
+    isOpen,
+    values: form,
+    initialValues: initialFormRef.current ? JSON.parse(initialFormRef.current) : form,
+    onClose: handleCancel,
+    onSave: handleSubmit,
+    isSaving: saving || uploadingImage,
+  });
+
   // Category — chooses whether this is a discount Bundle or a stock-deducting
   // Package. Puwede na itong palitan kahit Edit, dahil pareho na silang nasa
   // promo_bundles table (category column lang ang pagitan). Ang name, image
@@ -1053,7 +1071,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   return (
     <Modal
       isOpen={isOpen}
-      onClose={handleCancel}
+      onClose={closeGuard.requestClose}
       title={
         form.category === 'Package'
           ? (isEditing ? 'Edit Package' : 'Add Package')
@@ -1061,7 +1079,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       }
       footer={
         <div className="flex justify-end gap-2 sm:gap-3">
-          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={handleCancel} disabled={saving}>Cancel</Button>
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={closeGuard.requestClose} disabled={saving}>Cancel</Button>
           <Button variant="dark" className="flex-1 sm:flex-none" onClick={handleSubmit} disabled={saving}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
             {form.category === 'Package'
@@ -1072,6 +1090,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       }
     >
       <div className="space-y-3 sm:space-y-6">
+        {closeGuard.confirmation}
         {formError && (
           <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
             {formError}

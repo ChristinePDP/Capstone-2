@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td, Modal } from '../ui';
+import { Badge, Button, Table, Tr, Td, Modal, useUnsavedChanges } from '../ui';
 
 // Base URL ng backend. Kinukuha mula sa VITE_API_URL sa .env
 // (hal. VITE_API_URL=http://localhost:3000/api — kasama na ang "/api"
@@ -229,6 +229,14 @@ function EventModal({
     onSave({ ...form, event_name: form.event_name.trim(), event_tag: form.event_tag.trim() });
   };
 
+  const closeGuard = useUnsavedChanges({
+    isOpen,
+    values: form,
+    initialValues: { event_name: '', event_tag: '', start_month: 1, start_day: 1, end_month: 1, end_day: 1, is_active: true, ...(initialData || {}) },
+    onClose,
+    onSave: handleSave,
+  });
+
   const monthOptions = MONTHS.map(m => ({ value: m.val, label: m.label }));
   
   const startMaxDays = getDaysInMonth(form.start_month);
@@ -244,14 +252,15 @@ function EventModal({
   // naka-portal ang modal na ito, kaya iba ang stacking behavior nito kumpara
   // sa ibang modals gaya ng ConfirmModal).
   return (
+    <>
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={closeGuard.requestClose}
       title={isEditing ? 'Edit Event' : 'Add New Event'}
       size="sm"
       footer={
         <div className="flex items-center justify-end gap-3">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={closeGuard.requestClose}>Cancel</Button>
           <Button variant="primary" onClick={handleSave}>
             {isEditing ? 'Save Changes' : 'Save Event'}
           </Button>
@@ -370,6 +379,8 @@ function EventModal({
 
       </div>
     </Modal>
+    {closeGuard.confirmation}
+    </>
   );
 }
 

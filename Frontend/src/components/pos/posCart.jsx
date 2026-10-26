@@ -56,6 +56,18 @@ function stockIssueMessage(issue, type) {
     : `${issue.name} is not available in that quantity for ${type}.`;
 }
 
+const PH_MOBILE_REGEX = /^09\d{9}$/;
+
+const getNameError = (value, isRequired = false) => {
+  const name = String(value || '').trim();
+  if (!name) return isRequired ? 'Customer name is required.' : '';
+  const validChars = /^[\p{L}][\p{L}\s.'\u2019-]*$/u.test(name);
+  const letterCount = (name.match(/\p{L}/gu) || []).length;
+  if (!validChars) return 'Enter a valid name (letters only).';
+  if (letterCount < 2) return 'Name must have at least 2 letters.';
+  return '';
+};
+
 export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, onRemoveItem, onClearCart, isCartOpen, onClose, onOrderPlaced, onUpdateItem }) {
   const [editingSlipIndex, setEditingSlipIndex] = useState(null);
   const [isDiscountsOpen, setIsDiscountsOpen] = useState(false);
@@ -200,19 +212,24 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   const computeFormErrors = () => {
     const errors = {};
-    const phoneRegex = /^\d{11}$/;
+
 
     if (orderType === 'Pre-Order') {
-      if (!form.name.trim()) errors.name = 'Customer name is required.';
+      const nameErr = getNameError(form.name, true);
+      if (nameErr) errors.name = nameErr;
       if (!form.pickupDate) errors.pickupDate = 'Please select a date.';
       if (!form.pickupTime) errors.pickupTime = 'Please select a time.';
     }
+    else if (form.name && form.name.trim()) {
+      const nameErr = getNameError(form.name, false);
+      if (nameErr) errors.name = nameErr;
+    }
     if (orderType === 'Pre-Order' || form.phone) {
       if (!form.phone) errors.phone = 'Phone number is required.';
-      else if (!phoneRegex.test(form.phone)) errors.phone = 'Must be exactly 11 digits.';
+      else if (!PH_MOBILE_REGEX.test(form.phone)) errors.phone = 'Must start with 09 (11 digits).';
     }
-    if (form.altPhone && !phoneRegex.test(form.altPhone)) {
-      errors.altPhone = 'Must be exactly 11 digits.';
+    if (form.altPhone && !PH_MOBILE_REGEX.test(form.altPhone)) {
+      errors.altPhone = 'Must start with 09 (11 digits).';
     }
     if (orderType === 'Buy Now' && form.pickupTime) {
       const chosen = TIME_SLOTS.find(s => s.value === form.pickupTime);

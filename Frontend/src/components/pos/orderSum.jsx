@@ -477,7 +477,11 @@ export default function OrderSummaryModal({
                     placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
                     maxLength="11"
                     value={form.phone}
-                    onChange={e => setForm({ ...form, phone: e.target.value.replace(/\D/g, '') })}
+                    onChange={e => {
+                      let val = e.target.value.replace(/\D/g, '');
+                      if (val.startsWith('639')) val = '0' + val.slice(2);
+                      setForm({ ...form, phone: val.slice(0, 11) });
+                    }}
                     aria-invalid={!!errors.phone}
                     data-invalid={errors.phone ? 'true' : undefined}
                     className={fieldCls('phone')}
@@ -491,7 +495,11 @@ export default function OrderSummaryModal({
                     placeholder="Alt. Phone"
                     maxLength="11"
                     value={form.altPhone}
-                    onChange={e => setForm({ ...form, altPhone: e.target.value.replace(/\D/g, '') })}
+                    onChange={e => {
+                      let val = e.target.value.replace(/\D/g, '');
+                      if (val.startsWith('639')) val = '0' + val.slice(2);
+                      setForm({ ...form, altPhone: val.slice(0, 11) });
+                    }}
                     aria-invalid={!!errors.altPhone}
                     data-invalid={errors.altPhone ? 'true' : undefined}
                     className={fieldCls('altPhone')}
