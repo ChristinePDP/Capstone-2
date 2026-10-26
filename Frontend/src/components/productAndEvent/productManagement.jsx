@@ -558,7 +558,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== deleteTarget.id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== deleteTarget.id);
-      showToast(`${deleteTarget.name} deleted.`, 'warning');
+      showToast(`${deleteTarget.name} deleted.`, 'success');
     } catch (err) {
       console.error('Delete Product Error:', err);
       showToast(getErrMsg(err, 'Failed to delete product.'), 'warning');
@@ -573,7 +573,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== id);
-      showToast('Product deleted.', 'warning');
+      showToast('Product deleted.', 'success');
       handleCloseModal();
     } catch (err) {
       console.error('Delete Product Error:', err);
@@ -625,7 +625,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       setBundles(prev => prev.filter(b => b.id !== deleteBundleTarget.id));
       if (bundlesListCache) bundlesListCache = bundlesListCache.filter(b => b.id !== deleteBundleTarget.id);
       clearBundlesPageCache(); // sariwa ang datos pag-balik sa Promo Bundles tab
-      showToast(`${deleteBundleTarget.bundle_name} deleted.`, 'warning');
+      showToast(`${deleteBundleTarget.bundle_name} deleted.`, 'success');
     } catch (err) {
       console.error('Delete Bundle Error:', err);
       showToast(err.message || 'Failed to delete bundle.', 'warning');
@@ -640,8 +640,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
       {toast && (
         <div
-          className={`fixed bottom-4 right-4 z-[60] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg ${
-            toast.variant === 'warning' || toast.variant === 'error' ? 'bg-red-600' : 'bg-emerald-600'
+          className={`fixed bottom-6 right-6 z-[9999] px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-sm sm:text-base font-semibold tracking-wide animate-slideUp min-w-[260px] max-w-md pointer-events-auto leading-snug text-white ${
+            toast.variant === 'warning' ? 'bg-amber-700' : (toast.variant === 'error' || toast.variant === 'danger') ? 'bg-red-700' : 'bg-green-700'
           }`}
         >
           {toast.message}

@@ -4,7 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, createContext, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom'; // Dinagdag para sa Portal fix[cite: 13]
-import { X, Search, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 
 // ─── Badge ────────────────────────────────────────────────────
 export function Badge({ children, variant = 'default', className = '' }) {
@@ -307,17 +307,22 @@ export function ToastProvider({ children }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ show }}>
+    <ToastContext.Provider value={{ show, toast: show }}>
       {children}
       <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
-        {toasts.map(t => (
-          <div key={t.id} className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm font-medium animate-slideUp max-w-xs pointer-events-auto ${t.type === 'success' ? 'bg-green-700 text-white' : t.type === 'warning' ? 'bg-amber-700 text-white' : 'bg-red-700 text-white'}`}>
-            {t.type === 'success' && <CheckCircle size={16} />}
-            {t.type === 'warning' && <AlertCircle size={16} />}
-            {(t.type === 'error' || t.type === 'danger') && <XCircle size={16} />}
-            {t.message}
-          </div>
-        ))}
+        {toasts.map(t => {
+          const isSuccess = t.type === 'success' || t.type === 200 || t.type === 201;
+          const isWarning = t.type === 'warning';
+          const colorClass = isSuccess ? 'bg-green-700 text-white' : isWarning ? 'bg-amber-700 text-white' : 'bg-red-700 text-white';
+          return (
+            <div
+              key={t.id}
+              className={`flex items-center px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-sm sm:text-base font-semibold tracking-wide animate-slideUp min-w-[260px] max-w-md pointer-events-auto leading-snug ${colorClass}`}
+            >
+              {t.message}
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

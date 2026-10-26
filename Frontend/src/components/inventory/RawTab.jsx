@@ -136,7 +136,7 @@ export default function IngredientsTab() {
     setIsDeleting(true);
     try {
       if (deleteIngredient) await deleteIngredient(deleteTarget.id);
-      showToast(`${deleteTarget.name} removed from ingredients.`, 'warning');
+      showToast(`${deleteTarget.name} removed from ingredients.`, 'success');
     } catch (err) {
       showToast(err.message || 'Failed to delete ingredient', 'error');
     } finally {

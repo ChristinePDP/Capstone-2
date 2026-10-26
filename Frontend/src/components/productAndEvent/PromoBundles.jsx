@@ -1628,7 +1628,7 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
           bundles: bundlesPageCache.bundles.filter(b => b.id !== deleteTarget.id),
         };
       }
-      showToast(`${deleteTarget.bundle_name} deleted.`, 'warning');
+      showToast(`${deleteTarget.bundle_name} deleted.`, 'success');
     } catch (err) {
       console.error('Delete Bundle Error:', err);
       showToast(err.message || 'Failed to delete bundle.', 'warning');
@@ -1641,8 +1641,8 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
     <div className="overflow-x-hidden w-full max-w-full">
       {toast && (
         <div
-          className={`fixed bottom-4 right-4 z-[60] text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg ${
-            toast.variant === 'warning' || toast.variant === 'error' ? 'bg-red-600' : 'bg-emerald-600'
+          className={`fixed bottom-6 right-6 z-[9999] px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-sm sm:text-base font-semibold tracking-wide animate-slideUp min-w-[260px] max-w-md pointer-events-auto leading-snug text-white ${
+            toast.variant === 'warning' ? 'bg-amber-700' : (toast.variant === 'error' || toast.variant === 'danger') ? 'bg-red-700' : 'bg-green-700'
           }`}
         >
           {toast.message}

@@ -291,7 +291,7 @@ export default function CelebrationTab() {
     setIsDeleting(true);
     try {
       if (deleteMaterial) await deleteMaterial(deleteTarget.id);
-      showToast(`${deleteTarget.name} deleted.`, 'warning');
+      showToast(`${deleteTarget.name} deleted.`, 'success');
     } catch (err) {
       showToast(err.message || 'Failed to delete material', 'error');
     } finally {
