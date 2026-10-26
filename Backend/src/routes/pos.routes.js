@@ -8,6 +8,6 @@ const router = Router();
 router.get('/products', authMiddlewareJwt, getPosProducts);
 
 // Endpoint to process a completed POS transaction
-router.post('/order', authMiddlewareJwt, createPosOrder);
+router.post('/walk-in_orders', authMiddlewareJwt, createPosOrder);
 
 export default router;

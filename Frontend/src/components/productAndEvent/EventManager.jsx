@@ -543,7 +543,8 @@ export default function EventManager() {
     setSaveError(null);
     try {
       const isUpdate = isEditing && formData.id;
-      const res = await fetch(`${API_BASE}/events${isUpdate ? `/${formData.id}` : ''}`, {
+      const operationLabel = isUpdate ? 'update_event' : 'create_event';
+      const res = await fetch(`${API_BASE}/events${isUpdate ? `/${formData.id}` : ''}?devtools_label=${operationLabel}`, {
         method: isUpdate ? 'PUT' : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -577,7 +578,7 @@ export default function EventManager() {
     setIsDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/events/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
+      const res = await fetch(`${API_BASE}/events/${deleteTarget.id}?devtools_label=delete_event`, { method: 'DELETE', credentials: 'include' });
       await parseResponse(res);
       setEvents(prev => prev.filter(ev => ev.id !== deleteTarget.id));
       if (eventsCache) eventsCache = eventsCache.filter(ev => ev.id !== deleteTarget.id);

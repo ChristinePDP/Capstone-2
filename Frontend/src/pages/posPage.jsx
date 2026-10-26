@@ -169,7 +169,7 @@ export default function PosPage() {
       if (table === 'orders' && recordId && operation !== 'DELETE') {
         try {
           const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
-          const response = await apiClient.get(`${API_BASE}/inventory/orders/${encodeURIComponent(recordId)}`);
+          const response = await apiClient.get(`${API_BASE}/allOrders/${encodeURIComponent(recordId)}`);
           const order = response.data?.data;
           productIds = [...new Set((order?.items || order?.order_items || []).map(item => item.product_id).filter(Boolean))];
         } catch (error) {

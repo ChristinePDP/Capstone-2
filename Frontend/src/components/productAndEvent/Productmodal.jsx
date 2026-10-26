@@ -475,8 +475,8 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
         };
 
         const saveUrl = isEditing
-            ? `${import.meta.env.VITE_API_URL}/online-ordering/products/${product.id}`
-            : `${import.meta.env.VITE_API_URL}/online-ordering/products/add`;
+            ? `${import.meta.env.VITE_API_URL}/online-ordering/products/${product.id}?devtools_label=update_product`
+            : `${import.meta.env.VITE_API_URL}/online-ordering/products/add?devtools_label=create_product`;
 
         const response = await fetch(saveUrl, {
             method: isEditing ? 'PUT' : 'POST',

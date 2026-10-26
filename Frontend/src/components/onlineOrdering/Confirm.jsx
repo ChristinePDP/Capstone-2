@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { Profiler, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
@@ -14,6 +14,10 @@ const DUMMY_CART = [
 // ito ini-clear, pagkatapos ma-confirm na successful na ang order.
 const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
 const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
+
+function logQrRenderTime(id, phase, actualDuration) {
+  console.info(`[QR generation] ${id} ${phase}: ${actualDuration.toFixed(2)} ms`);
+}
 
 export default function Confirm({ orderId }) {
   const navigate = useNavigate();
@@ -163,7 +167,9 @@ export default function Confirm({ orderId }) {
 
             <div className="p-3 sm:p-4 flex flex-col items-center justify-center shrink-0 border-t md:border-t-0 md:border-l border-[#F1EBE6]">
               <div className="p-2 bg-white border border-[#EAE4E0] rounded-xl shadow-sm">
-                <QRCodeSVG value={qrPayload} size={112} fgColor="#3B1F0A" />
+                <Profiler id="online-order-qr" onRender={logQrRenderTime}>
+                  <QRCodeSVG value={qrPayload} size={112} fgColor="#3B1F0A" />
+                </Profiler>
               </div>
               <p className="text-[9px] tracking-widest text-[#B7A99F] mt-2 font-bold uppercase">
                 Scan to Verify
@@ -257,7 +263,9 @@ export default function Confirm({ orderId }) {
 
               <div className="p-6 flex flex-col items-center">
                 <div className="p-2.5 bg-white border border-[#EAE4E0] rounded-xl shadow-sm">
-                  <QRCodeSVG value={qrPayload} size={150} fgColor="#3B1F0A" />
+                  <Profiler id="online-order-receipt-image-qr" onRender={logQrRenderTime}>
+                    <QRCodeSVG value={qrPayload} size={150} fgColor="#3B1F0A" />
+                  </Profiler>
                 </div>
                 <p className="text-[9px] tracking-widest text-[#B7A99F] mt-3 font-bold uppercase" style={{ lineHeight: 1.6 }}>
                   Scan to Verify
