@@ -947,7 +947,8 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       };
 
       const isUpdate = Boolean(bundle?.id);
-      const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${bundle.id}` : ''}`, {
+      const operationLabel = `${isUpdate ? 'update' : 'create'}_bundle`;
+      const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${bundle.id}` : ''}?devtools_label=${operationLabel}`, {
         method: isUpdate ? 'PUT' : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -1000,7 +1001,8 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       // (hindi gagawa ng bago) — para gumana ang Bundle → Package na pagpapalit.
       const editId = bundle?.id || editPackageProduct?.id || null;
       const isUpdate = Boolean(editId);
-      const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${editId}` : ''}`, {
+      const operationLabel = `${isUpdate ? 'update' : 'create'}_package`;
+      const res = await fetch(`${BUNDLES_API}${isUpdate ? `/${editId}` : ''}?devtools_label=${operationLabel}`, {
         method: isUpdate ? 'PUT' : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -1597,7 +1599,8 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
 
   const confirmDelete = async () => {
     try {
-      const res = await fetch(`${BUNDLES_API}/${deleteTarget.id}`, { method: 'DELETE', credentials: 'include' });
+      const entityLabel = deleteTarget.category === 'Package' ? 'package' : 'bundle';
+      const res = await fetch(`${BUNDLES_API}/${deleteTarget.id}?devtools_label=delete_${entityLabel}`, { method: 'DELETE', credentials: 'include' });
       await parseResponse(res);
       setBundles(prev => prev.filter(b => b.id !== deleteTarget.id));
       if (bundlesPageCache) {

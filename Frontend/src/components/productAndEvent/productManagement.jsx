@@ -554,7 +554,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const confirmDelete = async () => {
     try {
-      const res = await apiClient.delete(`${PRODUCTS_BASE}/${deleteTarget.id}`);
+      const res = await apiClient.delete(`${PRODUCTS_BASE}/${deleteTarget.id}?devtools_label=delete_product`);
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== deleteTarget.id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== deleteTarget.id);
@@ -569,7 +569,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const handleModalDelete = async (id) => {
     try {
-      const res = await apiClient.delete(`${PRODUCTS_BASE}/${id}`);
+      const res = await apiClient.delete(`${PRODUCTS_BASE}/${id}?devtools_label=delete_product`);
       unwrapData(res.data, 'Failed to delete product.');
       setProducts(prev => prev.filter(p => p.id !== id));
       if (productsCache) productsCache = productsCache.filter(p => p.id !== id);
@@ -616,7 +616,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const confirmDeleteBundle = async () => {
     try {
-      const res = await fetch(`${BUNDLES_API}/${deleteBundleTarget.id}`, { method: 'DELETE', credentials: 'include' });
+      const entityLabel = deleteBundleTarget.category === 'Package' ? 'package' : 'bundle';
+      const res = await fetch(`${BUNDLES_API}/${deleteBundleTarget.id}?devtools_label=delete_${entityLabel}`, { method: 'DELETE', credentials: 'include' });
       const result = await res.json().catch(() => ({}));
       if (!res.ok || result.success === false) {
         throw new Error(result.message || result.error || 'Failed to delete bundle.');
