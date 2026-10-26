@@ -5,6 +5,7 @@ import {
   PerformanceSummaryService,
 } from '../services/aiAnalytics.service.js';
 import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js';
+import { emitRealtimeChange } from '../services/realtime.service.js';
 
 export const runDailyAnalyticsJob = async () => {
   console.log('--- Daily Analytics Job Started ---');
@@ -38,5 +39,6 @@ export const runDailyAnalyticsJob = async () => {
   console.log('Checking for live occasion & generating Event Ads...');
   await generateEventAds();
 
+  emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'daily-analytics' });
   console.log('--- Daily Analytics Job Finished ---');
 };

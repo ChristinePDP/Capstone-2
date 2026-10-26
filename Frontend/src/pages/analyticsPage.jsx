@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '../services/apiClient';
 import PerformanceTimeframe from '../components/analytics/performanceTimeframe';
 import PerformanceKpis from '../components/analytics/performanceKpis';
@@ -28,10 +28,46 @@ export default function AnalyticsPage() {
   const [isPerfLoading, setIsPerfLoading] = useState(true);
   const [isForecastLoading, setIsForecastLoading] = useState(true);
   const [isSummaryLoading, setIsSummaryLoading] = useState(true);
+  const [dataRefreshVersion, setDataRefreshVersion] = useState(0);
+  const [forceRefreshVersion, setForceRefreshVersion] = useState(0);
+  const lastPerfForceRefresh = useRef(0);
+  const lastForecastForceRefresh = useRef(0);
+  const lastSummaryForceRefresh = useRef(0);
+
+  useEffect(() => {
+    let refreshTimer;
+    const analyticsSourceTables = new Set(['orders', 'order_items', 'inventory_logs']);
+    let shouldForceRefresh = false;
+    const handleDataChanged = event => {
+      const table = event.detail?.table;
+      if (analyticsSourceTables.has(table)) {
+        shouldForceRefresh = true;
+      } else if (table !== 'analytics') {
+        return;
+      }
+
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        setDataRefreshVersion(version => version + 1);
+        if (shouldForceRefresh) {
+          setForceRefreshVersion(version => version + 1);
+        }
+        shouldForceRefresh = false;
+      }, 400);
+    };
+
+    window.addEventListener('cake:data-changed', handleDataChanged);
+    return () => {
+      window.removeEventListener('cake:data-changed', handleDataChanged);
+      window.clearTimeout(refreshTimer);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchPerf = async () => {
       setIsPerfLoading(true);
+      const shouldForceRefresh = forceRefreshVersion > lastPerfForceRefresh.current;
+      if (shouldForceRefresh) lastPerfForceRefresh.current = forceRefreshVersion;
       
       const [kpiRes, stackedRes] = await Promise.all([
         safeFetch(`${ANALYTICS_API_URL}/four-kpi/${encodeURIComponent(perfTimeframe)}`),
@@ -62,16 +98,19 @@ export default function AnalyticsPage() {
     };
     
     fetchPerf();
-  }, [perfTimeframe]);
+  }, [perfTimeframe, dataRefreshVersion, forceRefreshVersion]);
 
   useEffect(() => {
     const fetchForecast = async () => {
       setIsForecastLoading(true);
       
+      const shouldForceRefresh = forceRefreshVersion > lastForecastForceRefresh.current;
+      if (shouldForceRefresh) lastForecastForceRefresh.current = forceRefreshVersion;
+      const refreshParam = shouldForceRefresh ? '?refresh=true' : '';
       const [salesRes, prodRes, actionRes] = await Promise.all([
-        safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}`),
-        safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}`),
-        safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}`)
+        safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}${refreshParam}`),
+        safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}${refreshParam}`),
+        safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}${refreshParam}`)
       ]);
 
       const salesPayload = salesRes.ok ? (salesRes.data?.data || salesRes.data) : {};
@@ -89,12 +128,15 @@ export default function AnalyticsPage() {
     };
     
     fetchForecast();
-  }, [forecastTimeframe]);
+  }, [forecastTimeframe, dataRefreshVersion, forceRefreshVersion]);
 
   useEffect(() => {
     const fetchSummary = async () => {
       setIsSummaryLoading(true);
-      const summaryRes = await safeFetch(`${ANALYTICS_API_URL}/summary`);
+      const shouldForceRefresh = forceRefreshVersion > lastSummaryForceRefresh.current;
+      if (shouldForceRefresh) lastSummaryForceRefresh.current = forceRefreshVersion;
+      const refreshParam = shouldForceRefresh ? '?refresh=true' : '';
+      const summaryRes = await safeFetch(`${ANALYTICS_API_URL}/summary${refreshParam}`);
       
       setAnalyticsData(prev => ({
         ...prev,
@@ -105,7 +147,7 @@ export default function AnalyticsPage() {
     };
     
     fetchSummary();
-  }, []); 
+  }, [dataRefreshVersion, forceRefreshVersion]); 
 
   return (
     <div className="overflow-x-hidden w-full max-w-full">
