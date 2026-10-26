@@ -417,7 +417,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     try {
       sessionStorage.setItem(POS_CHECKOUT_RESERVATION_KEY, payload.checkoutReservationId);
       const token = localStorage.getItem('token'); 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/pos/order`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/pos/walk-in_orders`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },

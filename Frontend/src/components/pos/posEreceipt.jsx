@@ -1,6 +1,10 @@
-import { useRef, useEffect } from 'react';
+import { Profiler, useRef, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
+
+function logQrRenderTime(id, phase, actualDuration) {
+  console.info(`[QR generation] ${id} ${phase}: ${actualDuration.toFixed(2)} ms`);
+}
 
 /**
  * PosEReceipt
@@ -187,7 +191,9 @@ export default function PosEReceipt({
           {/* Kanan: QR code (mobile: nasa ilalim; desktop: nasa kanan) */}
           <div className="p-4 sm:p-6 flex flex-col items-center justify-center shrink-0 border-t md:border-t-0 md:border-l border-[#F1EBE6]">
             <div className="p-3 bg-white border border-[#EAE4E0] rounded-xl shadow-sm">
-              <QRCodeSVG value={qrPayload} size={130} fgColor="#3B1F0A" />
+              <Profiler id="pos-receipt-qr" onRender={logQrRenderTime}>
+                <QRCodeSVG value={qrPayload} size={130} fgColor="#3B1F0A" />
+              </Profiler>
             </div>
             <p className="text-[9px] tracking-widest text-[#B7A99F] mt-3 font-bold uppercase">
               Scan to Verify
