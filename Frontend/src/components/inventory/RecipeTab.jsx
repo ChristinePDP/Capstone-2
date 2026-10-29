@@ -993,8 +993,10 @@ export default function RecipeTab() {
         isOpen={!!deleteTarget}
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)}
         onConfirm={handleDeleteRecipe}
-        title="Delete Formula"
-        message={`Delete the formula for "${deleteTarget?.product}"?`}
+        title={`Are you sure you want to delete the formula for "${deleteTarget?.product}"?`}
+        message={(
+          `This will also delete its ${deleteTarget?.ingredients?.length || 0} ingredient link(s). The product will remain, but it cannot be ordered or used for production until a new formula is added. Past production records will remain, but their formula link will be cleared. This cannot be undone.`
+        )}
         confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
         variant="danger"
       />

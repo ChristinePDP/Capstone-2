@@ -4,6 +4,7 @@ import { Edit2, Trash2, X, Search, Package, Loader2 } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
+import { getBundleDeleteImpact } from './bundleDeleteContent';
 
 const PRODUCTS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 // Admin list lang ang /catalog (GET). Ang delete/edit ay nasa /products/:id — hindi /catalog/:id.
@@ -180,9 +181,9 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm border border-[#EAE4E0] p-6">
-        <h2 className="text-lg font-bold text-[#3B1F0A] mb-2">{title}</h2>
-        <p className="text-xs text-[#8A7264] mb-6 leading-relaxed">{message}</p>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg border border-[#EAE4E0] p-6">
+        <h2 className="text-xl font-bold text-[#3B1F0A] mb-3 leading-snug">{title}</h2>
+        <p className="text-sm text-[#8A7264] mb-5 leading-relaxed">{message}</p>
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button variant="danger" onClick={onConfirm}>{confirmLabel}</Button>
@@ -190,6 +191,12 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel
       </div>
     </div>
   );
+}
+
+function BundleDeleteTitle({ bundle }) {
+  if (!bundle) return <>Are you sure you want to delete this Bundle?</>;
+  const entity = bundle.category === 'Package' ? 'Package' : 'Bundle';
+  return <>Are you sure you want to delete the {entity} <span className="font-extrabold text-red-700">"{bundle.bundle_name}"</span>?</>;
 }
 
 function useToast() {
@@ -529,6 +536,9 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
           is_active: savedProduct.is_active
             ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.is_active
             ?? true,
+          linked_inventory_material: savedProduct.linked_inventory_material
+            ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.linked_inventory_material
+            ?? null,
           has_production_formula: savedProduct.category === 'Celebration Material'
             ? true
             : savedProduct.has_production_formula === true,
@@ -567,18 +577,11 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     }
   };
 
-  const handleModalDelete = async (id) => {
-    try {
-      const res = await apiClient.delete(`${PRODUCTS_BASE}/${id}?devtools_label=delete_product`);
-      unwrapData(res.data, 'Failed to delete product.');
-      setProducts(prev => prev.filter(p => p.id !== id));
-      if (productsCache) productsCache = productsCache.filter(p => p.id !== id);
-      showToast('Product deleted.', 'success');
-      handleCloseModal();
-    } catch (err) {
-      console.error('Delete Product Error:', err);
-      showToast(getErrMsg(err, 'Failed to delete product.'), 'warning');
-    }
+  const handleModalDelete = (id) => {
+    const productToDelete = products.find(product => String(product.id) === String(id)) || editProduct;
+    if (!productToDelete) return;
+    handleCloseModal();
+    setDeleteTarget(productToDelete);
   };
 
   // Ang edit form ay nangangailangan ng allProducts at events (shared cache sa
@@ -705,8 +708,34 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-        title="Delete Product"
-        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
+        title={<>Are you sure you want to delete <span className="font-extrabold text-red-700">"{deleteTarget?.name}"</span>?</>}
+        message={(() => {
+          const hasFormula = Boolean(deleteTarget?.recipe_id);
+          const ingredientCount = Number(deleteTarget?.recipe_ingredient_count || 0);
+          const isCelebrationMaterial = deleteTarget?.category === 'Celebration Material';
+          const formulaEffect = isCelebrationMaterial
+            ? ''
+            : hasFormula
+              ? `This product is linked to a production formula. Deleting it will also delete that formula and its ${ingredientCount} ingredient link(s). `
+              : 'No production formula is currently linked to this product. ';
+          const linkedMaterial = deleteTarget?.linked_inventory_material;
+          const isPartnerOrPreOrder = deleteTarget?.category === 'Celebration Material'
+            && (deleteTarget?.sourcing_type === 'partner'
+              || String(deleteTarget?.order_type || '').toLowerCase().replace(/[^a-z]/g, '') === 'preorder');
+          const inventoryEffect = isPartnerOrPreOrder
+            ? ' This item is also listed under Inventory > Stocks > Celebration/ Product Materials as a Partner or Pre-order item. Deleting the product will remove that inventory row and its order limit; it has no separate stock record.'
+            : linkedMaterial
+            ? ` It is also linked to inventory material "${linkedMaterial.name}" with ${Number(linkedMaterial.stock_quantity || 0)} ${linkedMaterial.unit || 'unit(s)'} in stock. Deleting this product will keep the inventory material and its stock; it will only clear the product link.`
+            : isCelebrationMaterial
+              ? ' This product is also listed under Inventory > Stocks > Celebration/ Product Materials as an own-stock item. Deleting it will remove that product row; any separately linked inventory material and stock will remain.'
+              : '';
+          const historyEffect = isCelebrationMaterial
+            ? ' Past order records will remain for reporting, but their product links will be cleared. This cannot be undone.'
+            : ' Past order items and production records will remain for reporting, but their links to this product or formula will be cleared. This cannot be undone.';
+          return (
+            `${formulaEffect}${inventoryEffect}${historyEffect}`
+          );
+        })()}
         confirmLabel="Delete"
       />
 
@@ -724,8 +753,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         isOpen={!!deleteBundleTarget}
         onClose={() => setDeleteBundleTarget(null)}
         onConfirm={confirmDeleteBundle}
-        title="Delete Bundle"
-        message={`Are you sure you want to delete "${deleteBundleTarget?.bundle_name}"? This cannot be undone.`}
+        title={<BundleDeleteTitle bundle={deleteBundleTarget} />}
+        message={getBundleDeleteImpact(deleteBundleTarget)}
         confirmLabel="Delete"
       />
     </div>

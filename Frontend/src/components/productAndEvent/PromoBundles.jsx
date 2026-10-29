@@ -2,12 +2,19 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ImagePlus, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
 import { useUnsavedChanges } from '../ui';
+import { getBundleDeleteImpact } from './bundleDeleteContent';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 const PRODUCTS_API = `${API_BASE}/catalog`;
 const EVENTS_API = `${API_BASE}/events`;
 export const BUNDLES_API = `${API_BASE}/bundles`;
 const UPLOAD_IMAGE_API = `${API_BASE}/upload-image`;
+
+function BundleDeleteTitle({ bundle }) {
+  if (!bundle) return <>Are you sure you want to delete this Bundle?</>;
+  const entity = bundle.category === 'Package' ? 'Package' : 'Bundle';
+  return <>Are you sure you want to delete the {entity} <span className="font-extrabold text-red-700">"{bundle.bundle_name}"</span>?</>;
+}
 
 // Binubura sa bucket ang image na na-upload pero hindi na gagamitin (best-effort).
 // Ligtas ito dahil tinatanggihan ng backend kung may product/bundle pang gumagamit ng URL.
@@ -276,9 +283,9 @@ function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm border border-[#EAE4E0] p-6">
-        <h2 className="text-lg font-bold text-[#3B1F0A] mb-2">{title}</h2>
-        <p className="text-xs text-[#8A7264] mb-6 leading-relaxed">{message}</p>
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg border border-[#EAE4E0] p-6">
+        <h2 className="text-xl font-bold text-[#3B1F0A] mb-3 leading-snug">{title}</h2>
+        <p className="text-sm text-[#8A7264] mb-5 leading-relaxed">{message}</p>
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
           <Button variant="danger" onClick={onConfirm}>{confirmLabel}</Button>
@@ -1696,8 +1703,8 @@ export default function PromoBundles({ autoOpenAdd = false, onAutoOpenHandled } 
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-        title="Delete Bundle"
-        message={`Are you sure you want to delete "${deleteTarget?.bundle_name}"? This cannot be undone.`}
+        title={<BundleDeleteTitle bundle={deleteTarget} />}
+        message={getBundleDeleteImpact(deleteTarget)}
         confirmLabel="Delete"
       />
     </div>

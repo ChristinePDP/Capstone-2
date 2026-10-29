@@ -513,9 +513,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
   const handleDeleteClick = () => {
     if (!isEditing || !onDelete) return;
-    if (window.confirm(`Are you sure you want to delete "${form.name}"? This cannot be undone.`)) {
-      onDelete(product.id);
-    }
+    onDelete(product.id);
   };
 
   const closeProductModal = onClose || (() => window.history.back());

@@ -184,6 +184,20 @@ export const getAllProducts = async (filters = {}) => {
     });
     if (error) throw error;
     const products = data || [];
+    const celebrationProductIds = products
+      .filter(product => product.category === 'Celebration Material')
+      .map(product => product.id);
+    let inventoryMaterialByProductId = new Map();
+    if (celebrationProductIds.length) {
+      const { data: linkedMaterials, error: materialError } = await supabase
+        .from('celebration_materials')
+        .select('id, product_id, name, stock_quantity, unit')
+        .in('product_id', celebrationProductIds);
+      if (materialError) throw materialError;
+      inventoryMaterialByProductId = new Map(
+        (linkedMaterials || []).map(material => [material.product_id, material])
+      );
+    }
     const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(
       products.map(product => product.id)
     );
@@ -192,6 +206,7 @@ export const getAllProducts = async (filters = {}) => {
       if (product.category === 'Celebration Material') {
         return {
           ...product,
+          linked_inventory_material: inventoryMaterialByProductId.get(product.id) || null,
           has_production_formula: true,
           formula_status: 'not_required',
         };
