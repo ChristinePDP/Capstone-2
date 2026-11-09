@@ -158,6 +158,11 @@ export default function EventAdsModal() {
     navigate('/onlineOrdering/menu');
   };
 
+  const handleProductClick = (product) => {
+    setClosed(true);
+    navigate('/onlineOrdering/menu', { state: { focusProductId: product.id } });
+  };
+
   // Buttons na nag-sscroll ng product strip — kapalit/karagdagan sa
   // swipe-only na dating gamit. Isang function lang ito, gumagana kahit
   // ilan pa ang products (walang naka-hardcode na bilang ng "pages").
@@ -357,6 +362,16 @@ export default function EventAdsModal() {
                     // lang sa pag-swipe o sa pag-click ng arrow buttons.
                     <div
                       key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleProductClick(p)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleProductClick(p);
+                        }
+                      }}
+                      aria-label={`View ${p.name} in the menu`}
                       className="snap-start shrink-0 w-[calc((100%-12px)/2)] md:w-[calc((100%-16px)/2)] text-left group cursor-pointer"
                     >
                       {/* Price-tag card: image sa taas, tapos ang price ay

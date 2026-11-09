@@ -11,9 +11,6 @@ import { getDateRange } from "../utils/analytics/PerformancetTimeframeHelper.uti
 
 const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 
-// Ang laki ng trend/level window ng Sales at Product Forecast ay nasa
-// FORECAST_MODEL (SHARED ENGINE) — iisang config para sa dalawa.
-
 // ==========================================
 // SHARED: PRE-GEMINI DATA SUFFICIENCY GATE
 // ==========================================
@@ -25,11 +22,11 @@ const TIMEFRAME_DAYS = { "7d": 7, "30d": 30 };
 // the AI cache, the database must actually contain sales history going
 // back at least this many calendar days from "now" — not just this
 // many days' worth of transactions, but real elapsed days.
-//   - "7d" forecasts require at least 60 days (~2 months) of history.
-//   - "30d" forecasts require at least 90 days (~3 months) of history.
-// If the requirement isn't met, the caller must skip Gemini entirely,
-// skip the cache write entirely, and effectively no-op the cron run.
-const REQUIRED_HISTORY_DAYS = { "7d": 60, "30d": 90 };
+//   - "7d" forecasts require at least 30 days (~1 month) of history.
+//   - "30d" forecasts require at least 60 days (~2 months) of history.
+// If the requirement isn't met, the caller skips Gemini and caches the
+// existing insufficient-data payload.
+const REQUIRED_HISTORY_DAYS = { "7d": 30, "30d": 60 };
 
 async function hasSufficientHistory(requiredDays) {
   const cutoff = new Date();
@@ -80,104 +77,6 @@ function buildDateSequenceSafe(startDate, endDate) {
   return dates;
 }
 
-// ==========================================
-// SHARED: OUTLIER GUARD (IQR WINSORIZATION)
-// ==========================================
-// Applies to the raw historical series fed into Gemini for BOTH Sales
-// Forecast and Product Forecast. Both prompts derive their trend by
-// comparing "recent half vs earlier half" averages of the raw numbers —
-// a single freak day (a huge bulk/event order, a data-entry glitch, an
-// unexpected closure) would otherwise swing that whole comparison and
-// get read as a real trend. This clamps (winsorizes) values that fall
-// outside the IQR fence to the nearest acceptable bound INSTEAD OF
-// deleting them, so the day sequence/array length stays intact and the
-// series still reflects "something happened" that day, just not at a
-// magnitude that distorts the trend math.
-const OUTLIER_MIN_SAMPLE_SIZE = 8; // too few points to trust a spread calc below this
-const OUTLIER_IQR_MULTIPLIER = 1.5; // standard Tukey fence
-
-function computePercentile(sortedValues, percentile) {
-  if (!sortedValues.length) return 0;
-  const index = (sortedValues.length - 1) * percentile;
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sortedValues[lower];
-  const weight = index - lower;
-  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
-}
-
-// values: numeric-only array (caller must strip null/undefined first).
-// Returns null when the sample is too small, or has zero spread (IQR
-// === 0 — e.g. a slow-mover product that's almost always 0), to safely
-// judge outliers from — in both cases, no capping should happen.
-function computeIqrBounds(values) {
-  if (values.length < OUTLIER_MIN_SAMPLE_SIZE) return null;
-
-  const sorted = [...values].sort((a, b) => a - b);
-  const q1 = computePercentile(sorted, 0.25);
-  const q3 = computePercentile(sorted, 0.75);
-  const iqr = q3 - q1;
-  if (iqr === 0) return null;
-
-  return {
-    lowerBound: q1 - OUTLIER_IQR_MULTIPLIER * iqr,
-    upperBound: q3 + OUTLIER_IQR_MULTIPLIER * iqr,
-  };
-}
-
-// Winsorizes a numeric series, preserving order/length. `null`/`undefined`
-// entries (e.g. "today" with no sales recorded yet) pass through
-// untouched and are excluded from the bound calculation itself.
-function winsorizeSeries(values) {
-  const numericValues = values.filter((v) => v !== null && v !== undefined && !Number.isNaN(v));
-  const bounds = computeIqrBounds(numericValues);
-
-  if (!bounds) {
-    return { adjusted: [...values], outlierCount: 0 };
-  }
-
-  let outlierCount = 0;
-  const adjusted = values.map((v) => {
-    if (v === null || v === undefined || Number.isNaN(v)) return v;
-    if (v > bounds.upperBound) {
-      outlierCount += 1;
-      return Math.round(bounds.upperBound);
-    }
-    if (v < bounds.lowerBound) {
-      outlierCount += 1;
-      return Math.max(0, Math.round(bounds.lowerBound));
-    }
-    return v;
-  });
-
-  return { adjusted, outlierCount };
-}
-
-// ==========================================
-// SHARED: DETERMINISTIC FORECAST ENGINE (SALES + PRODUCT)
-// ==========================================
-// Ang Sales Forecast at Product Forecast ay gumagamit na ng IISANG paraan
-// at IISANG set ng constants (FORECAST_MODEL sa baba). Wala nang Gemini sa
-// pagkuwenta ng forecast — code na ang nagku-compute, kaya:
-//   - pareho ang resulta sa tuwing tatakbo para sa parehong data,
-//   - makikita (at masusubukan) ang bawat hakbang,
-//   - at masusukat ang accuracy sa pamamagitan ng backtest (sa baba).
-//
-// METHOD (per series — total sales ng shop, o benta ng isang produkto):
-//   1. OUTLIER GUARD: i-clamp (winsorize) ang mga freak na araw, PERO
-//      ikinukumpara lang ang araw sa kapareho niyang weekday (Lunes vs
-//      Lunes), para hindi mawala ang totoong weekend/holiday peak.
-//   2. LEVEL: average kada araw sa huling `levelWindowDays`.
-//   3. WEEKDAY INDEX: average ng bawat weekday ÷ overall average, sa buong
-//      history window (60d para sa 7d, 90d para sa 30d).
-//   4. TREND: huling `trendWindowDays` vs ang `trendWindowDays` bago nito,
-//      na i-clamp (0.7–1.3) at i-damp (50%) para hindi ma-overreact sa
-//      isang magandang/pangit na linggo.
-//   5. FORECAST(araw k) = level × weekdayIndex × (1 + (trendFactor−1) × k/H)
-//
-// Para sa 7d: level 28 araw, trend 7 vs 7. Para sa 30d: level 56 araw,
-// trend 28 vs 28 (buong linggo — para hindi mabias ang weekday mix ng
-// dalawang window).
 const MANILA_TZ = "Asia/Manila";
 const manilaDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: MANILA_TZ,
@@ -186,24 +85,7 @@ const manilaDateFormatter = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
-const FORECAST_MODEL = {
-  // Sinukat sa backtest: 28/56 ay under-forecast ng ~23% (30d) kapag lumalaki ang
-  // negosyo dahil laging mas luma ang level kaysa sa kinukumparang huling window.
-  // 14/30 ang pinakabalanse. Pareho ito para sa Sales AT Product forecast.
-  levelWindowDays: { "7d": 14, "30d": 30 },
-  trendWindowDays: { "7d": 7, "30d": 28 },
-  trendDamping: 0.5,
-  trendClamp: { min: 0.7, max: 1.3 },
-  minWeekdaySamples: 4,
-  backtest: {
-    minTrainDays: 35,
-    maxOrigins: { "7d": 12, "30d": 4 },
-    originStepDays: 7,
-    minPairsForRange: 14,
-    rangeLowerQuantile: 0.1,
-    rangeUpperQuantile: 0.9,
-  },
-};
+const PRODUCT_RECENT_UNITS_WINDOW_DAYS = { "7d": 14, "30d": 30 };
 
 // Sales: ilang araw na may benta ang kailangan sa loob ng history window
 // bago mag-forecast (hindi lang "may isang order noon").
@@ -219,7 +101,7 @@ const PRODUCT_FORECAST_RULES = {
   "7d": {
     minDaysSinceFirstSale: 14,
     minActiveDays: 2,
-    minUnitsRecent: 3,        // units sa huling levelWindowDays
+    minUnitsRecent: 3,        // units sa configured recent-units window
     minAbsChange: 2,          // units — pinakamaliit na diff na papasok sa GROWTH list
     minPctChange: 10,         // % — pinakamaliit na pagtaas para maging "fast moving" (7d)
     // FIX: dati ay riskPctCeiling = +5, kaya kahit TUMATAAS na produkto
@@ -241,8 +123,6 @@ const PRODUCT_FORECAST_RULES = {
 };
 const PRODUCT_LIST_MAX = 5;
 
-const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
 // ---------- Date helpers (lahat ay nasa Manila calendar day) ----------
 // Dati: created_at.slice(0, 10) — UTC date 'yun, kaya ang order na pumasok
 // bago mag-8:00 AM Manila ay napupunta sa NAKARAANG araw at nagugulo ang
@@ -257,10 +137,6 @@ function addDaysToKey(key, n) {
   return d.toISOString().slice(0, 10);
 }
 
-function weekdayOfKey(key) {
-  return new Date(`${key}T00:00:00Z`).getUTCDay();
-}
-
 function formatForecastLabel(key) {
   return new Date(`${key}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
@@ -269,215 +145,7 @@ function buildFutureDateKeys(todayKey, count) {
   return Array.from({ length: count }, (_, i) => addDaysToKey(todayKey, i));
 }
 
-// Kumpletong mga araw lang ang gagamitin sa training: mula `days` araw
-// ang nakalipas HANGGANG KAHAPON (Manila). Hindi kasama ang "ngayon"
-// dahil hindi pa tapos ang araw — ang kalahating araw ay magmumukhang
-// biglang pagbaba ng benta.
-function getManilaHistoryWindow(days) {
-  const todayKey = toManilaDateKey(new Date());
-  const endKey = addDaysToKey(todayKey, -1);
-  const startKey = addDaysToKey(endKey, -(days - 1));
-  return {
-    todayKey,
-    dateKeys: Array.from({ length: days }, (_, i) => addDaysToKey(startKey, i)),
-    startISO: new Date(`${startKey}T00:00:00+08:00`).toISOString(),
-    endISO: new Date(`${endKey}T23:59:59.999+08:00`).toISOString(),
-  };
-}
-
 const sumOf = (arr) => arr.reduce((a, b) => a + b, 0);
-const meanOf = (arr) => (arr.length ? sumOf(arr) / arr.length : 0);
-const round1 = (n) => Math.round(n * 10) / 10;
-
-// ---------- Step 1: outlier guard, per weekday (trend-aware) ----------
-// Series: [{ date, value }]. Hinahambing ang bawat araw sa kapareho niyang
-// weekday lang.
-//
-// FIX: dati, ang IQR bounds ay kinukuwenta mula sa MISMONG halaga ng buong
-// history ng bawat weekday. Kapag lumalaki ang benta (o produkto), ang
-// pinakabago at pinakamataas na halaga ang lumalampas sa upper bound at
-// pinuputol bilang "outlier" — kaya ang tunay na paglaki ay binubura bago pa
-// ma-forecast (walang growth na lumalabas, at ang tumataas na produkto ay
-// lumalabas na "at risk"). Ngayon, ang ikinukumpara ay ang RATIO ng araw sa
-// average ng mga katabing araw nito (hindi kasama ang sarili), kaya ang
-// tuloy-tuloy na pag-akyat o pagbaba ay hindi na "outlier" — ang biglaang
-// spike lang (hal. isang malaking event order) ang naka-cap.
-const OUTLIER_TREND_WINDOW_DAYS = 14;
-
-function winsorizeByWeekday(series) {
-  const n = series.length;
-  const raw = series.map((p) => p.value);
-  const half = Math.floor(OUTLIER_TREND_WINDOW_DAYS / 2);
-
-  // Local baseline ng bawat araw: average ng mga katabing araw, hindi kasama ang sarili.
-  const baseline = raw.map((v, i) => {
-    let sum = 0;
-    let count = 0;
-    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) {
-      if (j === i || !Number.isFinite(raw[j])) continue;
-      sum += raw[j];
-      count += 1;
-    }
-    return count ? sum / count : 0;
-  });
-
-  const groups = Array.from({ length: 7 }, () => []);
-  series.forEach((point, i) => groups[weekdayOfKey(point.date)].push(i));
-
-  const adjusted = [...raw];
-  let outlierCount = 0;
-  for (const indexes of groups) {
-    // Kalat-kalat na series (halos puro 0): ang isang benta ay hindi "spike".
-    // Parehong proteksyon ng dating bersyon — walang cap kapag zero ang IQR.
-    if (!computeIqrBounds(indexes.map((i) => raw[i]).filter((v) => Number.isFinite(v)))) continue;
-
-    const usable = indexes.filter((i) => Number.isFinite(raw[i]) && baseline[i] > 0);
-    const bounds = computeIqrBounds(usable.map((i) => raw[i] / baseline[i]));
-    if (!bounds) continue;
-
-    for (const i of usable) {
-      const ratio = raw[i] / baseline[i];
-      if (ratio > bounds.upperBound) {
-        adjusted[i] = Math.round(baseline[i] * bounds.upperBound);
-        outlierCount += 1;
-      } else if (ratio < bounds.lowerBound) {
-        adjusted[i] = Math.max(0, Math.round(baseline[i] * bounds.lowerBound));
-        outlierCount += 1;
-      }
-    }
-  }
-  return { adjusted, outlierCount };
-}
-
-function getModelOptions(horizonKey) {
-  return {
-    levelWindow: FORECAST_MODEL.levelWindowDays[horizonKey],
-    trendWindow: FORECAST_MODEL.trendWindowDays[horizonKey],
-    useSeasonality: true,
-  };
-}
-
-// ---------- Steps 2–5 ----------
-// series: kumpletong araw, oldest -> newest.  futureDates: ['YYYY-MM-DD', ...]
-// Wala itong ginagamit na data lampas sa dulo ng `series`, kaya ligtas
-// itong gamitin sa backtest.
-function runForecastModel(series, futureDates, { levelWindow, trendWindow, useSeasonality = true }) {
-  const { adjusted, outlierCount } = winsorizeByWeekday(series);
-  const n = adjusted.length;
-
-  const level = meanOf(adjusted.slice(-Math.min(levelWindow, n)));
-
-  let weekdayIndex = Array(7).fill(1);
-  const overall = meanOf(adjusted);
-  if (useSeasonality && overall > 0) {
-    weekdayIndex = weekdayIndex.map((_, w) => {
-      const values = adjusted.filter((_, i) => weekdayOfKey(series[i].date) === w);
-      return values.length >= FORECAST_MODEL.minWeekdaySamples ? meanOf(values) / overall : 1;
-    });
-    const avgIndex = meanOf(weekdayIndex) || 1;
-    weekdayIndex = weekdayIndex.map((x) => x / avgIndex);
-  }
-
-  let trendRatio = 1;
-  if (n >= trendWindow * 2) {
-    const recentAvg = meanOf(adjusted.slice(-trendWindow));
-    const priorAvg = meanOf(adjusted.slice(-trendWindow * 2, -trendWindow));
-    if (priorAvg > 0) trendRatio = recentAvg / priorAvg;
-  }
-  const { min, max } = FORECAST_MODEL.trendClamp;
-  const clampedRatio = Math.min(max, Math.max(min, trendRatio));
-  const trendFactor = 1 + (clampedRatio - 1) * FORECAST_MODEL.trendDamping;
-
-  const horizon = futureDates.length;
-  const values = futureDates.map((dateKey, k) => {
-    const ramp = (k + 1) / horizon;
-    const multiplier = 1 + (trendFactor - 1) * ramp;
-    return Math.max(0, level * weekdayIndex[weekdayOfKey(dateKey)] * multiplier);
-  });
-
-  return {
-    values,
-    meta: {
-      level: Math.round(level * 100) / 100,
-      trendRatio: Math.round(trendRatio * 1000) / 1000,
-      trendFactor: Math.round(trendFactor * 1000) / 1000,
-      weekdayIndex: Object.fromEntries(WEEKDAY_NAMES.map((name, w) => [name, Math.round(weekdayIndex[w] * 100) / 100])),
-      outliersCapped: outlierCount,
-    },
-  };
-}
-
-// ---------- Backtest (accuracy measure) ----------
-// "Rolling origin": ibinabalik sa nakaraan, forecast gamit LANG ang data
-// bago ang puntong iyon, tapos ikinukumpara sa totoong nangyari. Ikinukumpara
-// rin sa simpleng baseline (kaparehong weekday noong nakaraang linggo) —
-// kung hindi natatalo ng model ang baseline, hindi ito nakakatulong.
-function backtestSeriesModel(series, horizonKey, opts) {
-  const horizon = TIMEFRAME_DAYS[horizonKey];
-  const { minTrainDays, maxOrigins, originStepDays } = FORECAST_MODEL.backtest;
-  const n = series.length;
-  const pairs = [];
-  let origins = 0;
-
-  for (let j = 0; j < maxOrigins[horizonKey]; j++) {
-    const originEnd = n - horizon - originStepDays * j;
-    if (originEnd < minTrainDays) break;
-
-    const train = series.slice(0, originEnd);
-    const test = series.slice(originEnd, originEnd + horizon);
-    const { values } = runForecastModel(train, test.map((p) => p.date), opts);
-
-    test.forEach((point, k) => {
-      const baselineIndex = originEnd + k - 7 * Math.ceil((k + 1) / 7);
-      pairs.push({ actual: point.value, forecast: values[k], baseline: series[baselineIndex].value });
-    });
-    origins += 1;
-  }
-
-  return { pairs, origins };
-}
-
-function summarizeBacktestPairs(pairs, origins) {
-  const totalActual = sumOf(pairs.map((p) => p.actual));
-  if (!pairs.length || totalActual <= 0) return null;
-
-  const wape = sumOf(pairs.map((p) => Math.abs(p.actual - p.forecast))) / totalActual;
-  const baselineWape = sumOf(pairs.map((p) => Math.abs(p.actual - p.baseline))) / totalActual;
-  const bias = (sumOf(pairs.map((p) => p.forecast)) - totalActual) / totalActual;
-
-  return {
-    wapePct: round1(wape * 100),               // average error (mas mababa = mas maganda)
-    baselineWapePct: round1(baselineWape * 100),
-    biasPct: round1(bias * 100),               // + = sobra ang forecast, − = kulang
-    beatsBaseline: wape <= baselineWape,
-    sampleDays: pairs.length,
-    origins,
-  };
-}
-
-// Range (hal. "₱3,000–5,000") mula sa AKTWAL na mga error ng backtest,
-// hindi hula-hula: P10 at P90 ng (actual − forecast).
-function computeResidualBand(pairs) {
-  const { minPairsForRange, rangeLowerQuantile, rangeUpperQuantile } = FORECAST_MODEL.backtest;
-  if (pairs.length < minPairsForRange) return null;
-  const residuals = pairs.map((p) => p.actual - p.forecast).sort((a, b) => a - b);
-  return {
-    low: computePercentile(residuals, rangeLowerQuantile),
-    high: computePercentile(residuals, rangeUpperQuantile),
-  };
-}
-
-// ---------- Method summary na ipinapakita/ina-save kasama ng forecast ----------
-function describeForecastMethod(horizonKey, historyDays, meta) {
-  return {
-    type: "weekday-seasonal level + damped trend (computed in code, no AI)",
-    historyDays,
-    levelWindowDays: FORECAST_MODEL.levelWindowDays[horizonKey],
-    trendWindowDays: FORECAST_MODEL.trendWindowDays[horizonKey],
-    trendDamping: FORECAST_MODEL.trendDamping,
-    ...(meta || {}),
-  };
-}
 
 // ==========================================
 // 1. ACTIONABLE RECOMMENDATIONS SERVICE (FORECAST-DRIVEN, TIMEFRAME-INDEPENDENT)
@@ -1191,19 +859,10 @@ const ActionableRecommendationService = {
 };
 
 // ==========================================
-// 2. PRODUCT FORECAST SERVICE (CODE-COMPUTED, SAME RULES AS SALES)
+// 2. PRODUCT FORECAST SERVICE (GEMINI-ANALYZED)
 // ==========================================
-// Parehong engine, parehong history window, parehong level/trend window
-// sa Sales Forecast (tingnan ang FORECAST_MODEL at REQUIRED_HISTORY_DAYS):
-//   - 7d  -> 60 araw na history, level 28d, trend 7d vs 7d
-//   - 30d -> 90 araw na history, level 56d, trend 28d vs 28d
-// Wala nang 14-day / 60-day "mini window" na hiwalay sa sales.
-//
-// Ang "pct" at "diff" ay kinukumpara na ngayon sa PANTAY NA HABA:
-//   recentQty = aktwal na units na naibenta sa HULING 7 (o 30) na araw
-//   forecast  = projected units sa SUSUNOD NA 7 (o 30) na araw
-// (Dati: forecast ng 7 araw laban sa sum ng 14 na araw — kaya halos lahat
-// ng produkto ay lumalabas na "bumababa".)
+// The system fetches full daily history, applies the per-product eligibility
+// rules, and reconciles Gemini's forecast against actual recent unit totals.
 const PF_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PF_TIMEFRAME_LABELS = { "7d": "Next 7 Days", "30d": "Next 30 Days" };
 const PRODUCT_COMBINED_CACHE_KEY = "product_forecast:combined";
@@ -1235,12 +894,13 @@ async function fetchRangeUncapped(fetchFn, startISO, endISO) {
   return left.concat(right);
 }
 
-// Daily units kada produkto (Manila dates), mula KAHAPON pabalik. Ang
-// bilang ay nagsisimula sa FIRST SALE ng produkto — hindi nilalagyan ng 0
-// ang mga araw bago pa ito lumabas, kaya hindi nasisira ang average ng
-// bagong produkto.
-async function getProductDailySeries(days) {
-  const { dateKeys, startISO, endISO, todayKey } = getManilaHistoryWindow(days);
+// Daily units kada produkto (Manila dates), mula sa unang araw na may
+// benta hanggang kahapon. Walang fixed fetch window.
+async function getProductDailySeries() {
+  const todayKey = toManilaDateKey(new Date());
+  const endKey = addDaysToKey(todayKey, -1);
+  const startISO = new Date(0).toISOString();
+  const endISO = new Date(`${endKey}T23:59:59.999+08:00`).toISOString();
 
   const items = await fetchRangeUncapped(
     (from, to) => OrderItemsModel.getByOrderDateRange(from, to, {
@@ -1250,7 +910,7 @@ async function getProductDailySeries(days) {
     startISO,
     endISO
   );
-  console.log(`[ProductForecastService] Fetched ${items.length} order-item rows for ${days}-day window.`);
+  console.log(`[ProductForecastService] Fetched ${items.length} order-item rows for all available history.`);
 
   if (items.length > 0 && items.length % SUPABASE_DEFAULT_ROW_CAP === 0) {
     console.warn(`[ProductForecastService] Query returned exactly ${items.length} rows — baka naputol ng row limit ang history. I-check ang pagination ng OrderItemsModel.getByOrderDateRange.`);
@@ -1262,21 +922,18 @@ async function getProductDailySeries(days) {
     const createdAt = row.orders?.created_at;
     if (!createdAt) continue;
 
-    // FIX: dati, ang pangalan ay galing LANG sa `products` join. Kapag null ang
-    // join (walang product_id — custom order, bundle, package, o na-delete na
-    // produkto), lahat ng iyon ay napupunta sa iisang "Unknown Product" na
-    // bucket kaya iisang "produkto" lang ang na-forecast. Ngayon: unahin ang
-    // product_name na naka-save mismo sa order item (parehong source ng
-    // getProductGrowthAndRisk, kaya tugma ang pangalan sa Recommendations),
-    // tapos products.name bilang fallback. Walang pangalan = hindi isinasama.
+    // Prefer the saved order-item name, with the joined product name as a
+    // fallback, so the forecast uses the same visible names as Recommendations.
+    // Rows without either name are excluded.
     const name = String(row.product_name || row.products?.name || "").trim();
     if (!name) {
       unnamedRows += 1;
       continue;
     }
     const category = row.products?.category || "Uncategorized";
-    const key = row.product_id ? `id:${row.product_id}` : `name:${name.toLowerCase()}`;
+    const key = `name:${name.toLowerCase()}`;
     const day = toManilaDateKey(createdAt);
+    if (day > endKey) continue;
 
     if (!byProduct[key]) byProduct[key] = { productName: name, category, qtyByDate: {} };
     byProduct[key].qtyByDate[day] = (byProduct[key].qtyByDate[day] || 0) + Number(row.quantity || 0);
@@ -1288,7 +945,13 @@ async function getProductDailySeries(days) {
 
   const products = Object.values(byProduct)
     .map((p) => {
-      const full = dateKeys.map((date) => ({ date, value: p.qtyByDate[date] || 0 }));
+      const saleKeys = Object.keys(p.qtyByDate).filter((date) => p.qtyByDate[date] > 0);
+      if (saleKeys.length === 0) return { productName: p.productName, category: p.category, series: [] };
+      const firstSaleKey = saleKeys.reduce((a, b) => (a < b ? a : b));
+      const full = [];
+      for (let date = firstSaleKey; date <= endKey; date = addDaysToKey(date, 1)) {
+        full.push({ date, value: p.qtyByDate[date] || 0 });
+      }
       const firstSaleIndex = full.findIndex((pt) => pt.value > 0);
       return {
         productName: p.productName,
@@ -1304,104 +967,13 @@ async function getProductDailySeries(days) {
 // Per-product sufficiency (hindi lang shop-wide).
 function isProductEligible(series, horizonKey) {
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  const levelWindow = FORECAST_MODEL.levelWindowDays[horizonKey];
+  const recentWindow = PRODUCT_RECENT_UNITS_WINDOW_DAYS[horizonKey];
 
   if (series.length < rules.minDaysSinceFirstSale) return false;
   if (series.filter((p) => p.value > 0).length < rules.minActiveDays) return false;
 
-  const recentUnits = sumOf(series.slice(-levelWindow).map((p) => p.value));
+  const recentUnits = sumOf(series.slice(-recentWindow).map((p) => p.value));
   return recentUnits >= rules.minUnitsRecent;
-}
-
-// Forecast ng isang produkto para sa isang comparison horizon, optionally
-// using the longer model and taking only its first comparison-horizon days.
-function forecastOneProduct(series, horizonKey, futureDates, modelHorizonKey = horizonKey) {
-  const horizon = TIMEFRAME_DAYS[horizonKey];
-
-  const { values } = runForecastModel(series, futureDates, {
-    ...getModelOptions(modelHorizonKey),
-    // FIX: total units ng susunod na 7/30 araw ang kailangan dito, kinukumpara
-    // sa aktwal na total ng huling 7/30 araw. Magkaiba ang bilang ng bawat
-    // weekday sa dalawang window (lalo na sa 30 araw), kaya kapag may weekday
-    // shape, nagkakaroon ng ±3-5% na "pagbabago" kahit walang totoong galaw
-    // (at nagbabago pa ito depende sa araw ng linggo kung kailan tumakbo ang
-    // cron). Kaya walang weekday shape sa product total. Ang Sales Forecast
-    // (na may daily chart) ay gumagamit pa rin ng weekday shape.
-    useSeasonality: false,
-  });
-
-  const forecast = Math.round(sumOf(values.slice(0, horizon)));
-  const recentQty = sumOf(series.slice(-horizon).map((p) => p.value));
-  const diff = forecast - recentQty;
-  const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
-
-  return { forecast, recentQty, diff, pct };
-}
-
-function isMeaningfulChange(result, horizonKey) {
-  const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  return result.pct !== null
-    && Math.abs(result.diff) >= rules.minAbsChange
-    && Math.abs(result.pct) >= rules.minPctChange;
-}
-
-// Backtest para sa product lists: gaano kalapit ang forecast na total
-// units sa totoong nangyari, at TAMA BA ANG DIREKSYON ng mga produktong
-// nilagay sa growth/risk (directionHitPct).
-function backtestProductHorizon(products, horizonKey, useThirtyDayForecast = false) {
-  const horizon = TIMEFRAME_DAYS[horizonKey];
-  const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  const { maxOrigins, originStepDays } = FORECAST_MODEL.backtest;
-
-  let totalActual = 0;
-  let totalError = 0;
-  let totalBaselineError = 0;
-  let samples = 0;
-  let flagged = 0;
-  let directionHits = 0;
-
-  for (let j = 0; j < maxOrigins[horizonKey]; j++) {
-    for (const product of products) {
-      const originEnd = product.series.length - horizon - originStepDays * j;
-      if (originEnd < rules.minDaysSinceFirstSale) continue;
-
-      const train = product.series.slice(0, originEnd);
-      const test = product.series.slice(originEnd, originEnd + horizon);
-      if (test.length < horizon || !isProductEligible(train, horizonKey)) continue;
-
-      const modelHorizonKey = useThirtyDayForecast && isProductEligible(train, "30d")
-        ? "30d"
-        : horizonKey;
-      const futureDates = Array.from(
-        { length: TIMEFRAME_DAYS[modelHorizonKey] },
-        (_, i) => addDaysToKey(test[0].date, i)
-      );
-      const result = forecastOneProduct(train, horizonKey, futureDates, modelHorizonKey);
-      const actual = sumOf(test.map((p) => p.value));
-
-      totalActual += actual;
-      totalError += Math.abs(result.forecast - actual);
-      totalBaselineError += Math.abs(result.recentQty - actual); // baseline: "uulitin lang ang nakaraang linggo/buwan"
-      samples += 1;
-
-      if (isMeaningfulChange(result, horizonKey)) {
-        flagged += 1;
-        const actualDiff = actual - result.recentQty;
-        if (actualDiff !== 0 && Math.sign(actualDiff) === Math.sign(result.diff)) directionHits += 1;
-      }
-    }
-  }
-
-  if (!samples || totalActual <= 0) return null;
-
-  return {
-    wapePct: round1((totalError / totalActual) * 100),
-    baselineWapePct: round1((totalBaselineError / totalActual) * 100),
-    beatsBaseline: totalError <= totalBaselineError,
-    directionHitPct: flagged ? round1((directionHits / flagged) * 100) : null,
-    flaggedChecks: flagged,
-    sampleCount: samples,
-  };
 }
 
 function productInsufficientPart(timeframe, message) {
@@ -1412,42 +984,53 @@ function emptyProductPayload(timeframe) {
   return { label: PF_TIMEFRAME_LABELS[timeframe] || PF_TIMEFRAME_LABELS["30d"], growth: [], risk: [] };
 }
 
-function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDayForecast = false) {
-  const horizon = TIMEFRAME_DAYS[horizonKey];
-  const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  const modelHorizonKey = horizonKey === "7d" && useThirtyDayForecast ? "30d" : horizonKey;
-  const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
-  const modelHistoryDays = REQUIRED_HISTORY_DAYS[modelHorizonKey];
+const FORECAST_AI_SYSTEM_PROMPT = `You are the forecasting analyst of a bake shop. The application only checks that the data
+is sufficient. YOU analyze the data and compute the forecast yourself. Use only the data
+provided. Do not invent products or dates. Respond with JSON only, matching the exact schema.`;
+const FORECAST_AI_MAX_ATTEMPTS = 3;
 
-  // Keep enough history for the 30-day model when its first seven days are
-  // also used by the 7-day comparison.
-  const scoped = products
-    .map((p) => ({ ...p, series: p.series.slice(-modelHistoryDays) }))
-    .filter((p) => p.series.length > 0);
-  const eligible = scoped.filter((p) => isProductEligible(p.series.slice(-historyDays), horizonKey));
+async function callForecastGeminiWithRetries({ serviceName, systemPrompt, userPrompt, validate }) {
+  let result = null;
+  let issues = [];
 
-  // DIAGNOSTIC LOG (walang epekto sa forecast): ipakita kung bakit pumasa/bagsak
-  // ang bawat produkto, para makita kung aling rule ang humaharang.
-  {
-    const lw = FORECAST_MODEL.levelWindowDays[horizonKey];
-    const rows = scoped
-      .map((p) => {
-        const days = p.series.length;
-        const active = p.series.filter((x) => x.value > 0).length;
-        const recent = sumOf(p.series.slice(-lw).map((x) => x.value));
-        const fails = [];
-        if (days < rules.minDaysSinceFirstSale) fails.push(`days ${days}<${rules.minDaysSinceFirstSale}`);
-        if (active < rules.minActiveDays) fails.push(`active ${active}<${rules.minActiveDays}`);
-        if (recent < rules.minUnitsRecent) fails.push(`recent ${recent}<${rules.minUnitsRecent}`);
-        return { name: p.productName, total: sumOf(p.series.map((x) => x.value)), days, active, recent, fails };
-      })
-      .sort((a, b) => b.total - a.total);
-    console.log(`[ProductForecastService][${horizonKey}] ${eligible.length}/${scoped.length} products eligible. Top 15 by units:`);
-    for (const r of rows.slice(0, 15)) {
-      console.log(`  - ${r.name}: total=${r.total}, daysSinceFirstSale=${r.days}, activeDays=${r.active}, recentUnits=${r.recent} -> ${r.fails.length ? 'FAIL (' + r.fails.join(', ') + ')' : 'OK'}`);
+  for (let attempt = 1; attempt <= FORECAST_AI_MAX_ATTEMPTS; attempt++) {
+    const retryNote = attempt > 1
+      ? `\n\nIMPORTANT — YOUR PREVIOUS ATTEMPT FAILED THESE SPECIFIC CHECKS. FIX THEM THIS TIME:\n${issues.map((issue) => `- ${issue}`).join("\n")}\n`
+      : "";
+
+    try {
+      const candidate = await callGeminiJSON({
+        systemPrompt,
+        userPrompt: userPrompt + retryNote,
+        temperature: attempt === 1 ? 0.4 : 0.2,
+      });
+      issues = validate(candidate);
+      result = candidate;
+    } catch (error) {
+      result = null;
+      issues = [`Gemini request or JSON parsing failed: ${error.message}`];
     }
+
+    if (issues.length === 0) return { result, issues: [] };
+    console.warn(`[${serviceName}] Attempt ${attempt}/${FORECAST_AI_MAX_ATTEMPTS} failed validation:`, issues);
   }
 
+  return { result, issues };
+}
+
+function getProductRecentUnits(product, horizonKey) {
+  const horizon = TIMEFRAME_DAYS[horizonKey];
+  return sumOf(product.series.slice(-horizon).map((point) => point.value));
+}
+
+function getEligibleProducts(products, horizonKey) {
+  return products.filter((product) => isProductEligible(product.series, horizonKey));
+}
+
+function buildProductHorizonPayload(products, aiProducts, horizonKey) {
+  const horizon = TIMEFRAME_DAYS[horizonKey];
+  const rules = PRODUCT_FORECAST_RULES[horizonKey];
+  const eligible = getEligibleProducts(products, horizonKey);
   if (eligible.length === 0) {
     return productInsufficientPart(
       horizonKey,
@@ -1455,46 +1038,37 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     );
   }
 
-  const results = eligible.map((p) => {
-    const useThirtyDayModel = horizonKey === "7d"
-      && useThirtyDayForecast
-      && isProductEligible(p.series, "30d");
-    const modelHorizonKey = useThirtyDayModel ? "30d" : horizonKey;
-    const modelSeries = useThirtyDayModel ? p.series : p.series.slice(-historyDays);
-    const futureDates = buildFutureDateKeys(todayKey, TIMEFRAME_DAYS[modelHorizonKey]);
-
-    return {
-      name: p.productName,
-      ...forecastOneProduct(modelSeries, horizonKey, futureDates, modelHorizonKey),
-    };
+  const aiProductsByName = new Map(aiProducts.map((item) => [item.name, item]));
+  const results = eligible.map((product) => {
+    const aiProduct = aiProductsByName.get(product.productName);
+    const forecast = Math.round(aiProduct.forecast);
+    const recentQty = getProductRecentUnits(product, horizonKey);
+    const diff = forecast - recentQty;
+    const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
+    return { name: product.productName, forecast, recentQty, diff, pct, classification: aiProduct.classification };
   });
 
   const toListItem = (r) => ({ name: r.name, pct: r.pct, diff: r.diff, forecast: r.forecast, recentQty: r.recentQty });
-
   const growth = results
-    .filter((r) => r.diff > 0 && isMeaningfulChange(r, horizonKey))
+    .filter((r) => r.classification === "growth")
     .sort((a, b) => b.diff - a.diff)
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
-
-  // At risk = forecast na BUMABABA (pct <= riskPctCeiling, negatibo). Hindi
-  // na kasama ang flat o tumataas na produkto, kaya hindi na lumilitaw ang
-  // iisang produkto sa growth at risk nang sabay.
   const risk = results
-    .filter((r) => r.pct !== null && r.diff <= -rules.minAbsChange && r.pct <= rules.riskPctCeiling)
+    .filter((r) => r.classification === "risk")
     .sort((a, b) => a.pct - b.pct)
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
 
-  const recentUnitsAll = sumOf(results.map((r) => r.recentQty));
-  const forecastUnitsAll = sumOf(results.map((r) => r.forecast));
+  const recentUnitsAll = sumOf(results.map((result) => result.recentQty));
+  const forecastUnitsAll = sumOf(results.map((result) => result.forecast));
   const totals = {
     recentUnits: recentUnitsAll,
     forecastUnits: forecastUnitsAll,
     pct: recentUnitsAll > 0 ? Math.round(((forecastUnitsAll - recentUnitsAll) / recentUnitsAll) * 100) : null,
   };
   console.log(`[ProductForecastService][${horizonKey}] TOTAL units (eligible products): last ${horizon}d actual=${totals.recentUnits} -> next ${horizon}d forecast=${totals.forecastUnits} (${totals.pct}%)`);
-  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length} (diff>0 & meaningful: >=${rules.minAbsChange} units & >=${rules.minPctChange}%), risk=${risk.length} (pct<=${rules.riskPctCeiling}%)`);
+  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length}, risk=${risk.length}`);
 
   return {
     label: PF_TIMEFRAME_LABELS[horizonKey],
@@ -1503,27 +1077,110 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     insufficientData: false,
     generatedAt: new Date().toISOString(),
     eligibleProducts: eligible.length,
-    skippedProducts: scoped.length - eligible.length,
+    skippedProducts: products.length - eligible.length,
     totals,
-    accuracy: backtestProductHorizon(scoped, horizonKey, useThirtyDayForecast),
+    accuracy: null,
     method: {
-      type: "recent run-rate + damped trend, like-for-like totals (computed in code, no AI)",
-      historyDays: modelHistoryDays,
-      levelWindowDays: FORECAST_MODEL.levelWindowDays[modelHorizonKey],
-      trendWindowDays: FORECAST_MODEL.trendWindowDays[modelHorizonKey],
-      trendDamping: FORECAST_MODEL.trendDamping,
-      rules,
-      comparison: `forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
-      ...(horizonKey === "7d" && useThirtyDayForecast
-        ? { sevenDayForecastSource: "first 7 days of the 30-day model when the product is eligible; otherwise the 7-day model" }
-        : {}),
+      type: "AI-generated (Gemini)",
+      historyDays: eligible.reduce((days, product) => Math.max(days, product.series.length), 0),
     },
   };
 }
 
-// Cron/refresh entry point — wala nang Gemini call dito. Pareho pa rin ang
-// gating (7d / 30d sufficiency) at ang cache key/shape na binabasa ng
-// frontend at ng Recommendations.
+function validateProductForecastResponse(response, eligibleByHorizon) {
+  const issues = [];
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    return ["Response must be a JSON object."];
+  }
+
+  for (const horizonKey of ["7d", "30d"]) {
+    const field = horizonKey === "7d" ? "sevenDay" : "thirtyDay";
+    const expectedProducts = eligibleByHorizon[horizonKey];
+    const forecasts = response[field];
+    if (!Array.isArray(forecasts)) {
+      issues.push(`${field} must be an array.`);
+      continue;
+    }
+
+    const expectedNames = new Set(expectedProducts.map((product) => product.productName));
+    const seenNames = new Set();
+    for (const item of forecasts) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        issues.push(`${field} contains an invalid product entry.`);
+        continue;
+      }
+      if (typeof item.name !== "string" || !expectedNames.has(item.name)) {
+        issues.push(`${field} contains a product name that was not eligible in the input.`);
+        continue;
+      }
+      if (seenNames.has(item.name)) {
+        issues.push(`${field} contains duplicate product "${item.name}".`);
+        continue;
+      }
+      seenNames.add(item.name);
+      if (typeof item.forecast !== "number" || !Number.isFinite(item.forecast) || item.forecast < 0 || !Number.isInteger(item.forecast)) {
+        issues.push(`${field} forecast for "${item.name}" must be a non-negative whole number.`);
+        continue;
+      }
+      if (!["growth", "risk", "stable"].includes(item.classification)) {
+        issues.push(`${field} classification for "${item.name}" must be growth, risk, or stable.`);
+        continue;
+      }
+
+      const product = expectedProducts.find((candidate) => candidate.productName === item.name);
+      const recentQty = getProductRecentUnits(product, horizonKey);
+      const diff = item.forecast - recentQty;
+      const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
+      const rules = PRODUCT_FORECAST_RULES[horizonKey];
+      const meaningfulGrowth = diff >= rules.minAbsChange && pct !== null && pct >= rules.minPctChange;
+      const meaningfulRisk = diff <= -rules.minAbsChange && pct !== null && pct <= rules.riskPctCeiling;
+
+      if (item.classification === "growth" && !meaningfulGrowth) {
+        issues.push(`${field} classifies "${item.name}" as growth without a meaningful increase.`);
+      } else if (item.classification === "risk" && !meaningfulRisk) {
+        issues.push(`${field} classifies "${item.name}" as risk without a meaningful decrease.`);
+      } else if (item.classification === "stable" && (meaningfulGrowth || meaningfulRisk)) {
+        issues.push(`${field} classifies "${item.name}" as stable despite a meaningful change.`);
+      }
+    }
+
+    for (const name of expectedNames) {
+      if (!seenNames.has(name)) issues.push(`${field} is missing the eligible product "${name}".`);
+    }
+  }
+
+  return issues;
+}
+
+function buildProductForecastPrompt(todayKey, eligibleByHorizon) {
+  const productsForHorizon = (horizonKey) => eligibleByHorizon[horizonKey].map((product) => ({
+    name: product.productName,
+    dailyUnits: product.series.map(({ date, value }) => ({ date, units: value })),
+    recentUnits: getProductRecentUnits(product, horizonKey),
+  }));
+  const input = {
+    today: todayKey,
+    horizons: {
+      sevenDay: { days: TIMEFRAME_DAYS["7d"], eligibleProducts: productsForHorizon("7d") },
+      thirtyDay: { days: TIMEFRAME_DAYS["30d"], eligibleProducts: productsForHorizon("30d") },
+    },
+  };
+  const userPrompt = `Analyze the full daily units series for every supplied product. For each available horizon, return a forecast for every product marked eligible for that horizon, compared with its supplied recent actual units. You decide whether each product has a meaningful increase (growth), meaningful decrease (risk), or no meaningful change (stable). A product must appear exactly once per horizon and must never be both growth and risk.
+
+Today in Manila: ${todayKey}
+Horizons: 7 days and 30 days, starting today.
+Each horizon's input contains only products that pass that horizon's eligibility rules. For a horizon with no eligible products, return an empty array.
+
+Return exactly this JSON shape:
+{"sevenDay":[{"name":"existing product name","forecast":0,"classification":"growth|risk|stable"}],"thirtyDay":[{"name":"existing product name","forecast":0,"classification":"growth|risk|stable"}]}
+Forecasts must be non-negative whole units. Do not omit eligible products.
+
+Input data: ${JSON.stringify(input)}`;
+
+  return { systemPrompt: FORECAST_AI_SYSTEM_PROMPT, userPrompt };
+}
+
+// Cron/refresh entry point. One Gemini call analyzes both eligible horizons.
 async function refreshProductForecast() {
   const sevenCheck = await checkForecastDataSufficiency("7d");
   const thirtyCheck = await checkForecastDataSufficiency("30d");
@@ -1538,37 +1195,76 @@ async function refreshProductForecast() {
   }
 
   const includeThirty = thirtyCheck.sufficient;
-  const fetchDays = includeThirty ? REQUIRED_HISTORY_DAYS["30d"] : REQUIRED_HISTORY_DAYS["7d"];
-
-  let payload;
   try {
-    const { products, todayKey } = await getProductDailySeries(fetchDays);
+    const { products, todayKey } = await getProductDailySeries();
+    const eligibleByHorizon = {
+      "7d": getEligibleProducts(products, "7d"),
+      "30d": includeThirty ? getEligibleProducts(products, "30d") : [],
+    };
 
-    if (products.length === 0) {
-      const noActivityMessage = "No product sales activity found in the historical window.";
-      payload = {
-        sevenDay: productInsufficientPart("7d", noActivityMessage),
-        thirtyDay: productInsufficientPart("30d", includeThirty ? noActivityMessage : thirtyCheck.message),
+    if (eligibleByHorizon["7d"].length === 0 && eligibleByHorizon["30d"].length === 0) {
+      const noEligibleProducts = (horizonKey) => {
+        const rules = PRODUCT_FORECAST_RULES[horizonKey];
+        const horizon = TIMEFRAME_DAYS[horizonKey];
+        return productInsufficientPart(
+          horizonKey,
+          `No product has enough sales history yet for a ${horizon}-day trend (needs ${rules.minDaysSinceFirstSale}+ days since first sale, ${rules.minActiveDays}+ days with sales, and ${rules.minUnitsRecent}+ units recently).`
+        );
       };
-    } else {
-      payload = {
-        sevenDay: buildProductHorizonPayload(products, "7d", todayKey, includeThirty),
+      const payload = {
+        sevenDay: noEligibleProducts("7d"),
+        thirtyDay: includeThirty ? noEligibleProducts("30d") : productInsufficientPart("30d", thirtyCheck.message),
+      };
+      await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
+      return payload;
+    }
+
+    const { systemPrompt, userPrompt } = buildProductForecastPrompt(todayKey, eligibleByHorizon);
+    const { result, issues } = await callForecastGeminiWithRetries({
+      serviceName: "ProductForecastService",
+      systemPrompt,
+      userPrompt,
+      validate: (candidate) => validateProductForecastResponse(candidate, eligibleByHorizon),
+    });
+
+    if (issues.length > 0) {
+      console.error("[ProductForecastService] All Gemini attempts failed validation — keeping previous cached forecast:", issues);
+      const existing = await AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY);
+      if (existing?.payload) return existing.payload;
+
+      const failedPart = (horizonKey) => productInsufficientPart(horizonKey, "Forecast generation failed validation. Will retry on next cron run.");
+      return {
+        sevenDay: eligibleByHorizon["7d"].length
+          ? failedPart("7d")
+          : productInsufficientPart("7d", "No eligible products are available for this forecast."),
         thirtyDay: includeThirty
-          ? buildProductHorizonPayload(products, "30d", todayKey)
+          ? (eligibleByHorizon["30d"].length ? failedPart("30d") : productInsufficientPart("30d", "No eligible products are available for this forecast."))
           : productInsufficientPart("30d", thirtyCheck.message),
       };
     }
+
+    const payload = {
+      sevenDay: eligibleByHorizon["7d"].length
+        ? buildProductHorizonPayload(products, result.sevenDay, "7d")
+        : productInsufficientPart("7d", "No product has enough sales history yet for a 7-day trend."),
+      thirtyDay: includeThirty
+        ? (eligibleByHorizon["30d"].length
+          ? buildProductHorizonPayload(products, result.thirtyDay, "30d")
+          : productInsufficientPart("30d", "No product has enough sales history yet for a 30-day trend."))
+        : productInsufficientPart("30d", thirtyCheck.message),
+    };
+    await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
+    return payload;
   } catch (err) {
-    console.error("[ProductForecastService] Forecast computation failed:", err.message);
+    console.error("[ProductForecastService] Forecast refresh failed:", err.message);
+    const existing = await AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY);
+    if (existing?.payload) return existing.payload;
     const failMessage = "Forecast generation failed. Will retry on next cron run.";
-    payload = {
+    return {
       sevenDay: productInsufficientPart("7d", failMessage),
       thirtyDay: productInsufficientPart("30d", includeThirty ? failMessage : thirtyCheck.message),
     };
   }
-
-  await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
-  return payload;
 }
 
 // Read-only lookup used by the frontend routes.
@@ -1609,17 +1305,10 @@ const ProductForecastService = {
 };
 
 // ==========================================
-// 3. SALES FORECAST SERVICE (CODE-COMPUTED, SAME ENGINE AS PRODUCT)
+// 3. SALES FORECAST SERVICE (GEMINI-ANALYZED)
 // ==========================================
-// Dating "TRUE ARIMA" ang label pero Gemini ang nagku-kuwenta ng numero.
-// Ngayon, ang forecast ay kinukuwenta ng runForecastModel() (tingnan ang
-// SHARED ENGINE) at may kasamang:
-//   - accuracy  : backtest laban sa aktwal na nangyari + simpleng baseline
-//   - lower/upper: range mula sa aktwal na error ng backtest
-//   - method    : mga parametro/numero na ginamit (level, trend, weekday index)
-// Ang 7d at 30d ay parehong native na kinukuwenta gamit ang sarili nilang
-// history/level/trend windows (kapareho ng Product Forecast), kaya maaaring
-// bahagyang magkaiba ang magkakapatong na petsa nila — sinadya 'yon.
+// The system supplies full daily sales history and actual recent totals.
+// Gemini generates both horizon forecasts; code only validates and shapes them.
 const SF_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function buildSalesCacheKey(timeframe) {
@@ -1629,8 +1318,17 @@ function buildSalesCacheKey(timeframe) {
 // amount_paid (aktwal na natanggap na bayad) — parehong basehan ng KPI at
 // Performance Summary. Manila dates, kumpletong araw lang (hanggang kahapon),
 // at nagsisimula sa unang araw na may benta ang shop.
-async function getSalesDailySeries(days) {
-  const { dateKeys, startISO, endISO, todayKey } = getManilaHistoryWindow(days);
+//
+// DYNAMIC: walang fixed na bilang ng araw. Kinukuha ang LAHAT ng orders
+// hanggang kahapon, hinahanap ang aktwal na unang araw na may benta, at
+// doon nagsisimula ang series. Ang REQUIRED_HISTORY_DAYS ay gate na lang
+// (assurance na sapat ang history) — hindi na ito ang naglilimita sa
+// binabasa ng forecast.
+async function getSalesDailySeries() {
+  const todayKey = toManilaDateKey(new Date());
+  const endKey = addDaysToKey(todayKey, -1);
+  const startISO = new Date(0).toISOString();
+  const endISO = new Date(`${endKey}T23:59:59.999+08:00`).toISOString();
 
   const orders = await fetchRangeUncapped(
     (from, to) => OrdersModel.getByDateRange(from, to, {
@@ -1653,9 +1351,18 @@ async function getSalesDailySeries(days) {
     totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.amount_paid || 0);
   }
 
-  const full = dateKeys.map((date) => ({ date, value: totalsByDate[date] || 0 }));
-  const firstSaleIndex = full.findIndex((p) => p.value > 0);
-  return { series: firstSaleIndex === -1 ? [] : full.slice(firstSaleIndex), todayKey };
+  // Unang araw na may benta (YYYY-MM-DD kaya tama ang string comparison).
+  const saleKeys = Object.keys(totalsByDate).filter((k) => totalsByDate[k] > 0 && k <= endKey);
+  if (saleKeys.length === 0) return { series: [], todayKey };
+  const firstKey = saleKeys.reduce((a, b) => (a < b ? a : b));
+
+  // Buuin ang tuloy-tuloy na araw mula sa unang benta hanggang kahapon.
+  // Ang mga araw na walang order pagkatapos ng unang benta ay tunay na 0.
+  const series = [];
+  for (let key = firstKey; key <= endKey; key = addDaysToKey(key, 1)) {
+    series.push({ date: key, value: totalsByDate[key] || 0 });
+  }
+  return { series, todayKey };
 }
 
 function insufficientSalesPayload(message) {
@@ -1666,42 +1373,21 @@ function insufficientSalesPayload(message) {
   };
 }
 
-function buildSalesHorizonPayload(series, horizonKey, todayKey) {
+function buildSalesHorizonPayload(forecasts, series, horizonKey) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
-  const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
-  const history = series.slice(-historyDays);
-
-  const activeDays = history.filter((p) => p.value > 0).length;
-  const requiredActive = SALES_MIN_ACTIVE_DAYS[horizonKey];
-  if (activeDays < requiredActive) {
-    return insufficientSalesPayload(
-      `Not enough sales activity yet — only ${activeDays} day(s) with sales in the last ${historyDays} days (a ${horizon}-day forecast needs at least ${requiredActive}).`
-    );
-  }
-
-  const opts = getModelOptions(horizonKey);
-  const futureDates = buildFutureDateKeys(todayKey, horizon);
-  const { values, meta } = runForecastModel(history, futureDates, opts);
-
-  const { pairs, origins } = backtestSeriesModel(history, horizonKey, opts);
-  const accuracy = summarizeBacktestPairs(pairs, origins);
-  const band = computeResidualBand(pairs);
-
-  const chartData = futureDates.map((date, i) => {
-    const forecastSales = Math.round(values[i]);
+  const chartData = forecasts.map((item, i) => {
+    const forecastSales = Math.round(item.forecastSales);
     return {
-      date,
-      label: formatForecastLabel(date),
+      date: item.date,
+      label: formatForecastLabel(item.date),
       isToday: i === 0,
       forecastSales,
-      lower: band ? Math.max(0, Math.round(forecastSales + band.low)) : null,
-      upper: band ? Math.round(forecastSales + band.high) : null,
+      lower: Math.max(0, Math.round(item.lower)),
+      upper: Math.round(item.upper),
     };
   });
 
-  // Para madaling i-reconcile sa totoong data (at sa Product Forecast): actual na
-  // benta ng huling N araw vs forecast ng susunod na N araw.
-  const recentTotal = sumOf(history.slice(-horizon).map((p) => p.value));
+  const recentTotal = sumOf(series.slice(-horizon).map((point) => point.value));
   const forecastTotal = sumOf(chartData.map((d) => d.forecastSales));
   const totals = {
     recentTotal,
@@ -1715,9 +1401,84 @@ function buildSalesHorizonPayload(series, horizonKey, todayKey) {
     insufficientData: false,
     generatedAt: new Date().toISOString(),
     totals,
-    accuracy,
-    method: describeForecastMethod(horizonKey, history.length, meta),
+    accuracy: null,
+    method: { type: "AI-generated (Gemini)", historyDays: series.length },
   };
+}
+
+function validateSalesForecastResponse(response, todayKey, availableHorizons) {
+  const issues = [];
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    return ["Response must be a JSON object."];
+  }
+
+  for (const horizonKey of ["7d", "30d"]) {
+    const field = horizonKey === "7d" ? "sevenDay" : "thirtyDay";
+    const horizon = TIMEFRAME_DAYS[horizonKey];
+    const forecasts = response[field];
+    if (!Array.isArray(forecasts)) {
+      issues.push(`${field} must be an array.`);
+      continue;
+    }
+
+    if (!availableHorizons[horizonKey]) {
+      if (forecasts.length !== 0) issues.push(`${field} must be empty because this horizon did not pass its data gate.`);
+      continue;
+    }
+
+    const expectedDates = buildFutureDateKeys(todayKey, horizon);
+    if (forecasts.length !== horizon) {
+      issues.push(`${field} must contain exactly ${horizon} dates.`);
+    }
+    forecasts.forEach((item, index) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        issues.push(`${field} contains an invalid forecast entry at index ${index}.`);
+        return;
+      }
+      if (item.date !== expectedDates[index]) {
+        issues.push(`${field} date at index ${index} must be ${expectedDates[index] || "omitted"}.`);
+      }
+      for (const key of ["forecastSales", "lower", "upper"]) {
+        if (typeof item[key] !== "number" || !Number.isFinite(item[key]) || item[key] < 0) {
+          issues.push(`${field} ${key} at index ${index} must be a non-negative finite number.`);
+        }
+      }
+      if (
+        typeof item.forecastSales === "number"
+        && Number.isFinite(item.forecastSales)
+        && typeof item.lower === "number"
+        && Number.isFinite(item.lower)
+        && typeof item.upper === "number"
+        && Number.isFinite(item.upper)
+        && (item.lower > item.forecastSales || item.forecastSales > item.upper)
+      ) {
+        issues.push(`${field} bounds at index ${index} must satisfy lower <= forecastSales <= upper.`);
+      }
+    });
+  }
+
+  return issues;
+}
+
+function buildSalesForecastPrompt(series, todayKey, availableHorizons) {
+  const horizonFacts = ["7d", "30d"].map((horizonKey) => ({
+    key: horizonKey,
+    days: TIMEFRAME_DAYS[horizonKey],
+    available: availableHorizons[horizonKey],
+    recentActualTotal: sumOf(series.slice(-TIMEFRAME_DAYS[horizonKey]).map((point) => point.value)),
+  }));
+  const userPrompt = `Analyze the full daily sales series for its level, trend, weekday pattern, outliers, and growth or decline. Forecast daily sales for every available horizon. Each horizon starts today in Manila. Use the actual recent totals below as facts; do not change them.
+
+Today in Manila: ${todayKey}
+Horizons and recent actual totals: ${JSON.stringify(horizonFacts)}
+For a horizon marked unavailable, return an empty array.
+
+Return exactly this JSON shape:
+{"sevenDay":[{"date":"YYYY-MM-DD","forecastSales":0,"lower":0,"upper":0}],"thirtyDay":[{"date":"YYYY-MM-DD","forecastSales":0,"lower":0,"upper":0}]}
+Each available horizon must contain exactly its specified number of consecutive dates, starting today. Values and bounds must be non-negative numbers, with lower <= forecastSales <= upper.
+
+Raw daily sales series: ${JSON.stringify(series)}`;
+  return { systemPrompt: FORECAST_AI_SYSTEM_PROMPT, userPrompt };
 }
 
 // Cron/refresh entry point. Tawagin ONCE bawat cron run.
@@ -1735,29 +1496,68 @@ async function refreshSalesForecast() {
   }
 
   const includeThirty = thirtyCheck.sufficient;
-  const fetchDays = includeThirty ? REQUIRED_HISTORY_DAYS["30d"] : REQUIRED_HISTORY_DAYS["7d"];
-
-  let sevenPayload;
-  let thirtyPayload;
   try {
-    const { series, todayKey } = await getSalesDailySeries(fetchDays);
-    sevenPayload = buildSalesHorizonPayload(series, "7d", todayKey);
-    thirtyPayload = includeThirty
-      ? buildSalesHorizonPayload(series, "30d", todayKey)
-      : insufficientSalesPayload(thirtyCheck.message);
+    const { series, todayKey } = await getSalesDailySeries();
+    const activeDays = series.filter((point) => point.value > 0).length;
+    const availableHorizons = {
+      "7d": activeDays >= SALES_MIN_ACTIVE_DAYS["7d"],
+      "30d": includeThirty && activeDays >= SALES_MIN_ACTIVE_DAYS["30d"],
+    };
+
+    if (!availableHorizons["7d"]) {
+      const activeMessage = `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a 7-day forecast needs at least ${SALES_MIN_ACTIVE_DAYS["7d"]}).`;
+      const payload = {
+        sevenDay: insufficientSalesPayload(activeMessage),
+        thirtyDay: insufficientSalesPayload(includeThirty
+          ? `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a 30-day forecast needs at least ${SALES_MIN_ACTIVE_DAYS["30d"]}).`
+          : thirtyCheck.message),
+      };
+      await Promise.all([
+        AiCacheModel.upsert(buildSalesCacheKey("7d"), payload.sevenDay, SF_CACHE_TTL_MS),
+        AiCacheModel.upsert(buildSalesCacheKey("30d"), payload.thirtyDay, SF_CACHE_TTL_MS),
+      ]);
+      return includeThirty ? payload.thirtyDay : payload.sevenDay;
+    }
+
+    const { systemPrompt, userPrompt } = buildSalesForecastPrompt(series, todayKey, availableHorizons);
+    const { result, issues } = await callForecastGeminiWithRetries({
+      serviceName: "SalesForecastService",
+      systemPrompt,
+      userPrompt,
+      validate: (candidate) => validateSalesForecastResponse(candidate, todayKey, availableHorizons),
+    });
+
+    if (issues.length > 0) {
+      console.error("[SalesForecastService] All Gemini attempts failed validation — keeping previous cached forecasts:", issues);
+      const [existingSeven, existingThirty] = await Promise.all([
+        AiCacheModel.getByKey(buildSalesCacheKey("7d")),
+        AiCacheModel.getByKey(buildSalesCacheKey("30d")),
+      ]);
+      const fallback = includeThirty ? existingThirty?.payload : existingSeven?.payload;
+      return fallback || insufficientSalesPayload("Forecast generation failed validation. Will retry on next cron run.");
+    }
+
+    const sevenPayload = buildSalesHorizonPayload(result.sevenDay, series, "7d");
+    const thirtyPayload = availableHorizons["30d"]
+      ? buildSalesHorizonPayload(result.thirtyDay, series, "30d")
+      : insufficientSalesPayload(includeThirty
+        ? `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a 30-day forecast needs at least ${SALES_MIN_ACTIVE_DAYS["30d"]}).`
+        : thirtyCheck.message);
+
+    await Promise.all([
+      AiCacheModel.upsert(buildSalesCacheKey("7d"), sevenPayload, SF_CACHE_TTL_MS),
+      AiCacheModel.upsert(buildSalesCacheKey("30d"), thirtyPayload, SF_CACHE_TTL_MS),
+    ]);
+    return includeThirty ? thirtyPayload : sevenPayload;
   } catch (err) {
-    console.error("[SalesForecastService] Forecast computation failed:", err.message);
-    const failed = insufficientSalesPayload("Forecast generation failed. Will retry on next cron run.");
-    sevenPayload = failed;
-    thirtyPayload = includeThirty ? failed : insufficientSalesPayload(thirtyCheck.message);
+    console.error("[SalesForecastService] Forecast refresh failed:", err.message);
+    const [existingSeven, existingThirty] = await Promise.all([
+      AiCacheModel.getByKey(buildSalesCacheKey("7d")),
+      AiCacheModel.getByKey(buildSalesCacheKey("30d")),
+    ]);
+    const fallback = includeThirty ? existingThirty?.payload : existingSeven?.payload;
+    return fallback || insufficientSalesPayload("Forecast generation failed. Will retry on next cron run.");
   }
-
-  await Promise.all([
-    AiCacheModel.upsert(buildSalesCacheKey("7d"), sevenPayload, SF_CACHE_TTL_MS),
-    AiCacheModel.upsert(buildSalesCacheKey("30d"), thirtyPayload, SF_CACHE_TTL_MS),
-  ]);
-
-  return includeThirty ? thirtyPayload : sevenPayload;
 }
 
 // Read-only lookup used by the frontend routes. Never recomputes.
@@ -1770,6 +1570,7 @@ async function getSalesForecastRead(timeframe) {
     return {
       chartData: payload.chartData,
       insufficientData: false,
+      totals: payload.totals ?? null,
       accuracy: payload.accuracy ?? null,
       method: payload.method ?? null,
       generatedAt: payload.generatedAt ?? null,

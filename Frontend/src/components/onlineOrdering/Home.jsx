@@ -255,7 +255,7 @@ function BundleTicketCard({ bundle, navigate, idx = 0, innerRef, focusStyle, onF
       className="snap-center shrink-0 w-[220px] sm:w-[280px] [contain:layout] transition-[filter,opacity,transform] duration-300 ease-out"
     >
       <div
-        onClick={() => !isDummy && navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle' } })}
+        onClick={() => !isDummy && navigate('/onlineOrdering/menu', { state: { category: 'Promo Bundle', focusBundleId: bundle.id } })}
         className={`bg-white rounded-2xl flex flex-col group relative border border-[#F0E9E4] shadow-[0_6px_16px_rgba(59,31,10,0.08)] transition-all duration-300 ease-out hover:-translate-y-2 hover:shadow-xl
           ${isDummy ? 'cursor-default opacity-90' : 'cursor-pointer'}
         `}

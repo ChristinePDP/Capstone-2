@@ -1443,9 +1443,46 @@ export default function Menu({ cart, setCart }) {
   const [rawBundles, setRawBundles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [focusedProductId, setFocusedProductId] = useState(null);
   const [toast, setToast] = useState(null); 
   const toastTimerRef = useRef(null);
   const productListRef = useRef(null);
+
+  useEffect(() => {
+    const bundleId = location.state?.focusBundleId;
+    const productId = location.state?.focusProductId;
+    const targetId = bundleId != null ? `bundle-${bundleId}` : productId;
+    if (targetId == null) return;
+
+    setActiveTab(bundleId != null ? 'Promo Bundle' : 'All');
+    setSearchQuery('');
+    if (isLoading) return;
+
+    let frameId;
+    let timeoutId;
+    frameId = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        const container = productListRef.current;
+        const target = Array.from(container?.querySelectorAll('[data-menu-product-id]') || [])
+          .find((element) => element.dataset.menuProductId === String(targetId));
+        if (!container || !target) return;
+
+        const containerRect = container.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        container.scrollTo({
+          top: container.scrollTop + targetRect.top - containerRect.top - 16,
+          behavior: 'smooth',
+        });
+        setFocusedProductId(String(targetId));
+        timeoutId = window.setTimeout(() => setFocusedProductId(null), 2200);
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
+  }, [location.key, location.state, isLoading, rawProducts, rawBundles]);
 
   const showToast = (message) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -1926,7 +1963,7 @@ export default function Menu({ cart, setCart }) {
               const inclusionText = p.type !== 'bundle' ? (p.inclusion || '') : '';
 
               return (
-                <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
+                <div key={p.id} data-menu-product-id={String(p.id)} className={`bg-white rounded-2xl border overflow-hidden flex flex-col group shadow-sm relative transition-all duration-500 ${focusedProductId === String(p.id) ? 'border-[#3B1F0A] ring-4 ring-[#3B1F0A]/20' : 'border-[#EAE4E0]'}`}>
                   <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
                     
                     {p.type === 'bundle' ? (
