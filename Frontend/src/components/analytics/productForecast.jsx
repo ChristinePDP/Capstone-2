@@ -2,6 +2,9 @@ import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
 
 const MAX_ITEMS_PER_LIST = 2;
 
+// Fixed na 30 days ang forecast
+const PERIOD_DAYS = 30;
+
 const PLACEHOLDER_ITEM = { name: '-', recentQty: 0, forecast: 0, diff: 0, pct: 0 };
 
 const formatSigned = (value) => `${value >= 0 ? '+' : ''}${value}`;
@@ -63,14 +66,12 @@ const ForecastSection = ({ title, icon, items, emptyText, periodDays, pctClass }
   );
 };
 
-export default function ProductForecasting({ data, view = '30d' }) {
+export default function ProductForecasting({ data }) {
   const insufficientData = data?.insufficientData || false;
   const message = data?.message || '';
 
   const growthList = (Array.isArray(data?.growth) ? data.growth : []).slice(0, MAX_ITEMS_PER_LIST);
   const riskList = (Array.isArray(data?.risk) ? data.risk : []).slice(0, MAX_ITEMS_PER_LIST);
-
-  const periodDays = view === '7d' ? 7 : 30;
 
   return (
     <div className="w-full bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col p-4 sm:p-5 h-full min-h-[350px]">
@@ -80,13 +81,13 @@ export default function ProductForecasting({ data, view = '30d' }) {
           <h3 className="text-base font-bold text-[#3d2410] leading-tight truncate">
             Product Forecast
           </h3>
-          <p className="text-xs text-[#9a8b7a]">Forecast vs last {periodDays} days</p>
+          <p className="text-xs text-[#9a8b7a]">Forecasted next 30 days</p>
         </div>
       </div>
 
       {insufficientData ? (
         <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#d97706] font-medium border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[250px] bg-[#fffbf4]">
-          {message || 'Insufficient data for this timeframe.'}
+          {message || 'Insufficient data for this forecast.'}
         </div>
       ) : (
         <div className="flex flex-col flex-1 min-h-0 gap-5">
@@ -95,7 +96,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
             icon={<TrendingUp size={14} className="text-emerald-500" />}
             items={growthList}
             emptyText="No fast moving products detected."
-            periodDays={periodDays}
+            periodDays={PERIOD_DAYS}
             pctClass="text-emerald-600"
           />
           <ForecastSection
@@ -103,7 +104,7 @@ export default function ProductForecasting({ data, view = '30d' }) {
             icon={<TrendingDown size={14} className="text-rose-500" />}
             items={riskList}
             emptyText="No at-risk products detected."
-            periodDays={periodDays}
+            periodDays={PERIOD_DAYS}
             pctClass="text-rose-600"
           />
         </div>

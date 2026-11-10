@@ -2,6 +2,10 @@ import { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { LineChart as LucideLineChart } from 'lucide-react';
 
+// Fixed na 30 days ang forecast
+const TOTAL_POINTS = 30;
+const TICK_STEP = 5;
+
 const formatCurrency = (val) => `₱${Number(val).toLocaleString('en-PH')}`;
 const formatAxis = (val) => (val >= 1000 ? `₱${(val / 1000).toFixed(0)}K` : `₱${val}`);
 
@@ -72,7 +76,6 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function SalesForecast({ 
   title = 'Sales Forecast', 
-  view = '30d', 
   data: propData,
   insufficientData = false,
   message = ''
@@ -80,13 +83,10 @@ export default function SalesForecast({
   const hasFetchedButEmpty = Array.isArray(propData) && propData.length === 0;
 
   const chartData = useMemo(() => {
-    const daysMap = { '7d': 7, '30d': 30 };
-    const totalPoints = daysMap[view] || 30;
-    
     const today = new Date();
     const rawForecasts = Array.isArray(propData) ? propData.map(d => d.forecastSales) : [];
 
-    return Array.from({ length: totalPoints }, (_, i) => {
+    return Array.from({ length: TOTAL_POINTS }, (_, i) => {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
 
@@ -98,10 +98,7 @@ export default function SalesForecast({
         isToday: i === 0 
       };
     });
-  }, [view, propData, hasFetchedButEmpty, insufficientData]);
-
-  const periodText = view === '7d' ? '7-Day' : '30-Day';
-  const tickStep = view === '7d' ? 1 : 5;
+  }, [propData]);
 
   return (
     <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full min-h-[350px]">
@@ -109,7 +106,7 @@ export default function SalesForecast({
         <LucideLineChart size={20} className="text-[#5C3317]" />
         <div>
           <h3 className="text-base font-bold text-[#3d2410]">{title}</h3>
-          <p className="text-xs text-[#9a8b7a]">{periodText} Trend Analysis</p>
+          <p className="text-xs text-[#9a8b7a]">Forecasted next 30 days</p>
         </div>
       </div>
 
@@ -138,7 +135,7 @@ export default function SalesForecast({
               <XAxis 
                 dataKey="label" 
                 interval={0}
-                tick={<CustomXAxisTick tickStep={tickStep} />} 
+                tick={<CustomXAxisTick tickStep={TICK_STEP} />} 
                 axisLine={{ stroke: '#f1ece4' }} 
                 tickLine={false} 
               />

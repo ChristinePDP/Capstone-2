@@ -3,13 +3,15 @@ import { apiClient } from '../services/apiClient';
 import PerformanceTimeframe from '../components/analytics/performanceTimeframe';
 import PerformanceKpis from '../components/analytics/performanceKpis';
 import StackedBar from '../components/analytics/stackedBar';
-import ForecastTimeframe from '../components/analytics/forecastTimeframe';
 import SalesForecast from '../components/analytics/salesForecast';
 import ProductForecasting from '../components/analytics/productForecast';
 import ActionableRecommendation from '../components/analytics/actionableRecommendation';
 import Summary from '../components/analytics/summary';
 
 const ANALYTICS_API_URL = `${import.meta.env.VITE_API_URL}/analytics`;
+
+// Fixed na ang forecasting sa susunod na 30 araw (wala nang timeframe selector)
+const FORECAST_RANGE = '30d';
 
 const safeFetch = async (url) => {
   try {
@@ -23,7 +25,6 @@ const safeFetch = async (url) => {
 
 export default function AnalyticsPage() {
   const [perfTimeframe, setPerfTimeframe] = useState('Today');
-  const [forecastTimeframe, setForecastTimeframe] = useState('30d');
   const [analyticsData, setAnalyticsData] = useState({});
   const [isPerfLoading, setIsPerfLoading] = useState(true);
   const [isForecastLoading, setIsForecastLoading] = useState(true);
@@ -108,9 +109,9 @@ export default function AnalyticsPage() {
       if (shouldForceRefresh) lastForecastForceRefresh.current = forceRefreshVersion;
       const refreshParam = shouldForceRefresh ? '?refresh=true' : '';
       const [salesRes, prodRes, actionRes] = await Promise.all([
-        safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${encodeURIComponent(forecastTimeframe)}${refreshParam}`),
-        safeFetch(`${ANALYTICS_API_URL}/product-forecast/${encodeURIComponent(forecastTimeframe)}${refreshParam}`),
-        safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${encodeURIComponent(forecastTimeframe)}${refreshParam}`)
+        safeFetch(`${ANALYTICS_API_URL}/sales-forecast/${FORECAST_RANGE}${refreshParam}`),
+        safeFetch(`${ANALYTICS_API_URL}/product-forecast/${FORECAST_RANGE}${refreshParam}`),
+        safeFetch(`${ANALYTICS_API_URL}/actionable-recommendations/${FORECAST_RANGE}${refreshParam}`)
       ]);
 
       const salesPayload = salesRes.ok ? (salesRes.data?.data || salesRes.data) : {};
@@ -128,7 +129,7 @@ export default function AnalyticsPage() {
     };
     
     fetchForecast();
-  }, [forecastTimeframe, dataRefreshVersion, forceRefreshVersion]);
+  }, [dataRefreshVersion, forceRefreshVersion]);
 
   useEffect(() => {
     const fetchSummary = async () => {
@@ -173,20 +174,18 @@ export default function AnalyticsPage() {
             <Summary data={analyticsData?.summary} isLoading={isSummaryLoading} />
           </div>
 
-          <div className="flex flex-col gap-3 bg-[#fdfbf9] p-3 sm:p-4 rounded-xl border border-[#e7ded4]">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 w-full mb-1">
-              <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Forecasting</h3>
-              <ForecastTimeframe defaultValue={forecastTimeframe} onChange={setForecastTimeframe} />
-            </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3 sm:gap-4 w-full lg:items-stretch">
-              <SalesForecast 
-                view={forecastTimeframe} 
-                data={analyticsData?.salesForecast} 
-                insufficientData={analyticsData?.salesInsufficient}
-                message={analyticsData?.salesMessage}
-              />
-              <ProductForecasting view={forecastTimeframe} data={analyticsData?.productForecast} />
+          {/* Heading nasa labas ng container, kapareho ng Decision Support Insights */}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Forecasting (Next 30 Days)</h3>
+            <div className="bg-[#fdfbf9] p-3 sm:p-4 rounded-xl border border-[#e7ded4] w-full">
+              <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-3 sm:gap-4 w-full lg:items-stretch">
+                <SalesForecast 
+                  data={analyticsData?.salesForecast} 
+                  insufficientData={analyticsData?.salesInsufficient}
+                  message={analyticsData?.salesMessage}
+                />
+                <ProductForecasting data={analyticsData?.productForecast} />
+              </div>
             </div>
           </div>
           
