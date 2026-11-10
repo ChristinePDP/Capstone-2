@@ -154,16 +154,18 @@ function winsorizeSeries(values) {
 }
 
 // ==========================================
-// SHARED: DETERMINISTIC FORECAST ENGINE (SALES + PRODUCT)
+// SHARED: STATISTICAL REFERENCE ENGINE (SALES + PRODUCT)
 // ==========================================
-// Ang Sales Forecast at Product Forecast ay gumagamit na ng IISANG paraan
-// at IISANG set ng constants (FORECAST_MODEL sa baba). Wala nang Gemini sa
-// pagkuwenta ng forecast — code na ang nagku-compute, kaya:
-//   - pareho ang resulta sa tuwing tatakbo para sa parehong data,
-//   - makikita (at masusubukan) ang bawat hakbang,
-//   - at masusukat ang accuracy sa pamamagitan ng backtest (sa baba).
+// PAALALA: si Gemini na ang nag-aanalyze at nagfo-forecast ng Sales at Product
+// Forecast (tingnan ang "SHARED: AI FORECAST GUARD" sa baba). Ang engine na
+// ito ay HINDI na ang pinagmumulan ng forecast. Ginagamit na lang ito para sa:
+//   - outlier guard (winsorizeByWeekday) ng data bago ipadala kay Gemini,
+//   - reference statistics (level / trend / weekday index) na ibinibigay kay
+//     Gemini bilang konteksto,
+//   - sanity check ng sagot ni Gemini (total laban sa baseline),
+//   - baseline accuracy (backtest) na reference lang.
 //
-// METHOD (per series — total sales ng shop, o benta ng isang produkto):
+// METHOD ng baseline (per series — total sales ng shop, o benta ng isang produkto):
 //   1. OUTLIER GUARD: i-clamp (winsorize) ang mga freak na araw, PERO
 //      ikinukumpara lang ang araw sa kapareho niyang weekday (Lunes vs
 //      Lunes), para hindi mawala ang totoong weekend/holiday peak.
@@ -470,7 +472,7 @@ function computeResidualBand(pairs) {
 // ---------- Method summary na ipinapakita/ina-save kasama ng forecast ----------
 function describeForecastMethod(horizonKey, historyDays, meta) {
   return {
-    type: "weekday-seasonal level + damped trend (computed in code, no AI)",
+    type: "Gemini AI forecast over system-filtered data; reference = weekday-seasonal level + damped trend computed in code",
     historyDays,
     levelWindowDays: FORECAST_MODEL.levelWindowDays[horizonKey],
     trendWindowDays: FORECAST_MODEL.trendWindowDays[horizonKey],
@@ -478,6 +480,126 @@ function describeForecastMethod(horizonKey, historyDays, meta) {
     ...(meta || {}),
   };
 }
+
+// ==========================================
+// SHARED: AI FORECAST GUARD (GEMINI)
+// ==========================================
+// Si Gemini na ang nag-aanalyze at nagfo-forecast ng Sales at Product
+// Forecast. Ang system ay:
+//   1. GATEKEEPER — bago tumawag: sufficiency gate, per-product eligibility,
+//      outlier cap, at bilang lang (petsa + amount/units + pangalan ng
+//      produkto) ang ipinapadala. Walang customer info, order ID, o contact.
+//   2. VALIDATOR — pagkatapos: tinitingnan ang sagot ni Gemini laban sa
+//      shape, limits, at sa statistical baseline ng system. Hindi pumasa =
+//      hindi isinusulat sa cache.
+//   3. SAFETY NET — para hindi mag-loop at hindi lumampas sa token limit:
+//      - ISANG Gemini call lang kada refresh. WALANG retry / "ulitin hanggang
+//        tama" na loop dito, kahit invalid ang output.
+//      - Kapag pumalya (error / timeout / invalid output / 429): cooldown na
+//        lumalaki (15 min -> hanggang 3 oras; 1 oras kapag rate-limit).
+//        Habang may cooldown, WALANG tawag kay Gemini.
+//      - Single-flight: kapag may tumatakbong refresh na, sasabay lang ang
+//        bagong tawag sa kasalukuyan — hindi gagawa ng pangalawang call.
+//      - Prompt token budget: kapag lampas, binabawasan ang bilang ng produkto
+//        (may hangganan), at kapag hindi pa rin kasya, hindi tatawag.
+//      - Kapag pumalya, HINDI ino-overwrite ang huling magandang cache.
+const AI_FORECAST_GUARD = {
+  maxPromptTokens: 20000, // estimate (chars / 3) — sinadyang konserbatibo
+  timeoutMs: 60 * 1000,
+  temperature: 0.2,
+  cooldownMs: { normal: 15 * 60 * 1000, rateLimited: 60 * 60 * 1000, max: 3 * 60 * 60 * 1000 },
+  minProductsInPrompt: 10,
+  shrinkFactor: 0.75,
+};
+
+// Shared sa Sales at Product (iisang Gemini key/quota) — kapag pumalya ang
+// isa, nagpapahinga rin ang isa.
+const aiForecastState = { cooldownUntil: 0, consecutiveFailures: 0 };
+const inFlightRefreshes = new Map();
+
+function singleFlight(key, fn) {
+  if (inFlightRefreshes.has(key)) return inFlightRefreshes.get(key);
+  const promise = Promise.resolve()
+    .then(fn)
+    .finally(() => inFlightRefreshes.delete(key));
+  inFlightRefreshes.set(key, promise);
+  return promise;
+}
+
+const estimateTokens = (text) => Math.ceil(String(text || "").length / 3);
+
+function isRateLimitError(err) {
+  const msg = String(err?.message || "");
+  return err?.status === 429
+    || err?.code === 429
+    || /\b429\b|quota|rate.?limit|RESOURCE_EXHAUSTED|too many requests/i.test(msg);
+}
+
+function registerAiForecastFailure(err) {
+  const { normal, rateLimited, max } = AI_FORECAST_GUARD.cooldownMs;
+  aiForecastState.consecutiveFailures += 1;
+  const base = isRateLimitError(err) ? rateLimited : normal;
+  const wait = Math.min(max, base * 2 ** (aiForecastState.consecutiveFailures - 1));
+  aiForecastState.cooldownUntil = Date.now() + wait;
+  console.error(
+    `[AIForecast] Failure #${aiForecastState.consecutiveFailures}: ${err?.message} | ` +
+    `Cooldown ${Math.round(wait / 60000)} min — walang retry hanggang matapos ito.`
+  );
+}
+
+// ISANG tawag lang. `parseResult` ay tumatakbo sa loob ng guard, kaya ang
+// invalid output ay binibilang din na failure (cooldown), hindi inuulit.
+async function callGeminiForecastOnce(label, { systemPrompt, userPrompt }, parseResult) {
+  const now = Date.now();
+  if (now < aiForecastState.cooldownUntil) {
+    const minsLeft = Math.ceil((aiForecastState.cooldownUntil - now) / 60000);
+    throw new Error(`[${label}] Gemini on cooldown (~${minsLeft} min left) — skipped, walang tinawag.`);
+  }
+
+  const estTokens = estimateTokens(systemPrompt) + estimateTokens(userPrompt);
+  if (estTokens > AI_FORECAST_GUARD.maxPromptTokens) {
+    throw new Error(`[${label}] Prompt too large (~${estTokens} tokens > ${AI_FORECAST_GUARD.maxPromptTokens}) — skipped, walang tinawag.`);
+  }
+
+  let timer;
+  try {
+    const raw = await Promise.race([
+      callGeminiJSON({ systemPrompt, userPrompt, temperature: AI_FORECAST_GUARD.temperature }),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Gemini timeout after ${AI_FORECAST_GUARD.timeoutMs / 1000}s`)),
+          AI_FORECAST_GUARD.timeoutMs
+        );
+      }),
+    ]);
+    if (!raw || typeof raw !== "object") throw new Error("Gemini returned an empty or non-object result.");
+
+    const parsed = parseResult(raw);
+    aiForecastState.consecutiveFailures = 0;
+    aiForecastState.cooldownUntil = 0;
+    return parsed;
+  } catch (err) {
+    registerAiForecastFailure(err);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Array ng eksaktong `length` na finite numbers (negatibo -> 0), o null.
+function toNumberArray(value, length) {
+  if (!Array.isArray(value) || value.length < length) return null;
+  const out = value.slice(0, length).map((v) => Number(v));
+  return out.every((n) => Number.isFinite(n)) ? out.map((n) => Math.max(0, n)) : null;
+}
+
+// "May magandang cache ba na pwedeng ipagpatuloy?" — para hindi ma-overwrite
+// ng error ang huling tamang forecast.
+const isUsableSalesCache = (cached) =>
+  !!(cached?.payload && !cached.payload.insufficientData && cached.payload.chartData?.length);
+const isUsableProductCache = (cached) =>
+  !!(cached?.payload
+    && (cached.payload.sevenDay?.insufficientData === false || cached.payload.thirtyDay?.insufficientData === false));
 
 // ==========================================
 // 1. ACTIONABLE RECOMMENDATIONS SERVICE (FORECAST-DRIVEN, TIMEFRAME-INDEPENDENT)
@@ -1191,8 +1313,14 @@ const ActionableRecommendationService = {
 };
 
 // ==========================================
-// 2. PRODUCT FORECAST SERVICE (CODE-COMPUTED, SAME RULES AS SALES)
+// 2. PRODUCT FORECAST SERVICE (GEMINI AI OVER SYSTEM-FILTERED DATA)
 // ==========================================
+// Si Gemini ang nag-fo-forecast ng units kada produkto. Ang system ang
+// nag-fi-filter (per-product eligibility, outlier cap, token budget) at
+// nagva-validate ng sagot; ang growth/risk lists at totals ay kinukuwenta ng
+// system mula sa forecast ni Gemini gamit ang PRODUCT_FORECAST_RULES.
+// ISANG Gemini call (7d + 30d nang sabay), walang retry loop.
+//
 // Parehong engine, parehong history window, parehong level/trend window
 // sa Sales Forecast (tingnan ang FORECAST_MODEL at REQUIRED_HISTORY_DAYS):
 //   - 7d  -> 60 araw na history, level 28d, trend 7d vs 7d
@@ -1412,41 +1540,120 @@ function emptyProductPayload(timeframe) {
   return { label: PF_TIMEFRAME_LABELS[timeframe] || PF_TIMEFRAME_LABELS["30d"], growth: [], risk: [] };
 }
 
-function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDayForecast = false) {
+const unitsOfProduct = (p) => sumOf(p.series.map((x) => x.value));
+
+// GATE (per product): ang produktong pasok lang sa eligibility rules ang
+// maaaring ipadala kay Gemini.
+function eligibleProductsFor(products, horizonKey) {
+  const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
+  return products.filter((p) => isProductEligible(p.series.slice(-historyDays), horizonKey));
+}
+
+// DIAGNOSTIC LOG (walang epekto sa forecast): bakit pumasa/bagsak ang bawat produkto.
+function logProductEligibility(scoped, eligibleCount, horizonKey) {
+  const rules = PRODUCT_FORECAST_RULES[horizonKey];
+  const lw = FORECAST_MODEL.levelWindowDays[horizonKey];
+  const rows = scoped
+    .map((p) => {
+      const days = p.series.length;
+      const active = p.series.filter((x) => x.value > 0).length;
+      const recent = sumOf(p.series.slice(-lw).map((x) => x.value));
+      const fails = [];
+      if (days < rules.minDaysSinceFirstSale) fails.push(`days ${days}<${rules.minDaysSinceFirstSale}`);
+      if (active < rules.minActiveDays) fails.push(`active ${active}<${rules.minActiveDays}`);
+      if (recent < rules.minUnitsRecent) fails.push(`recent ${recent}<${rules.minUnitsRecent}`);
+      return { name: p.productName, total: unitsOfProduct(p), days, active, recent, fails };
+    })
+    .sort((a, b) => b.total - a.total);
+  console.log(`[ProductForecastService][${horizonKey}] ${eligibleCount}/${scoped.length} products eligible. Top 15 by units:`);
+  for (const r of rows.slice(0, 15)) {
+    console.log(`  - ${r.name}: total=${r.total}, daysSinceFirstSale=${r.days}, activeDays=${r.active}, recentUnits=${r.recent} -> ${r.fails.length ? "FAIL (" + r.fails.join(", ") + ")" : "OK"}`);
+  }
+}
+
+// Prompt para kay Gemini. Ang series ay outlier-capped na (winsorizeByWeekday).
+function buildProductForecastPrompt(products, { todayKey, includeThirty }) {
+  const systemPrompt = [
+    "You are a product-demand analyst for a small food business.",
+    "You receive per-product daily units sold (outlier days were already capped by the system).",
+    "For each product, analyze its recent level, weekday pattern and trend, then forecast the TOTAL units it will sell over the requested horizons.",
+    "Use ONLY the data provided. Do not invent events, holidays or promotions.",
+    "Return ONLY one JSON object. No markdown, no commentary.",
+  ].join(" ");
+
+  const horizons = includeThirty ? [7, 30] : [7];
+  const userPrompt = JSON.stringify({
+    task: `For every product, forecast total units sold in the next ${horizons.join(" and ")} days, counting from ${todayKey} (today, inclusive).`,
+    historyEndDate: addDaysToKey(todayKey, -1),
+    products: products.map((p) => ({
+      id: p.id,
+      name: p.productName,
+      category: p.category,
+      firstSaleDate: p.series[0].date,
+      dailyUnits: winsorizeByWeekday(p.series).adjusted.join(","),
+    })),
+    outputFormat: `Return {"products":[{"id":"<same id>","next7Units":<whole number>${includeThirty ? ',"next30Units":<whole number>' : ""}}]} with one entry per product id. Whole numbers >= 0 only.`,
+  });
+  return { systemPrompt, userPrompt };
+}
+
+// Bounded: bawat ikot ay binabawasan ang listahan (hindi tumatawag kay Gemini).
+function fitProductsToTokenBudget(candidates, buildPrompt) {
+  const { maxPromptTokens, minProductsInPrompt, shrinkFactor } = AI_FORECAST_GUARD;
+  let list = candidates;
+  let prompts = buildPrompt(list);
+  while (
+    estimateTokens(prompts.systemPrompt) + estimateTokens(prompts.userPrompt) > maxPromptTokens
+    && list.length > minProductsInPrompt
+  ) {
+    list = list.slice(0, Math.max(minProductsInPrompt, Math.floor(list.length * shrinkFactor)));
+    prompts = buildPrompt(list);
+  }
+  if (list.length < candidates.length) {
+    console.warn(`[ProductForecastService] Token budget: ${list.length}/${candidates.length} products lang ang ipinadala kay Gemini (pinakamabenta muna).`);
+  }
+  return { list, prompts };
+}
+
+// VALIDATOR: id lang na ipinadala ang tatanggapin; may upper-bound bawat
+// produkto; kapag wala pang kalahati ang valid, buong sagot ay reject.
+function parseProductAiResult(raw, { sentById, includeThirty }) {
+  if (!Array.isArray(raw.products)) throw new Error('Gemini result is missing the "products" array.');
+
+  const byId = new Map();
+  for (const row of raw.products) {
+    const src = sentById.get(String(row?.id));
+    if (!src || byId.has(src.id)) continue; // hindi kilalang id / duplicate
+
+    const f7 = Number(row.next7Units);
+    const f30 = includeThirty ? Number(row.next30Units) : null;
+    const recent7 = sumOf(src.series.slice(-7).map((p) => p.value));
+    const recent30 = sumOf(src.series.slice(-30).map((p) => p.value));
+
+    const ok7 = Number.isFinite(f7) && f7 >= 0 && f7 <= recent7 * 3 + 10;
+    const ok30 = !includeThirty || (Number.isFinite(f30) && f30 >= 0 && f30 <= recent30 * 3 + 15);
+    if (!ok7 || !ok30) continue;
+
+    byId.set(src.id, { f7: Math.round(f7), f30: includeThirty ? Math.round(f30) : null });
+  }
+
+  const minValid = Math.ceil(sentById.size * 0.5);
+  if (byId.size < minValid) {
+    throw new Error(`Only ${byId.size}/${sentById.size} product forecasts passed validation (need ${minValid}) — response rejected.`);
+  }
+  return byId;
+}
+
+function buildProductHorizonPayload({ products, aiById, horizonKey }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  const modelHorizonKey = horizonKey === "7d" && useThirtyDayForecast ? "30d" : horizonKey;
   const historyDays = REQUIRED_HISTORY_DAYS[horizonKey];
-  const modelHistoryDays = REQUIRED_HISTORY_DAYS[modelHorizonKey];
 
-  // Keep enough history for the 30-day model when its first seven days are
-  // also used by the 7-day comparison.
   const scoped = products
-    .map((p) => ({ ...p, series: p.series.slice(-modelHistoryDays) }))
+    .map((p) => ({ ...p, series: p.series.slice(-historyDays) }))
     .filter((p) => p.series.length > 0);
-  const eligible = scoped.filter((p) => isProductEligible(p.series.slice(-historyDays), horizonKey));
-
-  // DIAGNOSTIC LOG (walang epekto sa forecast): ipakita kung bakit pumasa/bagsak
-  // ang bawat produkto, para makita kung aling rule ang humaharang.
-  {
-    const lw = FORECAST_MODEL.levelWindowDays[horizonKey];
-    const rows = scoped
-      .map((p) => {
-        const days = p.series.length;
-        const active = p.series.filter((x) => x.value > 0).length;
-        const recent = sumOf(p.series.slice(-lw).map((x) => x.value));
-        const fails = [];
-        if (days < rules.minDaysSinceFirstSale) fails.push(`days ${days}<${rules.minDaysSinceFirstSale}`);
-        if (active < rules.minActiveDays) fails.push(`active ${active}<${rules.minActiveDays}`);
-        if (recent < rules.minUnitsRecent) fails.push(`recent ${recent}<${rules.minUnitsRecent}`);
-        return { name: p.productName, total: sumOf(p.series.map((x) => x.value)), days, active, recent, fails };
-      })
-      .sort((a, b) => b.total - a.total);
-    console.log(`[ProductForecastService][${horizonKey}] ${eligible.length}/${scoped.length} products eligible. Top 15 by units:`);
-    for (const r of rows.slice(0, 15)) {
-      console.log(`  - ${r.name}: total=${r.total}, daysSinceFirstSale=${r.days}, activeDays=${r.active}, recentUnits=${r.recent} -> ${r.fails.length ? 'FAIL (' + r.fails.join(', ') + ')' : 'OK'}`);
-    }
-  }
+  const eligible = scoped.filter((p) => isProductEligible(p.series, horizonKey));
+  logProductEligibility(scoped, eligible.length, horizonKey);
 
   if (eligible.length === 0) {
     return productInsufficientPart(
@@ -1455,19 +1662,21 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     );
   }
 
-  const results = eligible.map((p) => {
-    const useThirtyDayModel = horizonKey === "7d"
-      && useThirtyDayForecast
-      && isProductEligible(p.series, "30d");
-    const modelHorizonKey = useThirtyDayModel ? "30d" : horizonKey;
-    const modelSeries = useThirtyDayModel ? p.series : p.series.slice(-historyDays);
-    const futureDates = buildFutureDateKeys(todayKey, TIMEFRAME_DAYS[modelHorizonKey]);
+  const aiKey = horizonKey === "7d" ? "f7" : "f30";
+  const results = [];
+  for (const p of eligible) {
+    const ai = aiById.get(p.id);
+    if (!ai || ai[aiKey] === null || ai[aiKey] === undefined) continue;
+    const recentQty = sumOf(p.series.slice(-horizon).map((x) => x.value));
+    const forecast = ai[aiKey];
+    const diff = forecast - recentQty;
+    const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
+    results.push({ name: p.productName, forecast, recentQty, diff, pct });
+  }
 
-    return {
-      name: p.productName,
-      ...forecastOneProduct(modelSeries, horizonKey, futureDates, modelHorizonKey),
-    };
-  });
+  if (results.length === 0) {
+    return productInsufficientPart(horizonKey, "AI forecast did not return a usable result for any eligible product.");
+  }
 
   const toListItem = (r) => ({ name: r.name, pct: r.pct, diff: r.diff, forecast: r.forecast, recentQty: r.recentQty });
 
@@ -1477,9 +1686,7 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
 
-  // At risk = forecast na BUMABABA (pct <= riskPctCeiling, negatibo). Hindi
-  // na kasama ang flat o tumataas na produkto, kaya hindi na lumilitaw ang
-  // iisang produkto sa growth at risk nang sabay.
+  // At risk = forecast na BUMABABA (pct <= riskPctCeiling, negatibo).
   const risk = results
     .filter((r) => r.pct !== null && r.diff <= -rules.minAbsChange && r.pct <= rules.riskPctCeiling)
     .sort((a, b) => a.pct - b.pct)
@@ -1493,8 +1700,8 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     forecastUnits: forecastUnitsAll,
     pct: recentUnitsAll > 0 ? Math.round(((forecastUnitsAll - recentUnitsAll) / recentUnitsAll) * 100) : null,
   };
-  console.log(`[ProductForecastService][${horizonKey}] TOTAL units (eligible products): last ${horizon}d actual=${totals.recentUnits} -> next ${horizon}d forecast=${totals.forecastUnits} (${totals.pct}%)`);
-  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length} (diff>0 & meaningful: >=${rules.minAbsChange} units & >=${rules.minPctChange}%), risk=${risk.length} (pct<=${rules.riskPctCeiling}%)`);
+  console.log(`[ProductForecastService][${horizonKey}] TOTAL units (AI-covered products): last ${horizon}d actual=${totals.recentUnits} -> next ${horizon}d forecast=${totals.forecastUnits} (${totals.pct}%)`);
+  console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length}, risk=${risk.length}`);
 
   return {
     label: PF_TIMEFRAME_LABELS[horizonKey],
@@ -1504,27 +1711,23 @@ function buildProductHorizonPayload(products, horizonKey, todayKey, useThirtyDay
     generatedAt: new Date().toISOString(),
     eligibleProducts: eligible.length,
     skippedProducts: scoped.length - eligible.length,
+    aiCoveredProducts: results.length,
     totals,
-    accuracy: backtestProductHorizon(scoped, horizonKey, useThirtyDayForecast),
+    // Hindi ma-backtest nang mura ang sagot ni Gemini; ang accuracy na ipinapakita
+    // sa method.baselineAccuracy ay ng NON-AI na statistical baseline (reference lang).
+    accuracy: null,
     method: {
-      type: "recent run-rate + damped trend, like-for-like totals (computed in code, no AI)",
-      historyDays: modelHistoryDays,
-      levelWindowDays: FORECAST_MODEL.levelWindowDays[modelHorizonKey],
-      trendWindowDays: FORECAST_MODEL.trendWindowDays[modelHorizonKey],
-      trendDamping: FORECAST_MODEL.trendDamping,
+      type: "Gemini AI forecast over system-filtered data (eligibility rules + outlier cap); statistical baseline kept for reference",
+      historyDays,
       rules,
-      comparison: `forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
-      ...(horizonKey === "7d" && useThirtyDayForecast
-        ? { sevenDayForecastSource: "first 7 days of the 30-day model when the product is eligible; otherwise the 7-day model" }
-        : {}),
+      comparison: `AI forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
+      baselineAccuracy: backtestProductHorizon(scoped, horizonKey, false),
     },
   };
 }
 
-// Cron/refresh entry point — wala nang Gemini call dito. Pareho pa rin ang
-// gating (7d / 30d sufficiency) at ang cache key/shape na binabasa ng
-// frontend at ng Recommendations.
-async function refreshProductForecast() {
+// Cron/refresh entry point. ISANG Gemini call (7d + 30d nang sabay), walang retry.
+async function runProductForecastRefresh() {
   const sevenCheck = await checkForecastDataSufficiency("7d");
   const thirtyCheck = await checkForecastDataSufficiency("30d");
 
@@ -1551,16 +1754,48 @@ async function refreshProductForecast() {
         thirtyDay: productInsufficientPart("30d", includeThirty ? noActivityMessage : thirtyCheck.message),
       };
     } else {
+      const withIds = products.map((p, i) => ({ ...p, id: `p${i + 1}` }));
+
+      // GATE: ang eligible lang (sa 7d o 30d) ang ipapadala kay Gemini.
+      const candidateIds = new Set(
+        [...eligibleProductsFor(withIds, "7d"), ...(includeThirty ? eligibleProductsFor(withIds, "30d") : [])].map((p) => p.id)
+      );
+      const candidates = withIds
+        .filter((p) => candidateIds.has(p.id))
+        .sort((a, b) => unitsOfProduct(b) - unitsOfProduct(a));
+
+      let aiById = new Map();
+      if (candidates.length > 0) {
+        const { list, prompts } = fitProductsToTokenBudget(
+          candidates,
+          (subset) => buildProductForecastPrompt(subset, { todayKey, includeThirty })
+        );
+        const sentById = new Map(list.map((p) => [p.id, p]));
+        aiById = await callGeminiForecastOnce(
+          "ProductForecast",
+          prompts,
+          (raw) => parseProductAiResult(raw, { sentById, includeThirty })
+        );
+      }
+
       payload = {
-        sevenDay: buildProductHorizonPayload(products, "7d", todayKey, includeThirty),
+        sevenDay: buildProductHorizonPayload({ products: withIds, aiById, horizonKey: "7d" }),
         thirtyDay: includeThirty
-          ? buildProductHorizonPayload(products, "30d", todayKey)
+          ? buildProductHorizonPayload({ products: withIds, aiById, horizonKey: "30d" })
           : productInsufficientPart("30d", thirtyCheck.message),
       };
     }
   } catch (err) {
-    console.error("[ProductForecastService] Forecast computation failed:", err.message);
-    const failMessage = "Forecast generation failed. Will retry on next cron run.";
+    console.error("[ProductForecastService] AI forecast failed — walang retry hanggang sa susunod na cron run:", err.message);
+
+    // Huwag burahin ang huling magandang forecast dahil lang pumalya ngayon.
+    const existing = await AiCacheModel.getByKey(PRODUCT_COMBINED_CACHE_KEY);
+    if (isUsableProductCache(existing)) {
+      console.warn("[ProductForecastService] Kept the previous cached forecast.");
+      return existing.payload;
+    }
+
+    const failMessage = "AI forecast unavailable right now. Will retry on next cron run.";
     payload = {
       sevenDay: productInsufficientPart("7d", failMessage),
       thirtyDay: productInsufficientPart("30d", includeThirty ? failMessage : thirtyCheck.message),
@@ -1570,6 +1805,9 @@ async function refreshProductForecast() {
   await AiCacheModel.upsert(PRODUCT_COMBINED_CACHE_KEY, payload, PF_CACHE_TTL_MS);
   return payload;
 }
+
+// Single-flight: kapag may tumatakbo na, sasabay lang — walang pangalawang Gemini call.
+const refreshProductForecast = () => singleFlight("product_forecast", runProductForecastRefresh);
 
 // Read-only lookup used by the frontend routes.
 async function getProductForecastRead(timeframe) {
@@ -1609,17 +1847,14 @@ const ProductForecastService = {
 };
 
 // ==========================================
-// 3. SALES FORECAST SERVICE (CODE-COMPUTED, SAME ENGINE AS PRODUCT)
+// 3. SALES FORECAST SERVICE (GEMINI AI OVER SYSTEM-FILTERED DATA)
 // ==========================================
-// Dating "TRUE ARIMA" ang label pero Gemini ang nagku-kuwenta ng numero.
-// Ngayon, ang forecast ay kinukuwenta ng runForecastModel() (tingnan ang
-// SHARED ENGINE) at may kasamang:
-//   - accuracy  : backtest laban sa aktwal na nangyari + simpleng baseline
-//   - lower/upper: range mula sa aktwal na error ng backtest
-//   - method    : mga parametro/numero na ginamit (level, trend, weekday index)
-// Ang 7d at 30d ay parehong native na kinukuwenta gamit ang sarili nilang
-// history/level/trend windows (kapareho ng Product Forecast), kaya maaaring
-// bahagyang magkaiba ang magkakapatong na petsa nila — sinadya 'yon.
+// Si Gemini ang nag-aanalyze ng daily sales history at nagbibigay ng forecast.
+// Ang system ang nag-fi-filter bago ipadala (sufficiency gate, active-days gate,
+// outlier cap, 90-day limit) at nagva-validate ng sagot (shape, per-day cap,
+// total vs statistical baseline). Ang resulta ay isinusulat sa AI cache.
+// ISANG Gemini call lang kada refresh para sa 7d at 30d (ang 7d ay ang unang
+// 7 araw ng 30-day forecast kapag sapat ang data). Walang retry loop.
 const SF_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function buildSalesCacheKey(timeframe) {
@@ -1684,41 +1919,76 @@ function insufficientSalesPayload(message) {
   };
 }
 
-function buildSalesHorizonPayload(series, horizonKey, todayKey) {
-  const horizon = TIMEFRAME_DAYS[horizonKey];
-  // Buong history ang ginagamit (hindi na hinihiwa sa huling N araw).
-  const history = series;
+const SF_PROMPT_HISTORY_DAYS = 90;      // hangganan ng history na ipinapadala kay Gemini (token control)
+const SF_DAILY_CAP_MULTIPLIER = 1.5;    // forecast ng isang araw <= 1.5x ng pinakamataas na (capped) araw
+const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // total ng AI vs statistical baseline
 
-  const activeDays = history.filter((p) => p.value > 0).length;
-  const requiredActive = SALES_MIN_ACTIVE_DAYS[horizonKey];
-  if (activeDays < requiredActive) {
-    return insufficientSalesPayload(
-      `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a ${horizon}-day forecast needs at least ${requiredActive}).`
-    );
-  }
+function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon }) {
+  const horizonDays = futureDates.length;
+  const systemPrompt = [
+    "You are a demand-forecasting analyst for a small food business.",
+    "You receive pre-cleaned daily sales history (outlier days were already capped by the system) and reference statistics computed by the system.",
+    "Analyze weekday seasonality, the recent level and the recent trend, then forecast daily sales for the requested dates.",
+    "Use ONLY the data provided. Do not invent events, holidays or promotions.",
+    "Return ONLY one JSON object. No markdown, no commentary.",
+  ].join(" ");
 
-  const opts = getModelOptions(horizonKey);
-  const futureDates = buildFutureDateKeys(todayKey, horizon);
-  const { values, meta } = runForecastModel(history, futureDates, opts);
-
-  const { pairs, origins } = backtestSeriesModel(history, horizonKey, opts);
-  const accuracy = summarizeBacktestPairs(pairs, origins);
-  const band = computeResidualBand(pairs);
-
-  const chartData = futureDates.map((date, i) => {
-    const forecastSales = Math.round(values[i]);
-    return {
-      date,
-      label: formatForecastLabel(date),
-      isToday: i === 0,
-      forecastSales,
-      lower: band ? Math.max(0, Math.round(forecastSales + band.low)) : null,
-      upper: band ? Math.round(forecastSales + band.high) : null,
-    };
+  const userPrompt = JSON.stringify({
+    task: `Forecast daily sales (PHP, actual amount paid) for the next ${horizonDays} days.`,
+    history: {
+      startDate: filteredHistory[0].date,
+      endDate: filteredHistory[filteredHistory.length - 1].date,
+      dailySales: filteredHistory.map((p) => Math.round(p.value)),
+    },
+    forecastDates: futureDates,
+    referenceStatistics: referenceByHorizon,
+    outputFormat: `Return {"forecast":[...],"lower":[...],"upper":[...]} where each array has exactly ${horizonDays} whole numbers aligned with forecastDates, and 0 <= lower <= forecast <= upper.`,
   });
 
-  // Para madaling i-reconcile sa totoong data (at sa Product Forecast): actual na
-  // benta ng huling N araw vs forecast ng susunod na N araw.
+  return { systemPrompt, userPrompt };
+}
+
+// VALIDATOR: shape, per-day cap, at total laban sa statistical baseline.
+// Hindi pumasa = throw (walang retry; cooldown ang hahawak).
+function parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal }) {
+  const forecastRaw = toNumberArray(raw.forecast, horizonDays);
+  if (!forecastRaw) throw new Error(`Invalid "forecast" array (expected ${horizonDays} finite numbers).`);
+
+  const forecast = forecastRaw.map((v) => Math.round(dailyCap > 0 ? Math.min(v, dailyCap) : v));
+  const total = sumOf(forecast);
+
+  if (baselineTotal > 0) {
+    const ratio = total / baselineTotal;
+    if (ratio < SF_TOTAL_SANITY_BAND.min || ratio > SF_TOTAL_SANITY_BAND.max) {
+      throw new Error(
+        `AI forecast total ${total} is ${ratio.toFixed(2)}x the statistical baseline (${Math.round(baselineTotal)}) — outside ${SF_TOTAL_SANITY_BAND.min}-${SF_TOTAL_SANITY_BAND.max}x, rejected.`
+      );
+    }
+  }
+
+  const lowerRaw = toNumberArray(raw.lower, horizonDays);
+  const upperRaw = toNumberArray(raw.upper, horizonDays);
+  return {
+    forecast,
+    lower: lowerRaw ? lowerRaw.map((v, i) => Math.round(Math.min(v, forecast[i]))) : null,
+    upper: upperRaw ? upperRaw.map((v, i) => Math.round(Math.max(v, forecast[i]))) : null,
+  };
+}
+
+function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount }) {
+  const horizon = TIMEFRAME_DAYS[horizonKey];
+
+  const chartData = futureDates.slice(0, horizon).map((date, i) => ({
+    date,
+    label: formatForecastLabel(date),
+    isToday: i === 0,
+    forecastSales: ai.forecast[i],
+    lower: ai.lower ? ai.lower[i] : null,
+    upper: ai.upper ? ai.upper[i] : null,
+  }));
+
+  // Para madaling i-reconcile sa totoong data: actual na benta ng huling N araw
+  // vs forecast ng susunod na N araw.
   const recentTotal = sumOf(history.slice(-horizon).map((p) => p.value));
   const forecastTotal = sumOf(chartData.map((d) => d.forecastSales));
   const totals = {
@@ -1728,18 +1998,30 @@ function buildSalesHorizonPayload(series, horizonKey, todayKey) {
   };
   console.log(`[SalesForecastService][${horizonKey}] TOTAL sales: last ${horizon}d actual=${totals.recentTotal} -> next ${horizon}d forecast=${totals.forecastTotal} (${totals.pct}%)`);
 
+  const opts = getModelOptions(horizonKey);
+  const { pairs, origins } = backtestSeriesModel(history, horizonKey, opts);
+
   return {
     chartData,
     insufficientData: false,
     generatedAt: new Date().toISOString(),
     totals,
-    accuracy,
-    method: describeForecastMethod(horizonKey, history.length, meta),
+    // Hindi ma-backtest nang mura ang sagot ni Gemini; ang statisticalBaselineAccuracy
+    // ay ng NON-AI baseline (reference lang).
+    accuracy: null,
+    method: {
+      ...describeForecastMethod(horizonKey, history.length, {
+        ...baselineMeta,
+        outliersCapped: outlierCount,
+        promptHistoryDays: Math.min(history.length, SF_PROMPT_HISTORY_DAYS),
+      }),
+      statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
+    },
   };
 }
 
-// Cron/refresh entry point. Tawagin ONCE bawat cron run.
-async function refreshSalesForecast() {
+// Cron/refresh entry point. ISANG Gemini call (7d + 30d nang sabay), walang retry.
+async function runSalesForecastRefresh() {
   const sevenCheck = await checkForecastDataSufficiency("7d");
   const thirtyCheck = await checkForecastDataSufficiency("30d");
 
@@ -1753,20 +2035,91 @@ async function refreshSalesForecast() {
   }
 
   const includeThirty = thirtyCheck.sufficient;
-
   let sevenPayload;
   let thirtyPayload;
+
   try {
     const { series, todayKey } = await getSalesDailySeries();
-    sevenPayload = buildSalesHorizonPayload(series, "7d", todayKey);
-    thirtyPayload = includeThirty
-      ? buildSalesHorizonPayload(series, "30d", todayKey)
-      : insufficientSalesPayload(thirtyCheck.message);
+
+    // GATE: sapat na araw na may benta bago tumawag kay Gemini.
+    const activeDays = series.filter((p) => p.value > 0).length;
+    const ready7 = activeDays >= SALES_MIN_ACTIVE_DAYS["7d"];
+    const ready30 = includeThirty && activeDays >= SALES_MIN_ACTIVE_DAYS["30d"];
+    const activityMessage = (hk) =>
+      `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a ${TIMEFRAME_DAYS[hk]}-day forecast needs at least ${SALES_MIN_ACTIVE_DAYS[hk]}).`;
+    const thirtyNotReadyPayload = () =>
+      insufficientSalesPayload(includeThirty ? activityMessage("30d") : thirtyCheck.message);
+
+    if (!ready7) {
+      sevenPayload = insufficientSalesPayload(activityMessage("7d"));
+      thirtyPayload = thirtyNotReadyPayload();
+    } else {
+      const horizonDays = ready30 ? 30 : 7;
+      const futureDates = buildFutureDateKeys(todayKey, horizonDays);
+
+      // FILTER: outlier-capped na history, limitado sa huling SF_PROMPT_HISTORY_DAYS.
+      const { adjusted, outlierCount } = winsorizeByWeekday(series);
+      const filteredHistory = series
+        .map((p, i) => ({ date: p.date, value: adjusted[i] }))
+        .slice(-SF_PROMPT_HISTORY_DAYS);
+      const dailyCap = Math.max(...filteredHistory.map((p) => p.value)) * SF_DAILY_CAP_MULTIPLIER;
+
+      // Statistical reference (hindi ito ang forecast): ipinapakita kay Gemini
+      // bilang konteksto, at ginagamit ng system pang-sanity check ng sagot.
+      const baselines = { "7d": runForecastModel(series, futureDates.slice(0, 7), getModelOptions("7d")) };
+      if (ready30) baselines["30d"] = runForecastModel(series, futureDates, getModelOptions("30d"));
+
+      const referenceByHorizon = Object.fromEntries(
+        Object.entries(baselines).map(([hk, b]) => [hk, {
+          level: b.meta.level,
+          trendRatio: b.meta.trendRatio,
+          weekdayIndex: b.meta.weekdayIndex,
+          baselineTotal: Math.round(sumOf(b.values)),
+        }])
+      );
+      const baselineTotal = sumOf(baselines[ready30 ? "30d" : "7d"].values);
+
+      const prompts = buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon });
+      const ai = await callGeminiForecastOnce(
+        "SalesForecast",
+        prompts,
+        (raw) => parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal })
+      );
+
+      sevenPayload = buildSalesHorizonPayload({
+        history: series, ai, futureDates, horizonKey: "7d", baselineMeta: baselines["7d"].meta, outlierCount,
+      });
+      thirtyPayload = ready30
+        ? buildSalesHorizonPayload({
+            history: series, ai, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount,
+          })
+        : thirtyNotReadyPayload();
+    }
   } catch (err) {
-    console.error("[SalesForecastService] Forecast computation failed:", err.message);
-    const failed = insufficientSalesPayload("Forecast generation failed. Will retry on next cron run.");
-    sevenPayload = failed;
-    thirtyPayload = includeThirty ? failed : insufficientSalesPayload(thirtyCheck.message);
+    console.error("[SalesForecastService] AI forecast failed — walang retry hanggang sa susunod na cron run:", err.message);
+
+    // Huwag burahin ang huling magandang forecast dahil lang pumalya ngayon.
+    const [cached7, cached30] = await Promise.all([
+      AiCacheModel.getByKey(buildSalesCacheKey("7d")),
+      AiCacheModel.getByKey(buildSalesCacheKey("30d")),
+    ]);
+    const keep7 = isUsableSalesCache(cached7);
+    const keep30 = isUsableSalesCache(cached30);
+    const failed = insufficientSalesPayload("AI forecast unavailable right now. Will retry on next cron run.");
+
+    const writes = [];
+    if (!keep7) writes.push(AiCacheModel.upsert(buildSalesCacheKey("7d"), failed, SF_CACHE_TTL_MS));
+    if (!keep30) {
+      writes.push(AiCacheModel.upsert(
+        buildSalesCacheKey("30d"),
+        includeThirty ? failed : insufficientSalesPayload(thirtyCheck.message),
+        SF_CACHE_TTL_MS
+      ));
+    }
+    await Promise.all(writes);
+
+    if (includeThirty && keep30) return cached30.payload;
+    return keep7 ? cached7.payload : failed;
   }
 
   await Promise.all([
@@ -1776,6 +2129,9 @@ async function refreshSalesForecast() {
 
   return includeThirty ? thirtyPayload : sevenPayload;
 }
+
+// Single-flight: kapag may tumatakbo na, sasabay lang — walang pangalawang Gemini call.
+const refreshSalesForecast = () => singleFlight("sales_forecast", runSalesForecastRefresh);
 
 // Read-only lookup used by the frontend routes. Never recomputes.
 async function getSalesForecastRead(timeframe) {

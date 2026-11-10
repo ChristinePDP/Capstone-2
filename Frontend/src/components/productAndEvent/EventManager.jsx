@@ -183,7 +183,7 @@ function EventModal({
   const computeErrors = (f) => {
     const next = {};
     if (!String(f.event_name || '').trim()) next.event_name = 'Event name is required.';
-    if (!String(f.event_tag || '').trim()) next.event_tag = 'AI recommendation tag is required.';
+    if (!String(f.event_tag || '').trim()) next.event_tag = 'Event tag is required.';
     return next;
   };
 
@@ -286,13 +286,13 @@ function EventModal({
         />
 
         <FormInput
-          label="AI Recommendation Tag"
+          label="Event Tag"
           required
           error={errors.event_tag}
           value={form.event_tag}
           onChange={(e) => setForm({ ...form, event_tag: e.target.value })}
           placeholder="e.g. valentines"
-          hint="This tells the AI which products to highlight on the homepage. Must match exactly with your product tags."
+          hint="Products tagged with this will automatically appear in the online ordering popup while this event is live."
         />
 
         <div className="grid grid-cols-2 gap-4">
@@ -602,7 +602,7 @@ export default function EventManager() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-[#3B1F0A]">Event Manager</h1>
-          <p className="text-xs sm:text-sm text-[#8A7264] mt-1">Manage seasonal events and AI product recommendations</p>
+          <p className="text-xs sm:text-sm text-[#8A7264] mt-1">Manage seasonal events and the products tagged to them</p>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -636,7 +636,7 @@ export default function EventManager() {
               hex-approximation lang. */}
           <div className="hidden md:block bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
             <Table columns={[
-              { label: 'Event' }, { label: 'AI Tag' }, { label: 'Date Range' },
+              { label: 'Event' }, { label: 'Event Tag' }, { label: 'Date Range' },
               { label: 'Status' }, { label: 'Action', align: 'right' },
             ]}>
               {events.map((event) => (
@@ -687,7 +687,7 @@ export default function EventManager() {
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-baseline gap-2">
                     <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider w-16 shrink-0">
-                      AI Tag
+                      Event Tag
                     </span>
                     <span className="text-xs text-[#5A453C] break-words">{event.event_tag}</span>
                   </div>

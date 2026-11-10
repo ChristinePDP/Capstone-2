@@ -4,7 +4,6 @@ import { ProductModel } from '../model/product.model.js';
 import { OccasionModel } from '../model/occasions.model.js'; 
 import { BundleModel } from '../model/bundle.model.js';
 import { RecipeModel } from '../model/recipe.model.js';
-import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { AiCacheModel } from '../model/AiCache.model.js'; 
 
 // ============================================================
@@ -979,10 +978,29 @@ const EVENT_ADS_CACHE_KEY = 'event_ads_homepage';
 const EVENT_ADS_TTL_MS = 24 * 60 * 60 * 1000;
 const EVENT_ADS_INACTIVE_PAYLOAD = { active: false };
 
-const EVENT_ICON_OPTIONS = [
-  'heart', 'gift', 'cake', 'sparkle', 'star',
-  'snowflake', 'ghost', 'flower', 'party'
+// Walang AI sa bahaging ito. Ang icon ay hinuhulaan ng code mula sa
+// pangalan/tag ng event (keyword match). Kapag walang tumama, 'sparkle'.
+const EVENT_ICON_KEYWORDS = [
+  { icon: 'heart',     keywords: ['valentine', 'heart', 'love', 'anniversary', 'wedding'] },
+  { icon: 'snowflake', keywords: ['christmas', 'noche', 'xmas', 'holiday', 'winter', 'ber'] },
+  { icon: 'ghost',     keywords: ['halloween', 'undas', 'all saints'] },
+  { icon: 'flower',    keywords: ['mother', 'mama', 'flower', 'spring', 'easter'] },
+  { icon: 'gift',      keywords: ['gift', 'father', 'graduation', 'teacher'] },
+  { icon: 'cake',      keywords: ['birthday', 'cake', 'baptism', 'christening'] },
+  { icon: 'party',     keywords: ['new year', 'party', 'fiesta', 'celebration'] },
+  { icon: 'star',      keywords: ['special', 'sale', 'promo'] },
 ];
+const DEFAULT_EVENT_ICON = 'sparkle';
+
+const normalizeTag = (tag) => String(tag || '').trim().toLowerCase();
+
+const pickEventIcon = (event) => {
+  const haystack = `${event.event_tag || ''} ${event.event_name || ''}`.toLowerCase();
+  const match = EVENT_ICON_KEYWORDS.find(({ keywords }) =>
+    keywords.some(keyword => haystack.includes(keyword))
+  );
+  return match ? match.icon : DEFAULT_EVENT_ICON;
+};
 
 const isEventLiveToday = (event, today) => {
   const month = today.getMonth() + 1;
@@ -994,7 +1012,10 @@ const isEventLiveToday = (event, today) => {
   );
 };
 
-export const generateEventAds = async () => {
+// Rule-based na (walang Gemini), at walang cache write dito: ang system mismo ang pumipili ng products
+// base sa event_tag ng LIVE event. Kapag nakatakda ang event ngayong araw
+// at may product na naka-tag dito, lalabas ito sa online ordering modal.
+const buildEventAdsPayload = async () => {
   try {
     const today = new Date();
 
@@ -1002,12 +1023,8 @@ export const generateEventAds = async () => {
     const liveEvents = events.filter(e => isEventLiveToday(e, today));
 
     if (liveEvents.length === 0) {
-      await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
-      console.log('[SERVICE] Walang live event ngayon. Event Ads cache cleared.');
       return EVENT_ADS_INACTIVE_PAYLOAD;
     }
-
-    const liveTags = liveEvents.map(e => e.event_tag).filter(Boolean);
 
     const { data: productsData, error: prodError } = await supabase
       .from('products')
@@ -1019,84 +1036,89 @@ export const generateEventAds = async () => {
     const formulaByProductId = await RecipeModel.findFormulaStatusByProductIds(
       (productsData || []).map(product => product.id)
     );
-    const matchingProducts = (productsData || []).filter(
+
+    // Products na pwedeng ibenta (Celebration Material o may production formula)
+    const sellableProducts = (productsData || []).filter(
       p => p.category === 'Celebration Material'
         || formulaByProductId.get(p.id)?.has_production_formula === true
-    ).filter(
-      p => Array.isArray(p.event_tags) && p.event_tags.some(tag => liveTags.includes(tag))
     );
 
-    if (matchingProducts.length === 0) {
-      await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, EVENT_ADS_INACTIVE_PAYLOAD, EVENT_ADS_TTL_MS);
-      console.log('[SERVICE] May live event pero walang naka-tag na products. Event Ads cache cleared.');
+    const productHasTag = (product, tag) =>
+      Array.isArray(product.event_tags)
+      && product.event_tags.some(t => normalizeTag(t) === normalizeTag(tag));
+
+    // Bawat live event: ilan ang naka-tag na products nito?
+    const liveEventsWithProducts = liveEvents
+      .filter(e => normalizeTag(e.event_tag))
+      .map(e => ({
+        event: e,
+        products: sellableProducts.filter(p => productHasTag(p, e.event_tag))
+      }))
+      .filter(entry => entry.products.length > 0);
+
+    if (liveEventsWithProducts.length === 0) {
       return EVENT_ADS_INACTIVE_PAYLOAD;
     }
 
-    const systemPrompt = `You are the marketing copywriter for Aileen and Niculus Cake Shop, a Filipino bakeshop. There is currently a live event happening. Write short, warm marketing copy for a homepage popup (modal) announcing it, and pick which of the given already-tagged products to feature.
+    // Kung higit sa isa ang live event, ang may pinakamaraming naka-tag na
+    // products ang magiging "primary" (sa title/badge). Ang products ng
+    // lahat ng live event ay pinagsasama (walang duplicate).
+    const primary = [...liveEventsWithProducts]
+      .sort((a, b) => b.products.length - a.products.length)[0];
+    const primaryEvent = primary.event;
 
-Live Event(s): ${JSON.stringify(liveEvents.map(e => ({ name: e.event_name, tag: e.event_tag })))}
+    const finalProducts = [];
+    const seenIds = new Set();
+    // Primary event muna ang mauna sa listahan
+    [primary, ...liveEventsWithProducts.filter(entry => entry !== primary)].forEach(entry => {
+      entry.products.forEach(p => {
+        if (!seenIds.has(p.id)) {
+          seenIds.add(p.id);
+          finalProducts.push(p);
+        }
+      });
+    });
 
-Allowed icon keys (choose exactly ONE that best fits — do not invent new ones): ${EVENT_ICON_OPTIONS.join(', ')}
-
-Rules:
-1. Select at most 8 products from the provided list to feature. Only choose from the given list — never invent a product or id.
-2. Keep the title short (under 6 words) and the subtitle to one short sentence.
-3. Return valid JSON only, no markdown formatting, no extra text, matching EXACTLY this structure:
-{
-  "eventName": "String, e.g. Valentine's Day",
-  "title": "String, short popup headline",
-  "subtitle": "String, one short sentence of marketing copy",
-  "badge": "String, short label e.g. Valentine's Special",
-  "icon": "one of the allowed icon keys",
-  "productIds": ["id1", "id2"]
-}`;
-
-    const userPrompt = `Tagged products available: ${JSON.stringify(
-      matchingProducts.map(p => ({ id: p.id, name: p.name, category: p.category, event_tags: p.event_tags }))
-    )}`;
-
-    let aiResponse;
-    try {
-      aiResponse = await callGeminiJSON({ systemPrompt, userPrompt, temperature: 0.3 });
-    } catch (aiError) {
-      console.error('[SERVICE] Gemini call failed for event ads:', aiError);
-      aiResponse = null;
-    }
-
-    const validIcon = aiResponse && EVENT_ICON_OPTIONS.includes(aiResponse.icon)
-      ? aiResponse.icon
-      : 'sparkle';
-
-    const selectedProducts = aiResponse && Array.isArray(aiResponse.productIds)
-      ? matchingProducts.filter(p => aiResponse.productIds.includes(p.id))
-      : [];
-
-    const finalProducts = selectedProducts.length > 0
-      ? selectedProducts
-      : matchingProducts.slice(0, 8);
-
-    const primaryEvent = liveEvents[0];
-
-    const eventAdsPayload = {
+    return {
       active: true,
       event: {
-        name: aiResponse?.eventName || primaryEvent.event_name,
-        title: aiResponse?.title || `${primaryEvent.event_name} Specials`,
-        subtitle: aiResponse?.subtitle || `Check out our specials for ${primaryEvent.event_name}!`,
-        badge: aiResponse?.badge || primaryEvent.event_name,
-        icon: validIcon,
+        name: primaryEvent.event_name,
+        title: `${primaryEvent.event_name} Specials`,
+        subtitle: `Check out our specials for ${primaryEvent.event_name}!`,
+        badge: primaryEvent.event_name,
+        icon: pickEventIcon(primaryEvent),
         endMonth: primaryEvent.end_month,
         endDay: primaryEvent.end_day
       },
       products: finalProducts
     };
-
-    await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, eventAdsPayload, EVENT_ADS_TTL_MS);
-    console.log(`[SERVICE] Event Ads Modal successfully generated and cached for: ${primaryEvent.event_name}`);
-
-    return eventAdsPayload;
   } catch (error) {
     console.error('[SERVICE] Error generating event ads:', error);
     throw error;
   }
+};
+
+// Para sa manual/cron refresh: kinukuwenta at sine-save pa rin sa cache.
+export const generateEventAds = async () => {
+  const payload = await buildEventAdsPayload();
+  await AiCacheModel.upsert(EVENT_ADS_CACHE_KEY, payload, EVENT_ADS_TTL_MS);
+  console.log(`[SERVICE] Event Ads regenerated (active: ${payload.active}).`);
+  return payload;
+};
+
+// Para sa homepage (GET /event-ads): kinukuwenta nang direkta mula sa
+// events + product tags, kaya agad lumalabas ang bagong tag/event at
+// hindi na naghihintay ng cron. May 60-segundong memo lang para hindi
+// mag-query sa DB sa bawat bisita.
+const LIVE_EVENT_ADS_MEMO_MS = 60 * 1000;
+let liveEventAdsMemo = { payload: null, expiresAt: 0 };
+
+export const getLiveEventAds = async () => {
+  const now = Date.now();
+  if (liveEventAdsMemo.payload && liveEventAdsMemo.expiresAt > now) {
+    return liveEventAdsMemo.payload;
+  }
+  const payload = await buildEventAdsPayload();
+  liveEventAdsMemo = { payload, expiresAt: now + LIVE_EVENT_ADS_MEMO_MS };
+  return payload;
 };

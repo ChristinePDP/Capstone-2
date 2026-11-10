@@ -4,7 +4,7 @@ import {
   SalesForecastService,
   PerformanceSummaryService,
 } from '../services/aiAnalytics.service.js';
-import { generateHomepageAds, generateEventAds } from '../services/productAndEvent.service.js';
+import { generateHomepageAds } from '../services/productAndEvent.service.js';
 import { emitRealtimeChange } from '../services/realtime.service.js';
 
 export const runDailyAnalyticsJob = async () => {
@@ -33,11 +33,12 @@ export const runDailyAnalyticsJob = async () => {
 
   await PerformanceSummaryService.getPerformanceSummary(true);
 
-  console.log('Generating Homepage Ads (Best Sellers) via Gemini...');
+  console.log('Generating Homepage Ads (Best Sellers)...');
   await generateHomepageAds();
 
-  console.log('Checking for live occasion & generating Event Ads...');
-  await generateEventAds();
+  // NOTE: Event Ads are no longer generated here. GET /event-ads computes
+  // them directly from live events + product event tags (getLiveEventAds),
+  // so no daily cron step is needed.
 
   emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'daily-analytics' });
   console.log('--- Daily Analytics Job Finished ---');

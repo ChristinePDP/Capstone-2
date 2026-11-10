@@ -13,6 +13,7 @@ import {
   deleteEvent,
   generateHomepageAds,
   generateEventAds,
+  getLiveEventAds,
   getAllBundles,
   getBundleById,
   createBundle,
@@ -396,7 +397,7 @@ export const addEvent = async (req, res) => {
       console.log('Validation Failed: Missing required fields.');
       return res.status(400).json({
         success: false,
-        message: 'Event name and AI recommendation tag are required fields.'
+        message: 'Event name and event tag are required fields.'
       });
     }
 
@@ -480,13 +481,15 @@ export const getHomepageAds = async (req, res) => {
 
 export const getEventAds = async (req, res) => {
   try {
-    const cachedData = await AiCacheModel.getByKey('event_ads_homepage');
+    // Rule-based na: kinukuwenta mula sa live events + product event tags
+    // (hindi na umaasa sa cache/cron).
+    const payload = await getLiveEventAds();
 
-    if (!cachedData || !cachedData.payload || cachedData.payload.active === false) {
+    if (!payload || payload.active === false) {
       return res.status(200).json({ success: true, data: { active: false } });
     }
 
-    res.status(200).json({ success: true, data: cachedData.payload });
+    res.status(200).json({ success: true, data: payload });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

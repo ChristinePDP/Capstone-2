@@ -23,7 +23,7 @@
 // mag-fallback ang icon sa isang neutral default (Sparkles) kung hindi
 // kilala ang key — walang epekto sa disenyo, icon lang ang mapapalitan.
 // Resulta: mas simple, mas kaunting hardcoded branching, at hindi na
-// dapat asahan pa na tama ang "guess" ng AI sa kulay ng bawat event.
+// dapat asahan pa na tama ang kulay ng bawat event.
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -53,8 +53,8 @@ const DEFAULT_ICON = Sparkles;
 
 // GENERAL na fallback copy — gumagamit lang ng `event.name` (direktang
 // tino-type ng owner sa Occasion Manager, kaya trusted/reliable, hindi
-// guess ng AI). Ito ang GUARANTEED na text na lalabas kapag walang
-// title/subtitle/badge na dumating mula sa AI — hindi kailanman blangko
+// guess lang). Ito ang GUARANTEED na text na lalabas kapag walang
+// title/subtitle/badge na dumating mula sa server — hindi kailanman blangko
 // ang modal, at hindi ito naka-tali sa isang partikular na event, kaya
 // gagana ito kahit anong occasion pa ang idagdag sa hinaharap.
 const buildFallbackCopy = (eventName) => {
@@ -149,7 +149,7 @@ export default function EventAdsModal() {
     setClosed(true);
   };
 
-  // "Shop Now!" CTA — static/general na label (hindi mula sa AI/event
+  // "Shop Now!" CTA — static/general na label (hindi mula sa event
   // data), kaya trusted at consistent kahit anong occasion pa ang i-load.
   // Isasara muna ang modal bago mag-navigate, kaya hindi na ito naka-mount
   // sa Menu page pagdating doon.
