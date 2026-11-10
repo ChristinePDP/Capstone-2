@@ -409,10 +409,18 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
   const hasOrderSlip = orderSlipCards.length > 0;
   const showSlipTab = hasOrderSlip || !!globalReferenceImage;
 
-  const nextStatus = { Confirmed: 'Ready', Ready: 'Completed' };
+  const orderSource = order.source || order.orderSource || '';
+  const isOnlineBuyNow = orderSource === 'online' && orderType === 'Buy Now';
+  const isPreOrder = orderType === 'Pre-Order';
+  const waitingForPreOrderProduction = isPreOrder && order.status === 'Confirmed';
+  const nextStatus = isOnlineBuyNow
+    ? { Confirmed: 'Completed' }
+    : isPreOrder
+      ? { Ready: 'Completed' }
+      : { Confirmed: 'Ready', Ready: 'Completed' };
   const next = nextStatus[order.status];
   const canCancel = order.status === 'Confirmed';
-  const hasActions = canCancel || !!next;
+  const hasActions = canCancel || !!next || waitingForPreOrderProduction;
 
   const pickupTimeLabel = pickupTime
     ? formatTime(pickupTime) + (pickupTimeEnd ? ` – ${formatTime(pickupTimeEnd)}` : '')
@@ -790,6 +798,18 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                     <X size={15} />
                     Close
                   </button>
+                  {waitingForPreOrderProduction && (
+                    <div className="flex min-w-0 flex-[1.3] flex-col items-stretch sm:flex-none">
+                      <button
+                        type="button"
+                        disabled
+                        title="This Pre-Order becomes Ready automatically after production is recorded."
+                        className={`inline-flex ${BTN_BASE} cursor-not-allowed bg-orange-100 text-orange-800 opacity-70 sm:px-5`}
+                      >
+                        Waiting for Production
+                      </button>
+                    </div>
+                  )}
                   {next && (
                     <button
                       type="button"

@@ -275,8 +275,9 @@ export const createPosOrder = async (payload) => {
   // sa Orders.jsx admin page.
   const isBuyNow = payload.orderType === 'Buy Now';
   const manilaNow = getManilaNow();
-  const hasOutstandingBalance = Number(payload.payment?.balance || 0) > 0;
-  const shouldCompleteImmediately = isBuyNow && !hasOutstandingBalance;
+  // A POS Buy Now item is already in stock and leaves with the walk-in
+  // customer at checkout, so its fulfillment is complete immediately.
+  const shouldCompleteImmediately = isBuyNow;
   const orderStatus = shouldCompleteImmediately ? 'Completed' : 'Confirmed';
 
   let dbPaymentType = 'full';

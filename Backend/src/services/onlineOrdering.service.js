@@ -871,6 +871,9 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
     customer_id: customerData.id,
     order_type: payload.orderType,
     source: 'online',
+    // Online Buy Now orders remain Confirmed after payment verification.
+    // All Orders routes these directly to Completed at pickup; only
+    // Pre-Orders use Ready after production.
     status: manualPayment ? 'Pending Verification' : 'Confirmed',
     subtotal: payload.payment.grandTotal,
     grand_total: payload.payment.grandTotal,

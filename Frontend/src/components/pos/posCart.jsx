@@ -394,8 +394,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const percentageNumberVal = Number(discountPercentage) || 0;
     const discountAmountCalc = subtotalCalc * (percentageNumberVal / 100);
     const chargeAmountCalc = Number(additionalCharge) || 0;
-    const grandTotalCalc = subtotalCalc - discountAmountCalc + chargeAmountCalc;
-    const amountDueCalc = paymentMode === '50% Deposit' ? grandTotalCalc / 2 : grandTotalCalc;
+    const calculatedTotal = subtotalCalc - discountAmountCalc + chargeAmountCalc;
+    const grandTotalCalc = paymentMode === '50% Deposit' ? Math.round(calculatedTotal) : calculatedTotal;
+    const amountDueCalc = paymentMode === '50% Deposit' ? Math.ceil(grandTotalCalc / 2) : grandTotalCalc;
 
     const discountPayload = percentageNumberVal > 0 ? {
       name: discountName || 'Discount',
@@ -515,8 +516,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const percentageNumber = Number(discountPercentage) || 0;
   const discountAmount = subtotal * (percentageNumber / 100);
   const chargeAmount = Number(additionalCharge) || 0;
-  const cartTotal = subtotal - discountAmount + chargeAmount;
-  const amountDue = paymentMode === '50% Deposit' ? cartTotal / 2 : cartTotal;
+  const calculatedCartTotal = subtotal - discountAmount + chargeAmount;
+  const cartTotal = paymentMode === '50% Deposit' ? Math.round(calculatedCartTotal) : calculatedCartTotal;
+  const amountDue = paymentMode === '50% Deposit' ? Math.ceil(cartTotal / 2) : cartTotal;
 
   return (
     <>
