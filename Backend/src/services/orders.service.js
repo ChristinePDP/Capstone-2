@@ -205,7 +205,7 @@ const OrdersService = {
    * Tumatanggap ng UUID (id) — pwede ring gumawa ng version na by order_number
    * kung ito ang gagamitin sa frontend (see updateStatusByOrderNumber sa model).
    */
-  async changeOrderStatus(id, status) {
+  async changeOrderStatus(id, status, { productionCompleted = false } = {}) {
     if (!id) {
       const err = new Error('Order id is required');
       err.status = 400;
@@ -226,6 +226,11 @@ const OrdersService = {
     if (!existingOrder) {
       const err = new Error('Order not found');
       err.status = 404;
+      throw err;
+    }
+    if (status === 'Ready' && existingOrder.order_type === 'Pre-Order' && !productionCompleted) {
+      const err = new Error('Pre-Orders can only be marked Ready after production is recorded.');
+      err.status = 409;
       throw err;
     }
     if (existingOrder.status === 'Pending Verification' && status !== 'Pending Verification' && status !== 'Cancelled') {

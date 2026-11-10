@@ -605,18 +605,21 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   }, [showSummaryModal]);
 
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  const paymentTotal = paymentType === 'half' ? Math.round(totalAmount) : totalAmount;
   const reservationMsRemaining = Date.parse(reservationExpiresAt) - Date.now();
   const reservationExpired = !checkoutReservationId || !Number.isFinite(reservationMsRemaining) || reservationMsRemaining <= 0;
   const reservationSecondsRemaining = Math.max(0, Math.ceil(reservationMsRemaining / 1000));
   const reservationIsUrgent = !reservationExpired && reservationSecondsRemaining <= 5 * 60;
-  const halfAmount = totalAmount / 2;
+  // Whole-peso deposit, rounded up so it is never below 50%; balance stays whole too.
+  const halfAmount = Math.ceil(paymentTotal / 2);
+  const balanceAtPickup = paymentTotal - halfAmount;
 
-  const getLiveNow = () => {
+  function getLiveNow() {
     const now = new Date();
     const dateStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
     const timeStr = now.toTimeString().slice(0, 5);
     return { dateStr, timeStr };
-  };
+  }
 
   useEffect(() => {
     if (pickupType === 'now') {
@@ -1024,9 +1027,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         })),
         payment: {
           type: paymentType === 'half' ? 'deposit' : 'full',
-          amountDueNow: paymentType === 'half' ? halfAmount : totalAmount,
-          balanceAtPickup: paymentType === 'half' ? halfAmount : 0,
-          grandTotal: totalAmount,
+          amountDueNow: paymentType === 'half' ? halfAmount : paymentTotal,
+          balanceAtPickup: paymentType === 'half' ? balanceAtPickup : 0,
+          grandTotal: paymentTotal,
         },
         createdAt: new Date().toISOString(),
       };
@@ -1431,7 +1434,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <span className="text-xs font-bold text-[#3B1F0A]">Full Payment</span>
                           </div>
                           <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay in full for hassle-free pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{totalAmount.toLocaleString()}</div>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{paymentTotal.toLocaleString()}</div>
                       </div>
                       </div>
                   </div>
@@ -1555,7 +1558,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
               {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[11px] text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
-                <span className="text-[11px] text-[#8A7264]">₱{(paymentType === 'half' ? halfAmount : totalAmount).toLocaleString()}</span>
+                <span className="text-[11px] text-[#8A7264]">₱{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
               </div>
               <div className={`flex items-center justify-between mb-1 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
                 <span className="text-[11px] text-[#8A7264]">Balance at Pick-up</span>
@@ -1564,7 +1567,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
               <div className="w-full h-px bg-[#F1EBE6] mb-1"></div>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                <span className="font-serif text-base text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
+                <span className="font-serif text-base text-[#3B1F0A]">₱{paymentTotal.toLocaleString()}</span>
               </div>
             </div>
             <div className="min-w-0">
@@ -1781,7 +1784,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
-                  <span className="text-xs text-[#8A7264] font-medium">₱{(paymentType === 'half' ? halfAmount : totalAmount).toLocaleString()}</span>
+                  <span className="text-xs text-[#8A7264] font-medium">₱{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
                 </div>
                 <div className={`flex items-center justify-between mb-2 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
                   <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
@@ -1790,7 +1793,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                  <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{totalAmount.toLocaleString()}</span>
+                  <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{paymentTotal.toLocaleString()}</span>
                 </div>
               </div>
 

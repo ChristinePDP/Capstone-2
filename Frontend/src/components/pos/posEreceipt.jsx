@@ -61,9 +61,9 @@ export default function PosEReceipt({
     };
   }, []);
 
-  const halfAmount = totalAmount / 2;
+  const halfAmount = Math.ceil(totalAmount / 2);
   const amountPaid = paymentType === 'half' ? halfAmount : totalAmount;
-  const balance = paymentType === 'half' ? halfAmount : 0;
+  const balance = paymentType === 'half' ? totalAmount - halfAmount : 0;
 
   const formattedDate = now.toLocaleDateString('en-US', {
     month: '2-digit',

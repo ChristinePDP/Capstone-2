@@ -665,7 +665,7 @@ const ProductionService = {
     // existing logic doon (hal. bawas sa Celebration Material stock
     // kapag 'Ready' ang isang Pre-Order).
     try {
-      await OrdersService.changeOrderStatus(body.order_id, 'Ready');
+      await OrdersService.changeOrderStatus(body.order_id, 'Ready', { productionCompleted: true });
     } catch (err) {
       throw new AppError(
         'Na-log na ang production at expenses, pero hindi na-update ang status ng order. '

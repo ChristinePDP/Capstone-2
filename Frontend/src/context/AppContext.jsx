@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AppContext.jsx
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { apiClient } from '../services/apiClient';
 import { getProfile } from '../services/authService.js';
 
@@ -27,10 +28,9 @@ const FULFILLMENT_API_URL = `${import.meta.env.VITE_API_URL}/allOrders/pending-c
 
 const normalizeName = (value = '') => String(value).trim().toLowerCase();
 
-// Compact, searchable labels for inventory activity in the browser DevTools.
-const logInventoryCrud = (operation, resource, details = {}) => {
-  console.info(`[Inventory CRUD] ${operation.toUpperCase()} ${resource}`, details);
-};
+// Intentionally no inventory details in browser DevTools; this context is also
+// mounted around public customer routes such as online ordering.
+const logInventoryCrud = () => {};
 
 const normalizeIngredientRow = item => ({
   id: item.id,
@@ -107,6 +107,9 @@ const getErrMsg = (err, fallback) =>
 // modification — iyon mismo ang inaasahang shape.
 
 export function AppProvider({ children }) {
+  const location = useLocation();
+  const isAdminRoute = /^\/(inventory|orders|pos|analytics|productAndEvent|settings)(\/|$)/.test(location.pathname);
+
   // ── Auth state ──
   // FIX: dating one-time localStorage.getItem() check lang ito sa loob ng
   // isang useEffect na may empty `[]` dependency array. Ang AppProvider ay
@@ -313,13 +316,25 @@ export function AppProvider({ children }) {
   // (mula false -> true, via login() sa ibaba), agad itong magra-refire at
   // magfe-fetch — kahit walang page refresh/remount.
   useEffect(() => {
-    if (isAuthed) {
+    if (!isAdminRoute) {
+      setIngredients([]);
+      setMaterials([]);
+      setRecipes([]);
+      setProductionLogs([]);
+      setWasteLogs([]);
+      setProducts([]);
+      setOrders([]);
+      setPendingMaterialFulfillment([]);
+      setLoading(false);
+      return;
+    }
+    if (isAuthed && isAdminRoute) {
       fetchAll();
     }
-  }, [isAuthed, fetchAll]);
+  }, [isAuthed, isAdminRoute, fetchAll]);
 
   useEffect(() => {
-    if (!isAuthed) return undefined;
+    if (!isAuthed || !isAdminRoute) return undefined;
 
     const source = new EventSource(REALTIME_API_URL, { withCredentials: true });
     let wasDisconnected = false;
@@ -515,7 +530,7 @@ export function AppProvider({ children }) {
       targetedRefreshTimers.forEach(timer => clearTimeout(timer));
       targetedRefreshTimers.clear();
     };
-  }, [isAuthed, fetchAll]);
+  }, [isAuthed, isAdminRoute, fetchAll]);
 
   // ── Auth actions ──
   // I-tawag ito sa Login page/handler pagka-SUCCESS ng login, sa halip na
