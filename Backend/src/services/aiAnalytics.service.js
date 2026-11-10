@@ -506,6 +506,7 @@ function describeForecastMethod(horizonKey, historyDays, meta) {
 const AI_FORECAST_GUARD = {
   maxPromptTokens: 20000, // estimate (chars / 3) — sinadyang konserbatibo
   timeoutMs: 60 * 1000,
+  maxOutputTokens: 4096, // forecast output ay maliit; cap para hindi kumain ng quota
   temperature: 0.2,
   cooldownMs: { normal: 15 * 60 * 1000, rateLimited: 60 * 60 * 1000, max: 3 * 60 * 60 * 1000 },
   minProductsInPrompt: 10,
@@ -515,6 +516,10 @@ const AI_FORECAST_GUARD = {
 // Shared sa Sales at Product (iisang Gemini key/quota) — kapag pumalya ang
 // isa, nagpapahinga rin ang isa.
 const aiForecastState = { cooldownUntil: 0, consecutiveFailures: 0 };
+// Invalid OUTPUT (hindi quota/API error) ay hindi dapat magpatigil sa ibang service,
+// kaya hiwalay at maikli ang cooldown nito (per label).
+const VALIDATION_COOLDOWN_MS = 5 * 60 * 1000;
+const labelCooldownUntil = new Map();
 const inFlightRefreshes = new Map();
 
 function singleFlight(key, fn) {
@@ -549,10 +554,11 @@ function registerAiForecastFailure(err) {
 
 // ISANG tawag lang. `parseResult` ay tumatakbo sa loob ng guard, kaya ang
 // invalid output ay binibilang din na failure (cooldown), hindi inuulit.
-async function callGeminiForecastOnce(label, { systemPrompt, userPrompt }, parseResult) {
+async function callGeminiForecastOnce(label, { systemPrompt, userPrompt, responseSchema }, parseResult) {
   const now = Date.now();
-  if (now < aiForecastState.cooldownUntil) {
-    const minsLeft = Math.ceil((aiForecastState.cooldownUntil - now) / 60000);
+  const blockedUntil = Math.max(aiForecastState.cooldownUntil, labelCooldownUntil.get(label) || 0);
+  if (now < blockedUntil) {
+    const minsLeft = Math.ceil((blockedUntil - now) / 60000);
     throw new Error(`[${label}] Gemini on cooldown (~${minsLeft} min left) — skipped, walang tinawag.`);
   }
 
@@ -564,7 +570,7 @@ async function callGeminiForecastOnce(label, { systemPrompt, userPrompt }, parse
   let timer;
   try {
     const raw = await Promise.race([
-      callGeminiJSON({ systemPrompt, userPrompt, temperature: AI_FORECAST_GUARD.temperature }),
+      callGeminiJSON({ systemPrompt, userPrompt, temperature: AI_FORECAST_GUARD.temperature, responseSchema, maxOutputTokens: AI_FORECAST_GUARD.maxOutputTokens }),
       new Promise((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`Gemini timeout after ${AI_FORECAST_GUARD.timeoutMs / 1000}s`)),
@@ -574,12 +580,24 @@ async function callGeminiForecastOnce(label, { systemPrompt, userPrompt }, parse
     ]);
     if (!raw || typeof raw !== "object") throw new Error("Gemini returned an empty or non-object result.");
 
-    const parsed = parseResult(raw);
+    let parsed;
+    try {
+      parsed = parseResult(raw);
+    } catch (validationErr) {
+      validationErr.isValidation = true;
+      throw validationErr;
+    }
     aiForecastState.consecutiveFailures = 0;
     aiForecastState.cooldownUntil = 0;
+    labelCooldownUntil.delete(label);
     return parsed;
   } catch (err) {
-    registerAiForecastFailure(err);
+    if (err.isValidation) {
+      labelCooldownUntil.set(label, Date.now() + VALIDATION_COOLDOWN_MS);
+      console.error(`[AIForecast] ${label} output rejected: ${err.message} | Cooldown ${VALIDATION_COOLDOWN_MS / 60000} min (para sa ${label} lang).`);
+    } else {
+      registerAiForecastFailure(err);
+    }
     throw err;
   } finally {
     clearTimeout(timer);
@@ -1594,7 +1612,19 @@ function buildProductForecastPrompt(products, { todayKey, includeThirty }) {
     })),
     outputFormat: `Return {"products":[{"id":"<same id>","next7Units":<whole number>${includeThirty ? ',"next30Units":<whole number>' : ""}}]} with one entry per product id. Whole numbers >= 0 only.`,
   });
-  return { systemPrompt, userPrompt };
+  const rowProps = { id: { type: "STRING" }, next7Units: { type: "INTEGER" } };
+  if (includeThirty) rowProps.next30Units = { type: "INTEGER" };
+  const responseSchema = {
+    type: "OBJECT",
+    properties: {
+      products: {
+        type: "ARRAY",
+        items: { type: "OBJECT", properties: rowProps, required: Object.keys(rowProps) },
+      },
+    },
+    required: ["products"],
+  };
+  return { systemPrompt, userPrompt, responseSchema };
 }
 
 // Bounded: bawat ikot ay binabawasan ang listahan (hindi tumatawag kay Gemini).
@@ -1616,30 +1646,58 @@ function fitProductsToTokenBudget(candidates, buildPrompt) {
 }
 
 // VALIDATOR: id lang na ipinadala ang tatanggapin; may upper-bound bawat
-// produkto; kapag wala pang kalahati ang valid, buong sagot ay reject.
+// produkto. TOLERANT sa shape (alias ng keys, numeric strings, id-or-name) at
+// per-horizon: kapag valid ang 7d pero sira ang 30d (o vice versa), hawak pa rin
+// ang valid na isa. Kapag wala pang kalahati ang may valid na horizon, reject.
+const pickNumber = (row, keys) => {
+  for (const k of keys) {
+    const v = row?.[k];
+    if (v === null || v === undefined || v === "") continue;
+    const n = Number(typeof v === "string" ? v.replace(/[,\s]/g, "") : v);
+    if (Number.isFinite(n)) return n;
+  }
+  return NaN;
+};
+
 function parseProductAiResult(raw, { sentById, includeThirty }) {
-  if (!Array.isArray(raw.products)) throw new Error('Gemini result is missing the "products" array.');
+  const rows = Array.isArray(raw.products) ? raw.products
+    : Array.isArray(raw.forecasts) ? raw.forecasts
+    : Array.isArray(raw.data) ? raw.data
+    : null;
+  if (!rows) throw new Error(`Gemini result is missing the "products" array. Keys received: [${Object.keys(raw).join(", ")}]`);
 
+  const byName = new Map([...sentById.values()].map((p) => [String(p.productName).trim().toLowerCase(), p]));
+  const tally = { unknownId: 0, duplicate: 0, bad7: 0, bad30: 0 };
   const byId = new Map();
-  for (const row of raw.products) {
-    const src = sentById.get(String(row?.id));
-    if (!src || byId.has(src.id)) continue; // hindi kilalang id / duplicate
 
-    const f7 = Number(row.next7Units);
-    const f30 = includeThirty ? Number(row.next30Units) : null;
+  for (const row of rows) {
+    const rawId = row?.id ?? row?.productId ?? row?.product_id;
+    const src = sentById.get(String(rawId ?? "").trim())
+      || byName.get(String(row?.name ?? row?.productName ?? "").trim().toLowerCase());
+    if (!src) { tally.unknownId += 1; continue; }
+    if (byId.has(src.id)) { tally.duplicate += 1; continue; }
+
     const recent7 = sumOf(src.series.slice(-7).map((p) => p.value));
     const recent30 = sumOf(src.series.slice(-30).map((p) => p.value));
+    const f7 = pickNumber(row, ["next7Units", "next_7_units", "next7", "units7d", "forecast7d"]);
+    const f30 = includeThirty ? pickNumber(row, ["next30Units", "next_30_units", "next30", "units30d", "forecast30d"]) : NaN;
 
     const ok7 = Number.isFinite(f7) && f7 >= 0 && f7 <= recent7 * 3 + 10;
-    const ok30 = !includeThirty || (Number.isFinite(f30) && f30 >= 0 && f30 <= recent30 * 3 + 15);
-    if (!ok7 || !ok30) continue;
+    const ok30 = includeThirty && Number.isFinite(f30) && f30 >= 0 && f30 <= recent30 * 3 + 15;
+    if (!ok7) tally.bad7 += 1;
+    if (includeThirty && !ok30) tally.bad30 += 1;
+    if (!ok7 && !ok30) continue;
 
-    byId.set(src.id, { f7: Math.round(f7), f30: includeThirty ? Math.round(f30) : null });
+    byId.set(src.id, { f7: ok7 ? Math.round(f7) : null, f30: ok30 ? Math.round(f30) : null });
   }
 
   const minValid = Math.ceil(sentById.size * 0.5);
   if (byId.size < minValid) {
-    throw new Error(`Only ${byId.size}/${sentById.size} product forecasts passed validation (need ${minValid}) — response rejected.`);
+    const sample = JSON.stringify(rows.slice(0, 2)).slice(0, 300);
+    throw new Error(
+      `Only ${byId.size}/${sentById.size} product forecasts passed validation (need ${minValid}) — response rejected. ` +
+      `rowsReceived=${rows.length}, reasons=${JSON.stringify(tally)}, sample=${sample}`
+    );
   }
   return byId;
 }
@@ -1945,7 +2003,13 @@ function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHor
     outputFormat: `Return {"forecast":[...],"lower":[...],"upper":[...]} where each array has exactly ${horizonDays} whole numbers aligned with forecastDates, and 0 <= lower <= forecast <= upper.`,
   });
 
-  return { systemPrompt, userPrompt };
+  const intArray = { type: "ARRAY", items: { type: "INTEGER" } };
+  const responseSchema = {
+    type: "OBJECT",
+    properties: { forecast: intArray, lower: intArray, upper: intArray },
+    required: ["forecast", "lower", "upper"],
+  };
+  return { systemPrompt, userPrompt, responseSchema };
 }
 
 // VALIDATOR: shape, per-day cap, at total laban sa statistical baseline.

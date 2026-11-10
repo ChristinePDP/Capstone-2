@@ -7,39 +7,79 @@ import {
 import { generateHomepageAds } from '../services/productAndEvent.service.js';
 import { emitRealtimeChange } from '../services/realtime.service.js';
 
-export const runDailyAnalyticsJob = async () => {
-  console.log('--- Daily Analytics Job Started ---');
+// Isang hakbang na pumalya ay hindi dapat pumigil sa susunod.
+const runStep = async (label, fn) => {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`[DailyJob] ${label} failed:`, err?.message || err);
+  }
+};
 
-  // Forecasting only supports these two windows now (60d was removed).
-  const timeframes = ['7d', '30d'];
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // STEP 1: Forecasts must run FIRST. Actionable Recommendations reads
-  // their cached output for this same run — if it ran before this, it
-  // would see yesterday's forecast (or none at all on a first-ever run).
-  console.log('Generating Product & Sales Forecasts...');
-  for (const t of timeframes) {
-    await ProductForecastService.getProductTrendsByTimeframe(t, true);
-    await SalesForecastService.getSalesTrendsByTimeframe(t, true);
+// Pinoprotektahan ang pagkakasunod-sunod: kapag tumatakbo pa ang forecast job
+// (halimbawa, mabagal at inabot na ng oras ng insights job), maghihintay muna
+// ang insights job sa natitira. Hindi ito gagawa ng pangalawang forecast.
+let forecastRun = null;
+
+// ==========================================
+// JOB 1 — FORECASTS
+// ISANG Gemini call kada forecast; 7d + 30d nang sabay.
+// ==========================================
+export const runForecastJob = async () => {
+  if (forecastRun) return forecastRun;
+
+  forecastRun = (async () => {
+    console.log('--- Forecast Job Started ---');
+    await runStep('Product forecast', () => ProductForecastService.refreshProductForecast());
+    await sleep(65 * 1000); // bagong TPM window bago ang susunod na Gemini call
+    await runStep('Sales forecast', () => SalesForecastService.refreshSalesForecast());
+    emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'forecast-analytics' });
+    console.log('--- Forecast Job Finished ---');
+  })().finally(() => {
+    forecastRun = null;
+  });
+
+  return forecastRun;
+};
+
+// ==========================================
+// JOB 2 — INSIGHTS (tinatawag pagkatapos ng Job 1)
+// Actionable Recommendations (past data + CACHED forecast mula sa Job 1)
+// at Performance Summary.
+// ==========================================
+export const runInsightsJob = async () => {
+  if (forecastRun) {
+    console.log('[InsightsJob] Forecast job is still running — waiting for it to finish first.');
+    await forecastRun.catch(() => {});
   }
 
-  // STEP 2: Actionable Recommendations — only after the forecasts above
-  // have completed. Each call must pass (timeframe, forceRefresh) in
-  // that order — not a single `true`, which used to be misread as the
-  // timeframe itself.
-  console.log('Generating Actionable Recommendations...');
-  for (const t of timeframes) {
-    await ActionableRecommendationService.getActionableRecommendations(t, true);
-  }
-
-  await PerformanceSummaryService.getPerformanceSummary(true);
+  console.log('--- Insights Job Started ---');
+  await runStep('Actionable recommendations', () =>
+    ActionableRecommendationService.getActionableRecommendations(true)
+  );
+  await sleep(65 * 1000);
+  await runStep('Performance summary', () => PerformanceSummaryService.getPerformanceSummary(true));
 
   console.log('Generating Homepage Ads (Best Sellers)...');
-  await generateHomepageAds();
+  await runStep('Homepage ads', () => generateHomepageAds());
 
-  // NOTE: Event Ads are no longer generated here. GET /event-ads computes
-  // them directly from live events + product event tags (getLiveEventAds),
-  // so no daily cron step is needed.
+  emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'insights-analytics' });
+  console.log('--- Insights Job Finished ---');
+};
 
-  emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'daily-analytics' });
-  console.log('--- Daily Analytics Job Finished ---');
+// Bilang ng minuto ng pahinga PAGKATAPOS matapos ang forecasts bago magsimula ang insights.
+const INSIGHTS_DELAY_MS = 5 * 60 * 1000;
+
+// ISANG entry point (cron at POST /run-daily): sunud-sunod, may dependency.
+//   1) Forecasts (Product -> Sales)           — hinihintay hanggang MATAPOS
+//   2) 5 minutong pahinga (iwas TPM / quota)
+//   3) Insights (Recommendations -> Performance Summary -> Homepage Ads)
+// Hindi magsisimula ang step 3 hangga't hindi tapos ang step 1, kahit gaano katagal ito.
+export const runDailyAnalyticsJob = async ({ insightsDelayMs = INSIGHTS_DELAY_MS } = {}) => {
+  await runForecastJob();
+  console.log(`[DailyJob] Forecasts done — waiting ${Math.round(insightsDelayMs / 1000)}s before insights.`);
+  await sleep(insightsDelayMs);
+  await runInsightsJob();
 };
