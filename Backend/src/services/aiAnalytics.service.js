@@ -2001,9 +2001,26 @@ const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // total ng AI vs statistic
 
 function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon }) {
   const horizonDays = futureDates.length;
+  const horizonKey = `${horizonDays}d`;
+  const baselineTotal = Number(referenceByHorizon[horizonKey]?.baselineTotal || 0);
+  const recent30DayActual = sumOf(filteredHistory.slice(-30).map((point) => point.value));
+  const scaleReference = {
+    currency: "PHP",
+    recent30DayActualTotal: Math.round(recent30DayActual),
+    recent30DayAveragePerCalendarDay: Math.round(recent30DayActual / 30),
+    statisticalForecastTotalForRequestedHorizon: Math.round(baselineTotal),
+    requiredForecastTotalRange: baselineTotal > 0
+      ? {
+          minimum: Math.round(baselineTotal * SF_TOTAL_SANITY_BAND.min),
+          maximum: Math.round(baselineTotal * SF_TOTAL_SANITY_BAND.max),
+        }
+      : null,
+  };
   const systemPrompt = [
     "You are a demand-forecasting analyst for a small food business.",
-    "You receive pre-cleaned daily sales history (outlier days were already capped by the system) and reference statistics computed by the system.",
+    "You receive pre-cleaned daily sales history in PHP (outlier days were already capped by the system) and reference statistics computed by the system.",
+    "Forecast revenue amounts in PHP only, not product units, order counts, or thousands of PHP.",
+    "First check the scaleReference values against dailySales. Your forecast values must stay on that same PHP scale, and their sum must be within requiredForecastTotalRange.",
     "Analyze weekday seasonality, the recent level and the recent trend, then forecast daily sales for the requested dates.",
     "Use ONLY the data provided. Do not invent events, holidays or promotions.",
     "Return ONLY one JSON object. No markdown, no commentary.",
@@ -2016,6 +2033,7 @@ function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHor
       endDate: filteredHistory[filteredHistory.length - 1].date,
       dailySales: filteredHistory.map((p) => Math.round(p.value)),
     },
+    scaleReference,
     forecastDates: futureDates,
     referenceStatistics: referenceByHorizon,
     outputFormat: `Return {"forecast":[...],"lower":[...],"upper":[...]} where each array has exactly ${horizonDays} whole numbers aligned with forecastDates, and 0 <= lower <= forecast <= upper.`,
