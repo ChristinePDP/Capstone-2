@@ -1677,6 +1677,23 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     .slice(0, PRODUCT_LIST_MAX)
     .map(toListItem);
 
+  // Keep enough per-product evidence in Render logs to explain why a product
+  // entered or left the at-risk list between scheduled runs.
+  for (const r of results) {
+    const isAtRisk = r.pct !== null
+      && r.diff <= -rules.minAbsChange
+      && r.pct <= rules.riskPctCeiling;
+    console.log(`[ProductForecastService][${horizonKey}] Product comparison: ${JSON.stringify({
+      name: r.name,
+      [`actualLast${horizon}d`]: r.recentQty,
+      [`forecastNext${horizon}d`]: r.forecast,
+      change: r.diff,
+      changePct: r.pct,
+      atRisk: isAtRisk,
+      riskRule: `change <= -${rules.minAbsChange} units and changePct <= ${rules.riskPctCeiling}%`,
+    })}`);
+  }
+
   const recentUnitsAll = sumOf(results.map((r) => r.recentQty));
   const forecastUnitsAll = sumOf(results.map((r) => r.forecast));
   const totals = {

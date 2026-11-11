@@ -5,6 +5,13 @@ import { BarChart2 } from 'lucide-react';
 export default function StackedBar({ period = 'Past 7 Days', height = 220, data: propData }) {
   const chartWrapRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 600);
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Track the ACTUAL rendered width of the chart instead of just a mobile/desktop
   // boolean. This lets the tick interval adapt to any container size (sidebar
@@ -81,24 +88,22 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
     processedChartData.every(d => Number(d.Sales || 0) === 0 && Number(d.Expenses || 0) === 0)
   );
 
-  // Roughly how many horizontal pixels a single label like "Sep 1" or "Sep 30"
-  // needs so it doesn't collide with its neighbors (glyph width + breathing room).
-  const LABEL_PX = 58;
-
-  const tickInterval = useMemo(() => {
+  // Allow enough room for the full weekday/date labels used on wide charts.
+  // Narrow charts use a shorter date label below.
+  const effectiveWidth = Math.min(chartWidth || viewportWidth, viewportWidth);
+  const isNarrowChart = effectiveWidth <= 560;
+  const labelStep = useMemo(() => {
     const len = processedChartData.length;
-    if (len === 0) return 0;
+    if (len === 0) return 1;
 
-    // While chartWidth hasn't been measured yet, fall back to a sane guess
-    // instead of showing every single label (which is what caused the crowding).
-    const width = chartWidth || (typeof window !== 'undefined' ? window.innerWidth * 0.6 : 600);
-
-    const maxVisibleLabels = Math.max(3, Math.floor(width / LABEL_PX));
-    if (len <= maxVisibleLabels) return 0;
-
-    // interval=N means "render every (N+1)th tick", so subtract 1 from the step.
-    return Math.max(0, Math.ceil(len / maxVisibleLabels) - 1);
-  }, [processedChartData.length, chartWidth]);
+    // Cap the measured width by the viewport. This prevents an initially wide
+    // chart measurement from keeping too many labels after desktop-to-mobile resize.
+    const width = Math.min(chartWidth || viewportWidth, viewportWidth);
+    const labelWidth = width <= 560 ? 54 : 92;
+    const plotWidth = Math.max(0, width - 88);
+    const maxVisibleLabels = Math.max(2, Math.floor(plotWidth / labelWidth));
+    return Math.max(1, Math.ceil(len / maxVisibleLabels));
+  }, [processedChartData.length, chartWidth, viewportWidth]);
 
   const fmtFull = (n) => '₱' + Math.round(n).toLocaleString('en-PH');
   const fmtAxis = (v) => {
@@ -110,7 +115,7 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
   const axisStyle = { fontSize: 11, fill: '#64748b', fontWeight: 600 };
 
   return (
-    <div className="relative overflow-hidden p-4 sm:p-5 bg-white rounded-xl flex flex-col h-full shadow-sm" data-testid="performance-trend">
+    <div className="relative min-w-0 w-full overflow-hidden p-4 sm:p-5 bg-white rounded-xl flex flex-col h-full shadow-sm" data-testid="performance-trend">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4 pt-1">
         <div className="flex items-center gap-2">
           <BarChart2 size={18} className="text-brand-600 shrink-0" />
@@ -135,17 +140,24 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
           No performance trend data available for this timeframe
         </div>
       ) : (
-      <div ref={chartWrapRef} className="flex-1" style={{ minHeight: height }}>
+      <div ref={chartWrapRef} className="flex-1 min-w-0 w-full" style={{ minHeight: height }}>
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           <BarChart data={processedChartData} margin={{ top: 8, right: 8, left: -15, bottom: 0 }} barCategoryGap="20%">
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={true} horizontal={true} />
             
             <XAxis 
               dataKey="label" 
+              interval={0}
+              tickFormatter={(label, index) => {
+                const lastIndex = processedChartData.length - 1;
+                if (index % labelStep !== 0 && index !== lastIndex) return '';
+                if (!isNarrowChart || isHourly || typeof label !== 'string') return label;
+                // Mobile: keep the date, drop the weekday (for example, "Nov 4").
+                return label.replace(/^[A-Za-z]{3,9}\s*\((.+)\)$/, '$1');
+              }}
               tick={axisStyle} 
               axisLine={{ stroke: '#f1f5f9' }} 
               tickLine={false} 
-              interval={tickInterval} 
               angle={0} 
               textAnchor="middle"
               dy={12} 
