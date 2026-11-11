@@ -6,13 +6,14 @@ const OrdersModel = {
   getByDateRange: async (
     startDate,
     endDate,
-    { columns = '*', excludeCancelled = false } = {}
+    { columns = '*', excludeCancelled = false, dateColumn = 'updated_at' } = {}
   ) => {
+    const rangeColumn = dateColumn === 'created_at' ? 'created_at' : 'updated_at';
     let query = getSupabase()
       .from(TABLE)
       .select(columns)
-      .gte('updated_at', startDate)
-      .lte('updated_at', endDate);
+      .gte(rangeColumn, startDate)
+      .lte(rangeColumn, endDate);
 
     if (excludeCancelled) {
       query = query.neq('status', 'Cancelled');

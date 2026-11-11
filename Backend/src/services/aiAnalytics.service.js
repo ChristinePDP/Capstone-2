@@ -1239,6 +1239,9 @@ function emptyActionablePayload() {
   return { salesOptimization: [], inventoryOptimization: [] };
 }
 
+const isUsableActionableCache = (cached) =>
+  !!(cached?.payload && (cached.payload.salesOptimization?.length || cached.payload.inventoryOptimization?.length));
+
 const ActionableRecommendationService = {
   // No longer takes a timeframe — recommendations are a single,
   // timeframe-independent set that internally reasons over whichever
@@ -1256,77 +1259,91 @@ const ActionableRecommendationService = {
       };
     }
 
-    // GATE: recommendations are a downstream consumer of the Sales
-    // Forecast AND Product Forecast. If NEITHER the 7-day NOR the 30-day
-    // horizon is ready on both sides, there is no forecast to reason
-    // over yet — no-op entirely rather than fall back to a past-data-only
-    // recommendation.
-    const forecastAvailability = await getForecastAvailability();
-    if (!forecastAvailability.anyReady) {
-      return {
-        recommendations: emptyActionablePayload(),
-        insufficientData: true,
-        message: "Waiting for the sales and product forecast to finish generating before recommendations can be produced.",
-      };
-    }
-
-    const historicalWindowDays = resolveHistoricalLookbackDays(forecastAvailability);
-
-    try {
-      const [ingredientToProducts, previousTitles] = await Promise.all([
-        buildIngredientToProductsMap(),
-        getPreviousRecommendationTitles(AR_CACHE_KEY),
-      ]);
-      const context = await getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability);
-      const { systemPrompt, userPrompt } = buildActionablePrompt(context, previousTitles);
-
-      // RELIABILITY LOOP: up to 3 attempts. Each attempt is checked with
-      // validateActionablePayload() (real content rules, not just JSON
-      // shape). If an attempt fails, the NEXT attempt is told exactly
-      // what was wrong and asked to fix it — and temperature is lowered
-      // on retries to reduce variance and push Gemini toward the
-      // instructions rather than a "creative" reinterpretation of them.
-      const MAX_ATTEMPTS = 3;
-      let payload = null;
-      let issues = [];
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        const retryNote = attempt > 1
-          ? `\n\nIMPORTANT — YOUR PREVIOUS ATTEMPT FAILED THESE SPECIFIC CHECKS. FIX THEM THIS TIME:\n${issues.map((i) => `- ${i}`).join("\n")}\n`
-          : "";
-        const temperature = attempt === 1 ? 0.5 : 0.25;
-        const aiResult = await callGeminiJSON({ systemPrompt, userPrompt: userPrompt + retryNote, temperature });
-        const candidate = normalizeActionablePayload(aiResult);
-        issues = validateActionablePayload(candidate, context);
-        payload = candidate; // keep the latest attempt as the best-so-far fallback
-
-        if (issues.length === 0) break;
-        console.warn(`[ActionableRecommendationService] Attempt ${attempt}/${MAX_ATTEMPTS} failed validation:`, issues);
+    return singleFlight("actionable_recommendations", async () => {
+      // GATE: recommendations are a downstream consumer of the Sales
+      // Forecast AND Product Forecast. If NEITHER the 7-day NOR the 30-day
+      // horizon is ready on both sides, there is no forecast to reason
+      // over yet — no-op entirely rather than fall back to a past-data-only
+      // recommendation.
+      const forecastAvailability = await getForecastAvailability();
+      if (!forecastAvailability.anyReady) {
+        return {
+          recommendations: emptyActionablePayload(),
+          insufficientData: true,
+          message: "Waiting for the sales and product forecast to finish generating before recommendations can be produced.",
+        };
       }
 
-      if (issues.length > 0) {
-        // All attempts still failed content validation. Do NOT overwrite
-        // a previously good cached result with something we know is
-        // low-quality — keep serving the last known-good set instead,
-        // and log loudly so this is visible in cron logs (not just
-        // discovered later by eyeballing the dashboard).
-        console.error(
-          "[ActionableRecommendationService] All attempts failed validation — keeping previous cached recommendations instead of overwriting with low-quality output:",
-          issues
-        );
-        const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY);
-        if (existingCache && existingCache.payload) {
+      const historicalWindowDays = resolveHistoricalLookbackDays(forecastAvailability);
+
+      try {
+        const [ingredientToProducts, previousTitles] = await Promise.all([
+          buildIngredientToProductsMap(),
+          getPreviousRecommendationTitles(AR_CACHE_KEY),
+        ]);
+        const context = await getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability);
+        const { systemPrompt, userPrompt } = buildActionablePrompt(context, previousTitles);
+
+        // RELIABILITY LOOP: up to 3 attempts. Each attempt is checked with
+        // validateActionablePayload() (real content rules, not just JSON
+        // shape). If an attempt fails, the NEXT attempt is told exactly
+        // what was wrong and asked to fix it — and temperature is lowered
+        // on retries to reduce variance and push Gemini toward the
+        // instructions rather than a "creative" reinterpretation of them.
+        const MAX_ATTEMPTS = 3;
+        let payload = null;
+        let issues = [];
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          if (attempt > 1) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+          const retryNote = attempt > 1
+            ? `\n\nIMPORTANT — YOUR PREVIOUS ATTEMPT FAILED THESE SPECIFIC CHECKS. FIX THEM THIS TIME:\n${issues.map((i) => `- ${i}`).join("\n")}\n`
+            : "";
+          const temperature = attempt === 1 ? 0.5 : 0.25;
+          const aiResult = await callGeminiJSON({ systemPrompt, userPrompt: userPrompt + retryNote, temperature });
+          const candidate = normalizeActionablePayload(aiResult);
+          issues = validateActionablePayload(candidate, context);
+          payload = candidate; // keep the latest attempt as the best-so-far fallback
+
+          if (issues.length === 0) break;
+          console.warn(`[ActionableRecommendationService] Attempt ${attempt}/${MAX_ATTEMPTS} failed validation:`, issues);
+        }
+
+        if (issues.length > 0) {
+          // All attempts still failed content validation. Do NOT overwrite
+          // a previously good cached result with something we know is
+          // low-quality — keep serving the last known-good set instead,
+          // and log loudly so this is visible in cron logs (not just
+          // discovered later by eyeballing the dashboard).
+          console.error(
+            "[ActionableRecommendationService] All attempts failed validation — keeping previous cached recommendations instead of overwriting with low-quality output:",
+            issues
+          );
+          const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY);
+          if (isUsableActionableCache(existingCache)) {
+            return { recommendations: existingCache.payload, insufficientData: false };
+          }
+          // No previous good cache to fall back to (e.g. first-ever run) —
+          // serve the best-effort payload anyway rather than an empty one.
+        }
+
+        await AiCacheModel.upsert(AR_CACHE_KEY, payload, AR_CACHE_TTL_MS);
+        return { recommendations: payload, insufficientData: false };
+      } catch (err) {
+        console.error("[ActionableRecommendationService] Gemini recommendation failed:", err.message);
+        const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY).catch(() => null);
+        if (isUsableActionableCache(existingCache)) {
+          console.warn("[ActionableRecommendationService] Kept the previous cached recommendations.");
           return { recommendations: existingCache.payload, insufficientData: false };
         }
-        // No previous good cache to fall back to (e.g. first-ever run) —
-        // serve the best-effort payload anyway rather than an empty one.
+        return {
+          recommendations: emptyActionablePayload(),
+          insufficientData: true,
+          message: "AI recommendations unavailable right now. Will retry on next cron run.",
+        };
       }
-
-      await AiCacheModel.upsert(AR_CACHE_KEY, payload, AR_CACHE_TTL_MS);
-      return { recommendations: payload, insufficientData: false };
-    } catch (err) {
-      console.error("[ActionableRecommendationService] Gemini recommendation failed:", err.message);
-      return { recommendations: emptyActionablePayload(), insufficientData: true };
-    }
+    });
   },
 };
 
@@ -1938,6 +1955,7 @@ async function getSalesDailySeries() {
     (from, to) => OrdersModel.getByDateRange(from, to, {
       columns: "amount_paid, created_at",
       excludeCancelled: true,
+      dateColumn: "created_at",
       ascending: true,
     }),
     startISO,
@@ -2360,28 +2378,46 @@ function emptySummaryPayload() {
   };
 }
 
+const isUsableSummaryCache = (cached) =>
+  !!(cached?.payload && String(cached.payload.summaryText || "").trim().length > 0);
+
 const PerformanceSummaryService = {
   async getPerformanceSummary(forceRefresh = false) {
     if (!forceRefresh) {
       const cached = await AiCacheModel.getByKey(PS_MASTER_CACHE_KEY);
-      if (cached && cached.payload) {
-        return cached.payload;
+      if (isUsableSummaryCache(cached)) {
+        return { ...cached.payload, insufficientData: false };
       }
       return { ...emptySummaryPayload(), insufficientData: true, message: "No cached summary available. Awaiting Cron execution." };
     }
 
-    try {
-      const context = await getSummaryContext();
-      const { systemPrompt, userPrompt } = buildSummaryPrompt(context);
-      const aiResult = await callGeminiJSON({ systemPrompt, userPrompt });
-      const payload = normalizeSummaryPayload(aiResult, context);
+    return singleFlight("performance_summary", async () => {
+      try {
+        const context = await getSummaryContext();
+        const { systemPrompt, userPrompt } = buildSummaryPrompt(context);
+        const aiResult = await callGeminiJSON({ systemPrompt, userPrompt });
+        const payload = normalizeSummaryPayload(aiResult, context);
 
-      await AiCacheModel.upsert(PS_MASTER_CACHE_KEY, payload, PS_CACHE_TTL_MS);
-      return { ...payload, insufficientData: false };
-    } catch (err) {
-      console.error("[PerformanceSummaryService] Gemini summary failed:", err.message);
-      return { ...emptySummaryPayload(), insufficientData: true };
-    }
+        if (!payload.summaryText.trim()) {
+          throw new Error("Gemini returned an empty performance summary.");
+        }
+
+        await AiCacheModel.upsert(PS_MASTER_CACHE_KEY, payload, PS_CACHE_TTL_MS);
+        return { ...payload, insufficientData: false };
+      } catch (err) {
+        console.error("[PerformanceSummaryService] Gemini summary failed:", err.message);
+        const existingCache = await AiCacheModel.getByKey(PS_MASTER_CACHE_KEY).catch(() => null);
+        if (isUsableSummaryCache(existingCache)) {
+          console.warn("[PerformanceSummaryService] Kept the previous cached summary.");
+          return { ...existingCache.payload, insufficientData: false };
+        }
+        return {
+          ...emptySummaryPayload(),
+          insufficientData: true,
+          message: "AI summary unavailable right now. Will retry on next cron run.",
+        };
+      }
+    });
   },
 };
 
