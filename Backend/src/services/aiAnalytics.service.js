@@ -2160,6 +2160,11 @@ async function runSalesForecastRefresh() {
         }])
       );
       const baselineTotal = sumOf(baselines[ready30 ? "30d" : "7d"].values);
+      const baseline = baselines[ready30 ? "30d" : "7d"];
+      const recent30dActual = sumOf(series.slice(-30).map((point) => point.value));
+      console.log(
+        `[SalesForecastService] Baseline diagnostics: historyDays=${series.length}, recent30dActual=${Math.round(recent30dActual)}, baselineLevel=${baseline.meta.level}, baseline${horizonDays}d=${Math.round(baselineTotal)}`
+      );
 
       const prompts = buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon });
       const ai = await callGeminiForecastOnce(
