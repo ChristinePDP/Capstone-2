@@ -30,22 +30,31 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
 
   const isHourly = period.toLowerCase() === 'today' || period.toLowerCase() === 'yesterday';
 
-  // LOGIC PARA SA RANGE / 30-DAY LIMIT O INTERVAL:
-  // Kapag ang data ay lumagpas sa 30 items (hal. 60 days o 3 months), 
-  // awtomatiko nating nilalagyan ng interval o downsampling para hindi magsiksikan 
-  // at manatiling malinis at UI-approved ang X-axis labels.
+  // For long ranges, sum neighboring days into display buckets. Keeping every
+  // day's values in the bucket ensures the chart still represents the full range.
+  // FIX: `label` stays the full range (for the tooltip), pero may hiwalay na
+  // `tickLabel` (start date lang) para sa X axis, kasi ang haba ng
+  // "Dec 1 – Dec 12" kaya nagpapatong-patong sa malalawak na date range.
   const processedChartData = useMemo(() => {
     const data = Array.isArray(propData) ? propData : [];
-    
-    // Kung mahigit 30 ang data points (e.g. Custom range na lampas 1 month), 
-    // kinukuha natin ang tamang step para magkasya sa max 30 bars/labels.
-    let filteredData = data;
+    let chartData = data;
     if (!isHourly && data.length > 30) {
       const step = Math.ceil(data.length / 30);
-      filteredData = data.filter((_, index) => index % step === 0 || index === data.length - 1);
+      chartData = [];
+      for (let index = 0; index < data.length; index += step) {
+        const bucket = data.slice(index, index + step);
+        const firstLabel = bucket[0]?.label || '';
+        const lastLabel = bucket[bucket.length - 1]?.label || firstLabel;
+        chartData.push({
+          label: firstLabel === lastLabel ? firstLabel : `${firstLabel} – ${lastLabel}`,
+          tickLabel: firstLabel,
+          Sales: bucket.reduce((sum, item) => sum + Number(item.Sales || 0), 0),
+          Expenses: bucket.reduce((sum, item) => sum + Number(item.Expenses || 0), 0),
+        });
+      }
     }
 
-    return filteredData.map(d => {
+    return chartData.map(d => {
       const Sales = Number(d.Sales || 0);
       const Expenses = Number(d.Expenses || 0);
       const Profit = Sales - Expenses;
@@ -72,6 +81,7 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
 
       return {
         ...d,
+        tickLabel: d.tickLabel ?? d.label,
         Sales,
         Expenses,
         Profit,
@@ -88,22 +98,48 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
     processedChartData.every(d => Number(d.Sales || 0) === 0 && Number(d.Expenses || 0) === 0)
   );
 
-  // Allow enough room for the full weekday/date labels used on wide charts.
-  // Narrow charts use a shorter date label below.
+  // Allow enough room for date labels while keeping the chart readable.
   const effectiveWidth = Math.min(chartWidth || viewportWidth, viewportWidth);
   const isNarrowChart = effectiveWidth <= 560;
-  const labelStep = useMemo(() => {
+
+  // FIX: dati fixed lang ang lapad ng label (54 / 92px) kahit gaano kahaba
+  // ang text. Ngayon, sinusukat na base sa pinakamahabang tick label na
+  // talagang ipapakita, kaya hindi na nagsasalpukan ang mga label.
+  const labelLayout = useMemo(() => {
     const len = processedChartData.length;
-    if (len === 0) return 1;
+    if (len === 0) return { step: 1, labelWidth: 0, slotWidth: 0 };
 
     // Cap the measured width by the viewport. This prevents an initially wide
     // chart measurement from keeping too many labels after desktop-to-mobile resize.
     const width = Math.min(chartWidth || viewportWidth, viewportWidth);
-    const labelWidth = width <= 560 ? 54 : 92;
     const plotWidth = Math.max(0, width - 88);
+
+    const longest = processedChartData.reduce(
+      (max, d) => Math.max(max, String(d.tickLabel ?? d.label ?? '').length),
+      0
+    );
+    const baseWidth = width <= 560 ? 54 : 92;
+    const labelWidth = Math.max(baseWidth, longest * 6.6 + 16);
+
     const maxVisibleLabels = Math.max(2, Math.floor(plotWidth / labelWidth));
-    return Math.max(1, Math.ceil(len / maxVisibleLabels));
-  }, [processedChartData.length, chartWidth, viewportWidth]);
+    return {
+      step: Math.max(1, Math.ceil(len / maxVisibleLabels)),
+      labelWidth,
+      slotWidth: plotWidth / len,
+    };
+  }, [processedChartData, chartWidth, viewportWidth]);
+
+  const labelStep = labelLayout.step;
+
+  // FIX: dati laging pinipilit ang huling label kaya sumasalpok sa naunang
+  // label. Ngayon, ipapakita lang kung may sapat na espasyo.
+  const showLastLabel = useMemo(() => {
+    const lastIndex = processedChartData.length - 1;
+    if (lastIndex < 1) return true;
+    const lastRegular = Math.floor(lastIndex / labelStep) * labelStep;
+    if (lastRegular === lastIndex) return true;
+    return (lastIndex - lastRegular) * labelLayout.slotWidth >= labelLayout.labelWidth;
+  }, [processedChartData.length, labelStep, labelLayout]);
 
   const fmtFull = (n) => '₱' + Math.round(n).toLocaleString('en-PH');
   const fmtAxis = (v) => {
@@ -150,10 +186,15 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
               interval={0}
               tickFormatter={(label, index) => {
                 const lastIndex = processedChartData.length - 1;
-                if (index % labelStep !== 0 && index !== lastIndex) return '';
-                if (!isNarrowChart || isHourly || typeof label !== 'string') return label;
+                const isRegular = index % labelStep === 0;
+                const isForcedLast = index === lastIndex && showLastLabel;
+                if (!isRegular && !isForcedLast) return '';
+
+                // Short tick label (start date lang) para hindi magpatong-patong.
+                const text = processedChartData[index]?.tickLabel ?? label;
+                if (!isNarrowChart || isHourly || typeof text !== 'string') return text;
                 // Mobile: keep the date, drop the weekday (for example, "Nov 4").
-                return label.replace(/^[A-Za-z]{3,9}\s*\((.+)\)$/, '$1');
+                return text.replace(/^[A-Za-z]{3,9}\s*\((.+)\)$/, '$1');
               }}
               tick={axisStyle} 
               axisLine={{ stroke: '#f1f5f9' }} 
@@ -175,7 +216,7 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
                 const tooltipHourly = isHourly || /AM|PM/i.test(label);
                 
                 return (
-                  <div className="bg-white border border-brand-200 rounded-md shadow-lg p-3 text-sm min-w-[150px] z-50">
+                  <div className="bg-white border border-brand-200 rounded-md shadow-lg p-3 text-sm min-w-37.5 z-50">
                     <p className="font-semibold text-brand-800 mb-2">{label}</p>
                     
                     {dataObj.Sales !== 0 && (
