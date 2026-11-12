@@ -11,6 +11,25 @@ import { formatSlipValueForCart } from '../shared/orderSlipUploads';
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+// Mga field ng Customer Details na may validation error — kapag may error
+// sa alinman dito, awtomatikong bukas ang Customer Details (kahit Buy Now)
+// para makita agad ng cashier kung ano ang kailangang ayusin.
+const CUSTOMER_FIELD_KEYS = ['name', 'phone', 'altPhone', 'pickupDate', 'pickupTime'];
+
+// FIX (fixed layout): laging may nakareserbang 14px na espasyo sa ilalim
+// ng bawat field para sa error text — kaya kapag lumabas/nawala ang error,
+// HINDI gumagalaw o humahaba ang form, at walang field na nababaan/naputol.
+// (Nasa labas ng OrderSummaryModal para hindi ito nagagawa ulit sa bawat render.)
+function FieldError({ message }) {
+  return (
+    <div className="h-[14px] mt-0.5 px-1 overflow-hidden">
+      {message && (
+        <p role="alert" className="text-[10px] leading-[14px] text-red-500 font-medium truncate">{message}</p>
+      )}
+    </div>
+  );
+}
+
 export function formatDateLong(dateStr) {
   if (!dateStr) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -183,6 +202,56 @@ export default function OrderSummaryModal({
 }) {
   const isBuyNow = orderType === 'Buy Now';
   const [expandedItemIndexes, setExpandedItemIndexes] = useState(() => new Set());
+  const [cashTendered, setCashTendered] = useState('');
+  const cashTenderedAmount = Number(cashTendered) || 0;
+  const amountDueCents = Math.round((Number(amountDue) || 0) * 100);
+  const cashTenderedCents = Math.round(cashTenderedAmount * 100);
+  const changeDue = Math.max(0, cashTenderedCents - amountDueCents) / 100;
+  const cashShort = Math.max(0, amountDueCents - cashTenderedCents) / 100;
+  const hasEnoughCash = amountDueCents <= 0 || (cashTendered !== '' && cashTenderedCents >= amountDueCents);
+
+  // Limitahan ang Cash Tendered hanggang 7 whole digits at 2 decimal places
+  // (max ₱9,999,999.99) para hindi nag-o-overflow at hindi natatabunan ang Change.
+  const handleCashTenderedChange = (rawValue) => {
+    if (rawValue === '') {
+      setCashTendered('');
+      return;
+    }
+    if (!/^\d{0,7}(\.\d{0,2})?$/.test(rawValue)) return;
+    setCashTendered(rawValue);
+  };
+
+  const handleCashTenderedKeyDown = (event) => {
+    if (['e', 'E', '+', '-'].includes(event.key)) {
+      event.preventDefault();
+    }
+  };
+
+  // Customer Details collapse (Buy Now lang):
+  //  - Buy Now = optional ang details, kaya sarado bilang default para
+  //    hindi nakaharang sa pagtingin ng order/items. Pwedeng buksan/isara.
+  //  - Pre-Order = required, laging bukas (walang hide button).
+  //  - Kapag may validation error sa alinmang customer field, awtomatikong
+  //    bukas para makita agad ang kailangang ayusin.
+  // `customerOverride`: null = default, true = manual na binuksan ng cashier.
+  // Nire-reset tuwing bubuksan ulit ang modal (render-time adjustment,
+  // hindi effect, para walang extra render at walang lint issue).
+  const [customerOverride, setCustomerOverride] = useState(null);
+  const [prevShow, setPrevShow] = useState(show);
+  if (show !== prevShow) {
+    setPrevShow(show);
+    setCustomerOverride(null);
+    // Blangko ulit ang Cash Tendered tuwing bubuksan ang modal.
+    if (show) setCashTendered('');
+  }
+  const hasCustomerErrors = CUSTOMER_FIELD_KEYS.some((key) => errors[key]);
+  const customerOpen = !isBuyNow || hasCustomerErrors || customerOverride === true;
+  const customerSummary = [form.name, form.phone].filter(Boolean).join(' · ');
+
+  const formatMoney = (amount) => `₱${Number(amount || 0).toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
   const availabilityItems = useMemo(() => cart.map(item => ({
     productId: item.id ?? null,
     name: item.name,
@@ -250,17 +319,6 @@ export default function OrderSummaryModal({
     `${baseField} ${errors[key]
       ? 'border-red-500 focus:border-red-500 bg-red-50/40'
       : 'border-[#EAE4E0] focus:border-[#5A453C]'}`;
-  // FIX (fixed layout): laging may nakareserbang 14px na espasyo sa ilalim
-  // ng bawat field para sa error text — kaya kapag lumabas/nawala ang error,
-  // HINDI gumagalaw o humahaba ang form, at walang field na nababaan/naputol.
-  const FieldError = ({ name }) => (
-    <div className="h-[14px] mt-0.5 px-1 overflow-hidden">
-      {errors[name] && (
-        <p role="alert" className="text-[10px] leading-[14px] text-red-500 font-medium truncate">{errors[name]}</p>
-      )}
-    </div>
-  );
-
   // FIX (req #1): dagdag na "Are you sure?" confirmation bago talaga
   // isubmit ang order — hindi na direktang tumatawag ang "Place Order"
   // button papunta sa onPlaceOrder(); nagpapakita muna ito ng maliit na
@@ -402,9 +460,13 @@ export default function OrderSummaryModal({
 
   if (!show) return null;
 
+  const isCashShort = cashTendered !== '' && cashTenderedCents < amountDueCents;
+  const isDeposit = paymentMode === '50% Deposit';
+  const hasBreakdown = discountAmount > 0 || chargeAmount > 0 || isDeposit;
+
   return createPortal(
     <div className="fixed inset-0 z-[1900] flex items-center justify-center bg-black/50 px-4 py-6 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[900px] max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200">
+      <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[900px] h-[90vh] max-h-220 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200">
         {/* FIX (req #2): "Order Summary" ang dating label dito, pero hindi
             na ito tumpak — ang laman ng modal na ito ay editable na
             Customer Details FORM (Name, Contact, Pick-up Date/Time) na
@@ -436,222 +498,279 @@ export default function OrderSummaryModal({
             ibaba (see closing tags) — kaya garantisadong visible na ito lagi, kahit
             gaano pa kahaba ang laman sa itaas. Parehong pattern gaya ng Checkout.jsx. */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden overscroll-contain scrollbar-thin">
-          <div className="w-full md:w-[340px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 md:overflow-y-auto scrollbar-thin">
-            <div className="flex items-center gap-2 mb-2">
-              <User size={14} className="text-[#8A7264]" />
-              <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider">
-                Customer Details
-                {isBuyNow ? (
-                  <span className="text-[#B7A99F] font-normal normal-case ml-1">· Optional</span>
-                ) : (
-                  <span className="text-red-500 font-normal normal-case ml-1">· Required</span>
-                )}
-              </h4>
-              {/* Mobile: Order Type bilang maliit na badge sa tabi ng heading (walang sariling row) */}
-              <span className="md:hidden ml-auto shrink-0 text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{orderType}</span>
-            </div>
+          {/* Customer Details — nasa GILID (kaliwa). Ang GILID LANG ang gumagalaw:
+              nag-a-animate ang lapad (desktop) / taas (mobile) at nagka-cross-fade
+              ang form at ang manipis na rail/bar. Pareho palagi ang laki ng modal. */}
+          <div className={`relative w-full shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] md:flex md:flex-col md:overflow-hidden md:transition-[width] md:duration-300 md:ease-in-out motion-reduce:transition-none ${customerOpen ? 'md:w-85' : 'md:w-12'}`}>
+            {/* Form (bukas) — `invisible` pagkatapos ng animation para hindi na ma-tab/ma-focus kapag nakatiklop */}
+            <div
+              aria-hidden={!customerOpen}
+              className={`grid md:flex md:flex-col md:flex-1 md:min-h-0 transition-[grid-template-rows,opacity,visibility] duration-300 ease-in-out motion-reduce:transition-none ${customerOpen ? 'grid-rows-[1fr] opacity-100 visible' : 'grid-rows-[0fr] opacity-0 invisible'}`}
+            >
+              <div className="min-h-0 overflow-hidden md:w-85 md:flex-1 md:overflow-y-auto scrollbar-thin">
+                <div className="p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <User size={14} className="text-[#8A7264]" />
+                    <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider">
+                      Customer Details
+                      {isBuyNow ? (
+                        <span className="text-[#B7A99F] font-normal normal-case ml-1">· Optional</span>
+                      ) : (
+                        <span className="text-red-500 font-normal normal-case ml-1">· Required</span>
+                      )}
+                    </h4>
+                    <div className="ml-auto flex items-center gap-2">
+                      {/* Mobile: Order Type bilang maliit na badge sa tabi ng heading (walang sariling row) */}
+                      <span className="md:hidden shrink-0 text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{orderType}</span>
+                      {/* Hide button — Buy Now lang (optional ang details), at hindi
+                          ipinapakita habang may error na kailangang makita. */}
+                      {isBuyNow && !hasCustomerErrors && (
+                        <button
+                          type="button"
+                          onClick={() => setCustomerOverride(false)}
+                          aria-expanded="true"
+                          aria-label="Hide customer details"
+                          title="Hide customer details"
+                          className="shrink-0 p-1 rounded-lg text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"
+                        >
+                          <ChevronLeft size={14} className="hidden md:block" />
+                          <ChevronUp size={14} className="md:hidden" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-            <div className="flex flex-col gap-1.5">
-              <div className="hidden md:flex flex-col gap-0.5">
-                <span className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Order Type</span>
-                <span className="text-xs text-[#3B1F0A] font-semibold">{orderType}</span>
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="hidden md:flex flex-col gap-0.5">
+                      <span className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Order Type</span>
+                      <span className="text-xs text-[#3B1F0A] font-semibold">{orderType}</span>
+                    </div>
 
-              <div className="flex flex-col">
-                <input
-                  type="text"
-                  placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
-                  value={form.name}
-                  onChange={e => setForm({ ...form, name: e.target.value })}
-                  aria-invalid={!!errors.name}
-                  data-invalid={errors.name ? 'true' : undefined}
-                  className={fieldCls('name')}
-                />
-                <FieldError name="name" />
-              </div>
+                    <div className="flex flex-col">
+                      <input
+                        type="text"
+                        placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
+                        value={form.name}
+                        onChange={e => setForm({ ...form, name: e.target.value })}
+                        aria-invalid={!!errors.name}
+                        data-invalid={errors.name ? 'true' : undefined}
+                        className={fieldCls('name')}
+                      />
+                      <FieldError message={errors.name} />
+                    </div>
 
-              <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
-                <div className="flex flex-col min-w-0">
-                  <input
-                    type="text"
-                    placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
-                    maxLength="11"
-                    value={form.phone}
-                    onChange={e => {
-                      let val = e.target.value.replace(/\D/g, '');
-                      if (val.startsWith('639')) val = '0' + val.slice(2);
-                      setForm({ ...form, phone: val.slice(0, 11) });
-                    }}
-                    aria-invalid={!!errors.phone}
-                    data-invalid={errors.phone ? 'true' : undefined}
-                    className={fieldCls('phone')}
-                  />
-                  <FieldError name="phone" />
-                </div>
+                    <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
+                      <div className="flex flex-col min-w-0">
+                        <input
+                          type="text"
+                          placeholder={isBuyNow ? "Phone Number" : "Phone Number *"}
+                          maxLength="11"
+                          value={form.phone}
+                          onChange={e => {
+                            let val = e.target.value.replace(/\D/g, '');
+                            if (val.startsWith('639')) val = '0' + val.slice(2);
+                            setForm({ ...form, phone: val.slice(0, 11) });
+                          }}
+                          aria-invalid={!!errors.phone}
+                          data-invalid={errors.phone ? 'true' : undefined}
+                          className={fieldCls('phone')}
+                        />
+                        <FieldError message={errors.phone} />
+                      </div>
 
-                <div className="flex flex-col min-w-0">
-                  <input
-                    type="text"
-                    placeholder="Alt. Phone"
-                    maxLength="11"
-                    value={form.altPhone}
-                    onChange={e => {
-                      let val = e.target.value.replace(/\D/g, '');
-                      if (val.startsWith('639')) val = '0' + val.slice(2);
-                      setForm({ ...form, altPhone: val.slice(0, 11) });
-                    }}
-                    aria-invalid={!!errors.altPhone}
-                    data-invalid={errors.altPhone ? 'true' : undefined}
-                    className={fieldCls('altPhone')}
-                  />
-                  <FieldError name="altPhone" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
-                <div className="relative min-w-0" ref={calendarWrapRef}>
-                  {orderType === 'Buy Now' ? (
-                    <div className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <Lock size={12} className="shrink-0" />
-                        <span className="truncate">Today</span>
+                      <div className="flex flex-col min-w-0">
+                        <input
+                          type="text"
+                          placeholder="Alt. Phone"
+                          maxLength="11"
+                          value={form.altPhone}
+                          onChange={e => {
+                            let val = e.target.value.replace(/\D/g, '');
+                            if (val.startsWith('639')) val = '0' + val.slice(2);
+                            setForm({ ...form, altPhone: val.slice(0, 11) });
+                          }}
+                          aria-invalid={!!errors.altPhone}
+                          data-invalid={errors.altPhone ? 'true' : undefined}
+                          className={fieldCls('altPhone')}
+                        />
+                        <FieldError message={errors.altPhone} />
                       </div>
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      ref={calendarTriggerRef}
-                      onClick={() => (showCalendar ? setShowCalendar(false) : openCalendar())}
-                      data-invalid={errors.pickupDate ? 'true' : undefined}
-                      className={`${fieldCls('pickupDate')} text-left flex items-center justify-between`}
-                    >
-                      <span className={form.pickupDate ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
-                        {form.pickupDate ? formatDateLong(form.pickupDate) : 'Date *'}
-                      </span>
-                      <CalendarIcon size={13} className="text-[#8A7264] shrink-0 ml-1" />
-                    </button>
-                  )}
-                  <FieldError name="pickupDate" />
-                  {orderType !== 'Buy Now' && showCalendar && calendarPos && createPortal(
-                    <div ref={calendarPortalRef}>
-                      <MonthCalendar
-                        selectedDate={form.pickupDate}
-                        minDate={minPreOrderDate}
-                        todayDate={getLiveNow().dateStr}
-                        style={calendarPos}
-                        unavailableDates={unavailablePickupDates}
-                        availabilityItems={availabilityItems}
-                                      availabilityLoading={availabilityLoading}
-                        onMonthChange={loadPickupDateAvailability}
-                        onSelect={(dateStr) => setForm(f => ({ ...f, pickupDate: dateStr }))}
-                        onClose={() => setShowCalendar(false)}
-                      />
-                    </div>,
-                    document.body
-                  )}
-                </div>
 
-                <div className="relative min-w-0" ref={timeDropdownWrapRef}>
-                  <button
-                    type="button"
-                    ref={timeDropdownTriggerRef}
-                    onClick={() => (showTimeDropdown ? setShowTimeDropdown(false) : openTimeDropdown())}
-                    data-invalid={errors.pickupTime ? 'true' : undefined}
-                    className={`${fieldCls('pickupTime')} flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
-                  >
-                    <span className="flex items-center gap-1.5 truncate">
-                      <Clock size={12} className="text-[#8A7264] shrink-0" />
-                      <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : (isBuyNow ? 'Walk-in (Now)' : 'Time *')}</span>
-                    </span>
-                    <ChevronDown
-                      size={13}
-                      className={`text-[#8A7264] shrink-0 ml-1 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-
-                  <FieldError name="pickupTime" />
-
-                  {showTimeDropdown && timeDropdownPos && createPortal(
-                    <div ref={timeDropdownPortalRef} style={timeDropdownPos} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden w-[220px]">
-                      <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
-                        {isBuyNow && (
-                          <li>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setForm(f => ({ ...f, pickupTime: '' }));
-                                setShowTimeDropdown(false);
-                              }}
-                              className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
-                                !form.pickupTime
-                                  ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
-                                  : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
-                              }`}
-                            >
-                              <span>Walk-in (Now)</span>
-                              {!form.pickupTime && <Check size={13} className="text-[#5A453C] shrink-0" />}
-                            </button>
-                          </li>
+                    <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
+                      <div className="relative min-w-0" ref={calendarWrapRef}>
+                        {orderType === 'Buy Now' ? (
+                          <div className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <Lock size={12} className="shrink-0" />
+                              <span className="truncate">Today</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            ref={calendarTriggerRef}
+                            onClick={() => (showCalendar ? setShowCalendar(false) : openCalendar())}
+                            data-invalid={errors.pickupDate ? 'true' : undefined}
+                            className={`${fieldCls('pickupDate')} text-left flex items-center justify-between`}
+                          >
+                            <span className={form.pickupDate ? 'text-[#3B1F0A] truncate' : 'text-[#8A7264] truncate'}>
+                              {form.pickupDate ? formatDateLong(form.pickupDate) : 'Date *'}
+                            </span>
+                            <CalendarIcon size={13} className="text-[#8A7264] shrink-0 ml-1" />
+                          </button>
                         )}
-                        {TIME_SLOTS.map(slot => {
-                          const disabled = isSlotDisabled(slot);
-                          const selected = form.pickupTime === slot.value;
-                          return (
-                            <li key={slot.value}>
-                              <button
-                                type="button"
-                                disabled={disabled}
-                                onClick={() => {
-                                  setForm(f => ({ ...f, pickupTime: slot.value }));
-                                  setShowTimeDropdown(false);
-                                }}
-                                className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
-                                  disabled
-                                    ? 'text-[#C9BEB6] cursor-not-allowed'
-                                    : selected
-                                    ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
-                                    : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
-                                }`}
-                              >
-                                <span>{slot.label}</span>
-                                {disabled ? (
-                                  <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
-                                ) : selected ? (
-                                  <Check size={13} className="text-[#5A453C] shrink-0" />
-                                ) : null}
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>,
-                    document.body
-                  )}
+                        <FieldError message={errors.pickupDate} />
+                        {orderType !== 'Buy Now' && showCalendar && calendarPos && createPortal(
+                          <div ref={calendarPortalRef}>
+                            <MonthCalendar
+                              selectedDate={form.pickupDate}
+                              minDate={minPreOrderDate}
+                              todayDate={getLiveNow().dateStr}
+                              style={calendarPos}
+                              unavailableDates={unavailablePickupDates}
+                              availabilityItems={availabilityItems}
+                              availabilityLoading={availabilityLoading}
+                              onMonthChange={loadPickupDateAvailability}
+                              onSelect={(dateStr) => setForm(f => ({ ...f, pickupDate: dateStr }))}
+                              onClose={() => setShowCalendar(false)}
+                            />
+                          </div>,
+                          document.body
+                        )}
+                      </div>
+
+                      <div className="relative min-w-0" ref={timeDropdownWrapRef}>
+                        <button
+                          type="button"
+                          ref={timeDropdownTriggerRef}
+                          onClick={() => (showTimeDropdown ? setShowTimeDropdown(false) : openTimeDropdown())}
+                          data-invalid={errors.pickupTime ? 'true' : undefined}
+                          className={`${fieldCls('pickupTime')} flex items-center justify-between text-left ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                        >
+                          <span className="flex items-center gap-1.5 truncate">
+                            <Clock size={12} className="text-[#8A7264] shrink-0" />
+                            <span className="truncate">{form.pickupTime ? getSlotLabel(form.pickupTime) : (isBuyNow ? 'Walk-in (Now)' : 'Time *')}</span>
+                          </span>
+                          <ChevronDown
+                            size={13}
+                            className={`text-[#8A7264] shrink-0 ml-1 transition-transform duration-200 ${showTimeDropdown ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+
+                        <FieldError message={errors.pickupTime} />
+
+                        {showTimeDropdown && timeDropdownPos && createPortal(
+                          <div ref={timeDropdownPortalRef} style={timeDropdownPos} className="z-[9999] bg-white border border-[#EAE4E0] rounded-xl shadow-lg overflow-hidden w-[220px]">
+                            <ul className="max-h-[240px] overflow-y-auto scrollbar-thin py-1">
+                              {isBuyNow && (
+                                <li>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setForm(f => ({ ...f, pickupTime: '' }));
+                                      setShowTimeDropdown(false);
+                                    }}
+                                    className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                                      !form.pickupTime
+                                        ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
+                                        : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
+                                    }`}
+                                  >
+                                    <span>Walk-in (Now)</span>
+                                    {!form.pickupTime && <Check size={13} className="text-[#5A453C] shrink-0" />}
+                                  </button>
+                                </li>
+                              )}
+                              {TIME_SLOTS.map(slot => {
+                                const disabled = isSlotDisabled(slot);
+                                const selected = form.pickupTime === slot.value;
+                                return (
+                                  <li key={slot.value}>
+                                    <button
+                                      type="button"
+                                      disabled={disabled}
+                                      onClick={() => {
+                                        setForm(f => ({ ...f, pickupTime: slot.value }));
+                                        setShowTimeDropdown(false);
+                                      }}
+                                      className={`w-full text-left px-3.5 py-2.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                                        disabled
+                                          ? 'text-[#C9BEB6] cursor-not-allowed'
+                                          : selected
+                                          ? 'bg-[#F5EFEB] text-[#3B1F0A] font-semibold'
+                                          : 'text-[#3B1F0A] hover:bg-[#FCFAF9] cursor-pointer'
+                                      }`}
+                                    >
+                                      <span>{slot.label}</span>
+                                      {disabled ? (
+                                        <span className="text-[9px] uppercase tracking-wider text-[#C9BEB6] shrink-0">Past</span>
+                                      ) : selected ? (
+                                        <Check size={13} className="text-[#5A453C] shrink-0" />
+                                      ) : null}
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>,
+                          document.body
+                        )}
+                      </div>
+                    </div>
+
+                    {noSlotsLeftToday && !errors.pickupTime && (
+                      <p className="text-[10px] text-[#8A7264] leading-snug px-1">
+                        No more pick-up slots today. This will be recorded as a walk-in (picked up now).
+                      </p>
+                    )}
+
+                    {/* FIX (Special Instructions, POS): dating naka-duplicate ito
+                        bilang default field sa BAWAT produkto (Product Modal),
+                        kaya paulit-ulit lumalabas sa order slip kapag maraming
+                        item. Isang beses na lang ito dito ngayon — para sa BUONG
+                        ORDER, hindi na per-product — katulad ng dati nitong
+                        puwesto: sa ilalim ng Date/Time. */}
+                    <div className="flex flex-col gap-0.5">
+                      <label htmlFor="pos-special-instructions" className="sr-only md:not-sr-only text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Special Instructions</label>
+                      <textarea
+                        id="pos-special-instructions"
+                        rows={2}
+                        placeholder="Special instructions (optional)"
+                        value={form.instructions || ''}
+                        onChange={e => setForm({ ...form, instructions: e.target.value })}
+                        className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {noSlotsLeftToday && !errors.pickupTime && (
-                <p className="text-[10px] text-[#8A7264] leading-snug px-1">
-                  No more pick-up slots today. This will be recorded as a walk-in (picked up now).
-                </p>
-              )}
-
-              {/* FIX (Special Instructions, POS): dating naka-duplicate ito
-                  bilang default field sa BAWAT produkto (Product Modal),
-                  kaya paulit-ulit lumalabas sa order slip kapag maraming
-                  item. Isang beses na lang ito dito ngayon — para sa BUONG
-                  ORDER, hindi na per-product — katulad ng dati nitong
-                  puwesto: sa ilalim ng Date/Time. */}
-              <div className="flex flex-col gap-0.5">
-                <label htmlFor="pos-special-instructions" className="sr-only md:not-sr-only text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Special Instructions</label>
-                <textarea
-                  id="pos-special-instructions"
-                  rows={2}
-                  placeholder="Special instructions (optional)"
-                  value={form.instructions || ''}
-                  onChange={e => setForm({ ...form, instructions: e.target.value })}
-                  className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl focus:outline-none focus:border-[#5A453C] transition-colors bg-white resize-none"
-                />
+            {/* Rail (desktop) / bar (mobile) — nakatiklop */}
+            <div
+              aria-hidden={customerOpen}
+              className={`grid md:block md:absolute md:inset-0 transition-[grid-template-rows,opacity,visibility] duration-300 ease-in-out motion-reduce:transition-none ${customerOpen ? 'grid-rows-[0fr] opacity-0 invisible' : 'grid-rows-[1fr] opacity-100 visible'}`}
+            >
+              <div className="min-h-0 overflow-hidden md:h-full">
+                <button
+                  type="button"
+                  onClick={() => setCustomerOverride(true)}
+                  aria-expanded="false"
+                  aria-label="Show customer details"
+                  title="Show customer details"
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-[#F5EFEB] transition-colors md:h-full md:flex-col md:justify-start md:gap-3 md:px-0 md:py-4"
+                >
+                  <ChevronRight size={14} className="hidden md:block md:order-first text-[#8A7264] shrink-0" />
+                  <User size={14} className="text-[#8A7264] shrink-0" />
+                  <span className="text-xs font-bold text-[#8A7264] uppercase tracking-wider shrink-0 md:[writing-mode:vertical-rl] md:rotate-180">Customer Details</span>
+                  <span className="min-w-0 truncate text-[11px] text-[#B7A99F] md:hidden">
+                    · {customerSummary || 'Optional — tap to add'}
+                  </span>
+                  {customerSummary && <span aria-hidden="true" className="hidden md:block w-1.5 h-1.5 rounded-full bg-[#5A453C] shrink-0" />}
+                  <span className="ml-auto shrink-0 md:hidden text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{orderType}</span>
+                  <ChevronDown size={14} className="md:hidden text-[#8A7264] shrink-0" />
+                </button>
               </div>
             </div>
           </div>
@@ -739,68 +858,177 @@ export default function OrderSummaryModal({
         </div>
         {/* End of scrollable body (Customer Details + Items) */}
 
-        {/* Fixed Payment Section — hiwalay na footer ng buong modal (sibling ng
-            scrollable body sa itaas), hindi na nested sa loob ng Right Column.
-            `shrink-0` ito kaya hindi ito sinisiksik/nawawala kahit gaano pa
-            kahaba ang Customer Details o Items list — palaging visible ang
-            Back/Place Order. */}
-        <div className="px-4 pt-3 pb-4 sm:px-5 sm:pt-4 sm:pb-5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
-          <div className="mb-4">
-            {discountAmount > 0 && (
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-[#8A7264]">Subtotal</span>
-                <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
-              </div>
-            )}
-            {discountAmount > 0 && (
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
-                <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
-              </div>
-            )}
-            {chargeAmount > 0 && (
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-red-500">Additional Charge</span>
-                <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
-              </div>
-            )}
+        {/* Fixed Payment Section — 50/50 split (half-half) sa desktop,
+            may red inline error sa ilalim ng Cash Tendered kapag kulang,
+            at may digit limit para hindi nag-o-overflow. */}
+        <div className="px-4 pt-2.5 pb-3 sm:px-5 sm:pt-3 sm:pb-3.5 shrink-0 border-t border-[#EAE4E0] bg-[#FCFAF9]">
+          <div className="grid gap-2.5 md:grid-cols-2 md:gap-3 md:items-stretch mb-2.5">
+            {/* Totals Card (Left Half) */}
+            <div className={`rounded-xl border border-[#EAE4E0] bg-white px-4 py-2.5 flex flex-col ${hasBreakdown ? 'justify-between gap-2' : 'justify-center'}`}>
+              {hasBreakdown && (
+                <div className="flex flex-col gap-1">
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-[#8A7264]">Subtotal</span>
+                      <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
+                      <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {chargeAmount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-red-500">Additional Charge</span>
+                      <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {isDeposit && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
+                        <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
-            {paymentMode === '50% Deposit' ? (
-              <>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                  <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+              <div className={`flex items-center ${hasBreakdown ? 'justify-between border-t border-[#EAE4E0] pt-2' : 'justify-center gap-4'}`}>
+                <span className="text-xs font-semibold uppercase tracking-wide text-[#5A453C]">Grand Total</span>
+                <span className="font-serif text-2xl sm:text-3xl leading-none text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Cash Tendered Card (Right Half) */}
+            <div className="rounded-xl border border-[#EAE4E0] bg-white p-2.5 flex flex-col justify-center">
+              {isDeposit ? (
+                <>
+                  <label htmlFor="pos-cash-tendered" className="block text-[11px] font-semibold text-[#5A453C] mb-1">
+                    Cash Tendered
+                  </label>
+                  <div className="relative">
+                    <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold ${isCashShort ? 'text-red-500' : 'text-[#8A7264]'}`}>₱</span>
+                    <input
+                      id="pos-cash-tendered"
+                      aria-label="Cash tendered"
+                      aria-invalid={isCashShort}
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="9999999.99"
+                      step="0.01"
+                      placeholder="Enter amount received"
+                      value={cashTendered}
+                      onKeyDown={handleCashTenderedKeyDown}
+                      onChange={(event) => handleCashTenderedChange(event.target.value)}
+                      className={`w-full h-9 rounded-lg border pl-7 pr-3 text-sm font-semibold outline-none transition-colors ${
+                        isCashShort
+                          ? 'border-red-500 bg-red-50/40 text-red-700 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                          : 'border-[#DED4CC] bg-[#FCFAF9] text-[#3B1F0A] focus:border-[#8A6A57] focus:ring-2 focus:ring-[#EAE4E0]'
+                      }`}
+                    />
+                  </div>
+                  {isCashShort && (
+                    <p role="alert" className="mt-1 text-[11px] font-medium text-red-500 leading-tight">
+                      Insufficient cash — short by {formatMoney(cashShort)}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="rounded-lg border border-[#F1EBE6] bg-[#FCFAF9] px-2.5 py-1.5 min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8A7264]">Amount Due (50%)</p>
+                      <p className="text-xs sm:text-sm font-bold text-[#3B1F0A] tabular-nums truncate">{formatMoney(amountDue)}</p>
+                    </div>
+                    <div className={`rounded-lg border px-2.5 py-1.5 min-w-0 ${
+                      hasEnoughCash && cashTendered !== ''
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : 'border-[#F1EBE6] bg-[#FCFAF9]'
+                    }`}>
+                      <p className={`text-[10px] font-semibold uppercase tracking-wide ${
+                        hasEnoughCash && cashTendered !== '' ? 'text-emerald-700' : 'text-[#8A7264]'
+                      }`}>
+                        Change
+                      </p>
+                      <p className={`text-xs sm:text-sm font-bold tabular-nums truncate ${
+                        hasEnoughCash && cashTendered !== '' ? 'text-emerald-700' : 'text-[#8A7264]'
+                      }`}>
+                        {formatMoney(hasEnoughCash ? changeDue : 0)}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-[minmax(0,1fr)_140px] gap-2.5 items-stretch">
+                  <div className="flex flex-col justify-center min-w-0">
+                    <label htmlFor="pos-cash-tendered" className="block text-[11px] font-semibold text-[#5A453C] mb-1">
+                      Cash Tendered
+                    </label>
+                    <div className="relative">
+                      <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold ${isCashShort ? 'text-red-500' : 'text-[#8A7264]'}`}>₱</span>
+                      <input
+                        id="pos-cash-tendered"
+                        aria-label="Cash tendered"
+                        aria-invalid={isCashShort}
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="9999999.99"
+                        step="0.01"
+                        placeholder="Amount received"
+                        value={cashTendered}
+                        onKeyDown={handleCashTenderedKeyDown}
+                        onChange={(event) => handleCashTenderedChange(event.target.value)}
+                        className={`w-full h-9 rounded-lg border pl-7 pr-2.5 text-sm font-semibold outline-none transition-colors ${
+                          isCashShort
+                            ? 'border-red-500 bg-red-50/40 text-red-700 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                            : 'border-[#DED4CC] bg-[#FCFAF9] text-[#3B1F0A] focus:border-[#8A6A57] focus:ring-2 focus:ring-[#EAE4E0]'
+                        }`}
+                      />
+                    </div>
+                    {isCashShort && (
+                      <p role="alert" className="mt-1 text-[11px] font-medium text-red-500 leading-tight">
+                        Insufficient cash — short by {formatMoney(cashShort)}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className={`rounded-lg border px-3 py-1.5 flex flex-col justify-center min-w-0 ${
+                    hasEnoughCash && cashTendered !== ''
+                      ? 'border-emerald-200 bg-emerald-50'
+                      : 'border-[#F1EBE6] bg-[#FCFAF9]'
+                  }`}>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${
+                      hasEnoughCash && cashTendered !== '' ? 'text-emerald-700' : 'text-[#8A7264]'
+                    }`}>
+                      Change
+                    </p>
+                    <p className={`mt-0.5 text-sm font-bold tabular-nums truncate ${
+                      hasEnoughCash && cashTendered !== '' ? 'text-emerald-700' : 'text-[#8A7264]'
+                    }`}>
+                      {formatMoney(hasEnoughCash ? changeDue : 0)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                  <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
-                </div>
-                <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-[#8A7264]">To Pay Now</span>
-                  <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
-                </div>
-                <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
-              </>
-            )}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-              <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+              )}
             </div>
           </div>
 
           {isProcessing && (
-            <UploadProgressNote progress={uploadProgress} finalLabel="Saving your order..." className="mb-3" />
+            <UploadProgressNote progress={uploadProgress} finalLabel="Saving your order..." className="mb-2.5" />
           )}
 
           <div className="flex gap-2.5">
             <button
               onClick={onBack}
               disabled={isProcessing}
-              className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
+              className="w-1/3 border border-[#EAE4E0] text-[#3B1F0A] bg-white py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#F5EFEB] disabled:opacity-50 transition-colors"
             >
               Back
             </button>
@@ -823,8 +1051,8 @@ export default function OrderSummaryModal({
                 }
                 setShowConfirm(true);
               }}
-              disabled={isProcessing}
-              className="w-2/3 bg-[#3B1F0A] text-white py-3 sm:py-3.5 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
+              disabled={isProcessing || !hasEnoughCash}
+              className="w-2/3 bg-[#3B1F0A] text-white py-2.5 sm:py-3 rounded-full text-xs sm:text-sm font-semibold hover:bg-[#2A1608] disabled:opacity-75 disabled:cursor-not-allowed transition-colors"
             >
               {isProcessing ? getProcessingLabel(uploadProgress, 'Processing...', 'Saving order...') : 'Place Order'}
             </button>
@@ -849,6 +1077,16 @@ export default function OrderSummaryModal({
             <p className="text-xs sm:text-sm text-[#8A7264] mb-6 leading-relaxed">
               Please double-check the customer details, items, and payment amount.
             </p>
+            <div className="w-full rounded-xl bg-[#FCFAF9] border border-[#EAE4E0] px-3 py-2.5 mb-5 text-xs">
+              <div className="flex items-center justify-between text-[#8A7264]">
+                <span>Cash tendered</span>
+                <span className="font-semibold text-[#3B1F0A]">{formatMoney(cashTenderedAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between mt-1 text-[#8A7264]">
+                <span>Change</span>
+                <span className="font-bold text-emerald-700">{formatMoney(changeDue)}</span>
+              </div>
+            </div>
             <div className="flex gap-2.5 w-full">
               <button
                 onClick={() => setShowConfirm(false)}
