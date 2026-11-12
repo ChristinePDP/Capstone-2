@@ -1,14 +1,2 @@
-import cron from 'node-cron';
-import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
-
-export const setupCheckoutReservationCron = (scheduler = cron) => scheduler.schedule('0 0 1 * *', async () => {
-  try {
-    await CheckoutReservationModel.expire();
-  } catch (error) {
-    console.error('[CHECKOUT RESERVATION] Expiration job failed:', error);
-  }
-}, {
-  name: 'monthly-checkout-reservation-cleanup',
-  timezone: 'Asia/Manila',
-  noOverlap: true,
-});
+// Checkout reservation expiration now runs through the authenticated Render
+// cron endpoint alongside analytics and storage retention cleanup.
