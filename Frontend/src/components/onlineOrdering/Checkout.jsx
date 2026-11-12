@@ -1420,7 +1420,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <span className="text-xs font-bold text-[#3B1F0A]">50% Deposit</span>
                           </div>
                           <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay half now, balance upon pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">â‚±{halfAmount.toLocaleString()}</div>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{halfAmount.toLocaleString()}</div>
                       </div>
 
                       <div
@@ -1434,7 +1434,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <span className="text-xs font-bold text-[#3B1F0A]">Full Payment</span>
                           </div>
                           <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay in full for hassle-free pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">â‚±{paymentTotal.toLocaleString()}</div>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{paymentTotal.toLocaleString()}</div>
                       </div>
                       </div>
                   </div>
@@ -1558,16 +1558,16 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
               {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[11px] text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
-                <span className="text-[11px] text-[#8A7264]">â‚±{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
+                <span className="text-[11px] text-[#8A7264]">₱{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
               </div>
               <div className={`flex items-center justify-between mb-1 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
                 <span className="text-[11px] text-[#8A7264]">Balance at Pick-up</span>
-                <span className="text-[11px] text-[#8A7264]">â‚±{balanceAtPickup.toLocaleString()}</span>
+                <span className="text-[11px] text-[#8A7264]">₱{balanceAtPickup.toLocaleString()}</span>
               </div>
               <div className="w-full h-px bg-[#F1EBE6] mb-1"></div>
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                <span className="font-serif text-base text-[#3B1F0A]">â‚±{paymentTotal.toLocaleString()}</span>
+                <span className="font-serif text-base text-[#3B1F0A]">₱{paymentTotal.toLocaleString()}</span>
               </div>
             </div>
             <div className="min-w-0">
@@ -1714,7 +1714,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <span className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</span>
                               {expandedSummaryIndexes.has(i) ? <ChevronUp size={14} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={14} className="text-[#8A7264] shrink-0" />}
                             </button>
-                            <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">â‚±{(item.price * item.qty).toLocaleString()}</span>
+                            <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
                           </div>
                           {!expandedSummaryIndexes.has(i) && <p className="text-[10px] text-[#8A7264]">Tap item to view details</p>}
                           
@@ -1784,16 +1784,16 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
-                  <span className="text-xs text-[#8A7264] font-medium">â‚±{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
+                  <span className="text-xs text-[#8A7264] font-medium">₱{(paymentType === 'half' ? halfAmount : paymentTotal).toLocaleString()}</span>
                 </div>
                 <div className={`flex items-center justify-between mb-2 ${paymentType === 'half' ? '' : 'invisible'}`} aria-hidden={paymentType !== 'half'}>
                   <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                  <span className="text-xs text-[#8A7264] font-medium">â‚±{balanceAtPickup.toLocaleString()}</span>
+                  <span className="text-xs text-[#8A7264] font-medium">₱{balanceAtPickup.toLocaleString()}</span>
                 </div>
                 <div className="w-full h-px bg-[#EAE4E0] mb-2"></div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-[#5A453C]">Grand Total</span>
-                  <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">â‚±{paymentTotal.toLocaleString()}</span>
+                  <span className="font-serif text-lg sm:text-xl text-[#3B1F0A]">₱{paymentTotal.toLocaleString()}</span>
                 </div>
               </div>
 
