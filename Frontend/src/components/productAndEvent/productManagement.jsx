@@ -530,8 +530,15 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const handleSaveSuccess = async (savedProduct) => {
     const refreshedProducts = await fetchProductsFromApi(true);
+    const refreshedProduct = (refreshedProducts || []).find(
+      product => String(product.id) === String(savedProduct?.id)
+    );
+    const hasProductionFormula = savedProduct?.category === 'Celebration Material'
+      ? true
+      : (savedProduct?.has_production_formula ?? refreshedProduct?.has_production_formula) === true;
     const saved = savedProduct
       ? {
+          ...refreshedProduct,
           ...savedProduct,
           is_active: savedProduct.is_active
             ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.is_active
@@ -539,14 +546,26 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
           linked_inventory_material: savedProduct.linked_inventory_material
             ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.linked_inventory_material
             ?? null,
-          has_production_formula: savedProduct.category === 'Celebration Material'
-            ? true
-            : savedProduct.has_production_formula === true,
+          has_production_formula: hasProductionFormula,
           formula_status: savedProduct.category === 'Celebration Material'
             ? 'not_required'
-            : savedProduct.has_production_formula === true ? 'ready' : 'missing',
+            : hasProductionFormula ? 'ready' : 'missing',
         }
       : null;
+
+    // Notify the shared inventory context immediately. Product Management has
+    // its own list/cache, while Production Formula reads products from
+    // AppContext; the database realtime event may arrive slightly later.
+    if (saved) {
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: {
+          table: 'products',
+          event: editProduct?.id ? 'UPDATE' : 'INSERT',
+          record: saved,
+          recordId: saved.id,
+        },
+      }));
+    }
 
     const mergedProducts = saved
       ? [

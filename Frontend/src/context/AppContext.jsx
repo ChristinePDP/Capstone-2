@@ -350,6 +350,16 @@ export function AppProvider({ children }) {
 
     const handleLocalDataChanged = event => {
       const change = event.detail || {};
+      if (change.table === 'products') {
+        updateList(
+          setProducts,
+          change.recordId || change.record?.id,
+          change.record,
+          normalizeProductRow,
+          change.event
+        );
+        return;
+      }
       if (change.source !== 'pos' || change.table !== 'orders') return;
       if (change.recordId) {
         scheduleTargetedRefresh(`order:${change.recordId}`, () => refreshOrder(change.recordId, 'INSERT'));

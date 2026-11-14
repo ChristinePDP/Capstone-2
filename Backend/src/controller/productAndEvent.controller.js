@@ -22,6 +22,26 @@ import {
 } from '../services/productAndEvent.service.js';
 
 import { AiCacheModel } from '../model/AiCache.model.js';
+import { invalidateLiveEventAdsMemo } from '../services/productAndEvent.service.js';
+
+// Cache event lists by filter for 60 seconds.
+const EVENTS_CACHE_TTL_MS = 60 * 1000;
+const eventsCache = new Map();
+
+const invalidateEventsCache = () => {
+  eventsCache.clear();
+  invalidateLiveEventAdsMemo();
+};
+
+const getCachedEvents = async (activeOnly) => {
+  const key = activeOnly ? 'active' : 'all';
+  const cached = eventsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  const data = await getAllEvents({ activeOnly });
+  eventsCache.set(key, { data, expiresAt: Date.now() + EVENTS_CACHE_TTL_MS });
+  return data;
+};
 
 // ============================================================
 // PRODUCT CRUD
@@ -345,7 +365,7 @@ export const removeBundle = async (req, res) => {
 export const getEvents = async (req, res) => {
   try {
     const activeOnly = req.query.active === 'true';
-    const events = await getAllEvents({ activeOnly });
+    const events = await getCachedEvents(activeOnly);
 
     res.status(200).json({
       success: true,
@@ -402,6 +422,7 @@ export const addEvent = async (req, res) => {
     }
 
     const savedEvent = await createEvent(eventData);
+    invalidateEventsCache();
     console.log('Event Successfully Saved:', savedEvent);
 
     res.status(201).json({
@@ -411,10 +432,10 @@ export const addEvent = async (req, res) => {
     });
   } catch (error) {
     console.error('Event Creation Error Caught:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Failed to add event.',
-      error: error.message
+      message: error.statusCode === 400 ? error.message : 'Failed to add event.',
+      ...(error.statusCode === 400 ? {} : { error: error.message })
     });
   }
 };
@@ -425,6 +446,7 @@ export const editEvent = async (req, res) => {
     const eventData = req.body;
 
     const updatedEvent = await updateEvent(id, eventData);
+    invalidateEventsCache();
 
     res.status(200).json({
       success: true,
@@ -433,10 +455,10 @@ export const editEvent = async (req, res) => {
     });
   } catch (error) {
     console.error('Event Update Error:', error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: 'Failed to update event.',
-      error: error.message
+      message: error.statusCode === 400 ? error.message : 'Failed to update event.',
+      ...(error.statusCode === 400 ? {} : { error: error.message })
     });
   }
 };
@@ -445,6 +467,7 @@ export const removeEvent = async (req, res) => {
   try {
     const { id } = req.params;
     const deletedEvent = await deleteEvent(id);
+    invalidateEventsCache();
 
     res.status(200).json({
       success: true,
@@ -485,11 +508,10 @@ export const getEventAds = async (req, res) => {
     // (hindi na umaasa sa cache/cron).
     const payload = await getLiveEventAds();
 
-    if (!payload || payload.active === false) {
-      return res.status(200).json({ success: true, data: { active: false } });
-    }
-
-    res.status(200).json({ success: true, data: payload });
+    res.status(200).json({
+      success: true,
+      data: payload || { active: false, events: [] }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

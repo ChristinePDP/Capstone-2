@@ -49,6 +49,47 @@ const getDaysInMonth = (month) => {
   return 31;
 };
 
+const eventDayIndex = (month, day) => {
+  const date = new Date(Date.UTC(2000, Number(month) - 1, Number(day)));
+  return Math.floor((date.getTime() - Date.UTC(2000, 0, 1)) / 86400000);
+};
+const eventIsLiveOnDay = (event, dayIndex) => {
+  const start = eventDayIndex(event.start_month, event.start_day);
+  const end = eventDayIndex(event.end_month, event.end_day);
+  return start <= end ? dayIndex >= start && dayIndex <= end : dayIndex >= start || dayIndex <= end;
+};
+const formatEventDay = dayIndex => {
+  const date = new Date(Date.UTC(2000, 0, 1 + dayIndex));
+  return `${MONTHS[date.getUTCMonth()].label.slice(0, 3)} ${date.getUTCDate()}`;
+};
+const getEventLiveLimitConflict = (candidate, events = [], excludeId = null) => {
+  if (candidate.is_active === false) return null;
+  const others = events.filter(event => event.is_active !== false && String(event.id) !== String(excludeId));
+  const start = eventDayIndex(candidate.start_month, candidate.start_day);
+  const end = eventDayIndex(candidate.end_month, candidate.end_day);
+  const rangeLength = (end - start + 366) % 366 + 1;
+  let conflictStart = -1;
+  let conflictEnd = -1;
+  const liveNames = new Set();
+
+  for (let offset = 0; offset < rangeLength; offset += 1) {
+    const day = (start + offset) % 366;
+    const liveEvents = others.filter(event => eventIsLiveOnDay(event, day));
+    if (liveEvents.length >= 3) {
+      if (conflictStart < 0) conflictStart = offset;
+      conflictEnd = offset;
+      liveEvents.forEach(event => liveNames.add(event.event_name));
+    } else if (conflictStart >= 0) {
+      break;
+    }
+  }
+
+  if (conflictStart < 0) return null;
+  const firstDay = (start + conflictStart) % 366;
+  const lastDay = (start + conflictEnd) % 366;
+  return `Only 3 events can run at the same time. From ${formatEventDay(firstDay)} to ${formatEventDay(lastDay)}, these are already live: ${[...liveNames].join(', ')}. Change the dates or set one of them to inactive.`;
+};
+
 // Text field na may inline validation: pulang border + pulang label, at ang
 // error message ay nasa mismong field (overlay sa ilalim nito, hindi
 // nagdadagdag ng taas kaya hindi gumagalaw ang form). Kapag may `hint`,
@@ -164,7 +205,9 @@ function EventModal({
   isEditing = false,
   initialData, 
   onSave,
-  serverError = null
+  serverError = null,
+  events = [],
+  onValidationError = () => {}
 }) {
   useLockBodyScroll(isOpen);
   const [form, setForm] = useState({
@@ -214,8 +257,6 @@ function EventModal({
     });
   }, [form]);
 
-  if (!isOpen) return null;
-
   const handleSave = () => {
     const found = computeErrors(form);
     if (Object.keys(found).length > 0) {
@@ -226,16 +267,47 @@ function EventModal({
       }, 50);
       return;
     }
+    const conflict = getEventLiveLimitConflict(form, events, initialData?.id);
+    if (conflict) {
+      onValidationError(conflict);
+      return;
+    }
     onSave({ ...form, event_name: form.event_name.trim(), event_tag: form.event_tag.trim() });
+  };
+
+  // Compare only editable event fields in a fixed order and normalized types.
+  // Database-only fields such as id must not make an untouched form look dirty.
+  // FIX: dating `(data = {})` lang — gumagana lang ang default na iyon kapag
+  // `undefined`. Pero `null` ang initialData kapag "Add New Event" (selectedEvent
+  // = null), kaya nag-crash ang `data.event_name`. Ngayon, `data || {}` para
+  // sakop pati null.
+  const normalizeEventForm = (data) => {
+    const d = data || {};
+    return {
+      event_name: d.event_name ?? '',
+      event_tag: d.event_tag ?? '',
+      start_month: Number(d.start_month ?? 1),
+      start_day: Number(d.start_day ?? 1),
+      end_month: Number(d.end_month ?? 1),
+      end_day: Number(d.end_day ?? 1),
+      is_active: d.is_active ?? true,
+    };
   };
 
   const closeGuard = useUnsavedChanges({
     isOpen,
-    values: form,
-    initialValues: { event_name: '', event_tag: '', start_month: 1, start_day: 1, end_month: 1, end_day: 1, is_active: true, ...(initialData || {}) },
+    values: normalizeEventForm(form),
+    initialValues: normalizeEventForm(initialData),
     onClose,
     onSave: handleSave,
   });
+
+  // FIX: dating nasa itaas ito (bago ang useUnsavedChanges). Kapag isOpen=false,
+  // nagre-return agad bago tumakbo ang useUnsavedChanges, kaya pag naging
+  // isOpen=true ay mas marami ang hooks na tumakbo kaysa sa previous render
+  // ("Rendered more hooks than during the previous render"). Dapat nasa
+  // ibaba ng LAHAT ng hooks ang conditional return.
+  if (!isOpen) return null;
 
   const monthOptions = MONTHS.map(m => ({ value: m.val, label: m.label }));
   
@@ -722,6 +794,8 @@ export default function EventManager() {
         initialData={selectedEvent}
         onSave={handleSave}
         serverError={saveError}
+        events={events}
+        onValidationError={setSaveError}
       />
 
       <ConfirmToast

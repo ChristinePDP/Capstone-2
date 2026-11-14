@@ -862,6 +862,63 @@ export const getEventById = async (id) => {
   }
 };
 
+const EVENT_CYCLE_DAYS = 366; // leap-year calendar so February 29 is included
+const eventDayIndex = (month, day) => {
+  const date = new Date(Date.UTC(2000, Number(month) - 1, Number(day)));
+  return Math.floor((date.getTime() - Date.UTC(2000, 0, 1)) / 86400000);
+};
+const eventIsLiveOnDay = (event, dayIndex) => {
+  const start = eventDayIndex(event.start_month, event.start_day);
+  const end = eventDayIndex(event.end_month, event.end_day);
+  return start <= end
+    ? dayIndex >= start && dayIndex <= end
+    : dayIndex >= start || dayIndex <= end;
+};
+const formatEventDay = dayIndex => {
+  const date = new Date(Date.UTC(2000, 0, 1 + dayIndex));
+  return `${date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${date.getUTCDate()}`;
+};
+
+// Returns the exact user-facing conflict message, or null when the event fits.
+// The date cycle has no year, so compare every day in a leap-year calendar.
+export const getEventLiveLimitConflict = async (eventData, excludeId = null) => {
+  if (eventData.is_active === false) return null;
+  const activeEvents = await OccasionModel.findAll({ activeOnly: true });
+  const others = (activeEvents || []).filter(event => String(event.id) !== String(excludeId));
+  const start = eventDayIndex(eventData.start_month, eventData.start_day);
+  const end = eventDayIndex(eventData.end_month, eventData.end_day);
+  const rangeLength = (end - start + EVENT_CYCLE_DAYS) % EVENT_CYCLE_DAYS + 1;
+  let conflictStart = -1;
+  let conflictEnd = -1;
+  const liveNames = new Set();
+
+  for (let offset = 0; offset < rangeLength; offset += 1) {
+    const day = (start + offset) % EVENT_CYCLE_DAYS;
+    const liveEvents = others.filter(event => eventIsLiveOnDay(event, day));
+    if (liveEvents.length >= 3) {
+      if (conflictStart < 0) conflictStart = offset;
+      conflictEnd = offset;
+      liveEvents.forEach(event => liveNames.add(event.event_name));
+    } else if (conflictStart >= 0) {
+      break;
+    }
+  }
+
+  if (conflictStart < 0) return null;
+  const firstDay = (start + conflictStart) % EVENT_CYCLE_DAYS;
+  const lastDay = (start + conflictEnd) % EVENT_CYCLE_DAYS;
+  return `Only 3 events can run at the same time. From ${formatEventDay(firstDay)} to ${formatEventDay(lastDay)}, these are already live: ${[...liveNames].join(', ')}. Change the dates or set one of them to inactive.`;
+};
+
+const assertEventLiveLimit = async (eventData, excludeId = null) => {
+  const message = await getEventLiveLimitConflict(eventData, excludeId);
+  if (message) {
+    const error = new Error(message);
+    error.statusCode = 400;
+    throw error;
+  }
+};
+
 export const createEvent = async (eventData) => {
   const eventToInsert = {
     event_name: eventData.event_name,
@@ -874,8 +931,10 @@ export const createEvent = async (eventData) => {
   };
 
   try {
+    await assertEventLiveLimit(eventToInsert);
     return await OccasionModel.create(eventToInsert);
   } catch (error) {
+    if (error.statusCode) throw error;
     throw new Error(`Service Error (createEvent): ${error.message}`);
   }
 };
@@ -896,8 +955,11 @@ export const updateEvent = async (id, eventData) => {
   });
 
   try {
+    const existingEvent = await OccasionModel.findById(id);
+    await assertEventLiveLimit({ ...existingEvent, ...eventToUpdate }, id);
     return await OccasionModel.update(id, eventToUpdate);
   } catch (error) {
+    if (error.statusCode) throw error;
     throw new Error(`Service Error (updateEvent): ${error.message}`);
   }
 };
@@ -976,7 +1038,7 @@ export const generateHomepageAds = async () => {
 
 const EVENT_ADS_CACHE_KEY = 'event_ads_homepage';
 const EVENT_ADS_TTL_MS = 24 * 60 * 60 * 1000;
-const EVENT_ADS_INACTIVE_PAYLOAD = { active: false };
+const EVENT_ADS_INACTIVE_PAYLOAD = { active: false, events: [] };
 
 // Walang AI sa bahaging ito. Ang icon ay hinuhulaan ng code mula sa
 // pangalan/tag ng event (keyword match). Kapag walang tumama, 'sparkle'.
@@ -1012,19 +1074,27 @@ const isEventLiveToday = (event, today) => {
   );
 };
 
-// Rule-based na (walang Gemini), at walang cache write dito: ang system mismo ang pumipili ng products
-// base sa event_tag ng LIVE event. Kapag nakatakda ang event ngayong araw
-// at may product na naka-tag dito, lalabas ito sa online ordering modal.
+// Ilang araw pa bago matapos ang live event; kung lumipas na ang end month/day,
+// ang susunod nitong pagtatapos ay sa susunod na taon.
+const daysUntilEventEnd = (event, today) => {
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let endDate = new Date(today.getFullYear(), Number(event.end_month) - 1, Number(event.end_day));
+  if (endDate < todayDate) {
+    endDate = new Date(today.getFullYear() + 1, Number(event.end_month) - 1, Number(event.end_day));
+  }
+  return Math.ceil((endDate - todayDate) / (24 * 60 * 60 * 1000));
+};
+
+// Bumubuo ng hanggang tatlong live event ads, bawat isa ay may sariling products.
 const buildEventAdsPayload = async () => {
   try {
     const today = new Date();
+    const activeEvents = await OccasionModel.findAll({ activeOnly: true });
+    const liveEvents = activeEvents
+      .filter(event => isEventLiveToday(event, today))
+      .sort((a, b) => daysUntilEventEnd(a, today) - daysUntilEventEnd(b, today));
 
-    const events = await OccasionModel.findAll({ activeOnly: true });
-    const liveEvents = events.filter(e => isEventLiveToday(e, today));
-
-    if (liveEvents.length === 0) {
-      return EVENT_ADS_INACTIVE_PAYLOAD;
-    }
+    if (liveEvents.length === 0) return EVENT_ADS_INACTIVE_PAYLOAD;
 
     const { data: productsData, error: prodError } = await supabase
       .from('products')
@@ -1037,61 +1107,89 @@ const buildEventAdsPayload = async () => {
       (productsData || []).map(product => product.id)
     );
 
-    // Products na pwedeng ibenta (Celebration Material o may production formula)
     const sellableProducts = (productsData || []).filter(
-      p => p.category === 'Celebration Material'
-        || formulaByProductId.get(p.id)?.has_production_formula === true
+      product => product.category === 'Celebration Material'
+        || formulaByProductId.get(product.id)?.has_production_formula === true
     );
 
-    const productHasTag = (product, tag) =>
-      Array.isArray(product.event_tags)
-      && product.event_tags.some(t => normalizeTag(t) === normalizeTag(tag));
+    const eventsWithProducts = liveEvents.map(event => {
+      const products = sellableProducts.filter(product =>
+        Array.isArray(product.event_tags)
+        && product.event_tags.some(tag => normalizeTag(tag) === normalizeTag(event.event_tag))
+      );
 
-    // Bawat live event: ilan ang naka-tag na products nito?
-    const liveEventsWithProducts = liveEvents
-      .filter(e => normalizeTag(e.event_tag))
-      .map(e => ({
-        event: e,
-        products: sellableProducts.filter(p => productHasTag(p, e.event_tag))
-      }))
-      .filter(entry => entry.products.length > 0);
+      return { event, products };
+    }).filter(entry => entry.products.length > 0);
 
-    if (liveEventsWithProducts.length === 0) {
-      return EVENT_ADS_INACTIVE_PAYLOAD;
-    }
-
-    // Kung higit sa isa ang live event, ang may pinakamaraming naka-tag na
-    // products ang magiging "primary" (sa title/badge). Ang products ng
-    // lahat ng live event ay pinagsasama (walang duplicate).
-    const primary = [...liveEventsWithProducts]
-      .sort((a, b) => b.products.length - a.products.length)[0];
-    const primaryEvent = primary.event;
-
-    const finalProducts = [];
-    const seenIds = new Set();
-    // Primary event muna ang mauna sa listahan
-    [primary, ...liveEventsWithProducts.filter(entry => entry !== primary)].forEach(entry => {
-      entry.products.forEach(p => {
-        if (!seenIds.has(p.id)) {
-          seenIds.add(p.id);
-          finalProducts.push(p);
-        }
+    const toEventAd = event => ({
+      name: event.event_name,
+      icon: pickEventIcon(event),
+      endMonth: event.end_month,
+      endDay: event.end_day,
+    });
+    // Identical product sets share one section, even if the DB returned those
+    // products in a different order for each event.
+    const mergedByProductSet = new Map();
+    eventsWithProducts.forEach(({ event, products }) => {
+      const key = products.map(product => String(product.id)).sort().join('|');
+      const eventAd = toEventAd(event);
+      if (mergedByProductSet.has(key)) {
+        mergedByProductSet.get(key).mergedEvents.push(eventAd);
+        return;
+      }
+      mergedByProductSet.set(key, {
+        event: {
+          ...eventAd,
+          title: `${event.event_name} Specials`,
+          subtitle: `Check out our specials for ${event.event_name}!`,
+          badge: event.event_name,
+        },
+        mergedEvents: [eventAd],
+        products,
       });
     });
 
-    return {
-      active: true,
-      event: {
-        name: primaryEvent.event_name,
-        title: `${primaryEvent.event_name} Specials`,
-        subtitle: `Check out our specials for ${primaryEvent.event_name}!`,
-        badge: primaryEvent.event_name,
-        icon: pickEventIcon(primaryEvent),
-        endMonth: primaryEvent.end_month,
-        endDay: primaryEvent.end_day
-      },
-      products: finalProducts
-    };
+    // For partial overlaps, preserve each product in the event ending soonest.
+    // If that leaves a later event with no unique products, retain its event
+    // name/deadline under the nearest winning entry so the customer still sees
+    // every occasion represented by the shared products.
+    const productOwner = new Map();
+    const dedupedEvents = [];
+    for (const entry of mergedByProductSet.values()) {
+      const uniqueProducts = [];
+      const ownersForEntry = new Map();
+      entry.products.forEach(product => {
+        const productId = String(product.id);
+        const owner = productOwner.get(productId);
+        if (owner) {
+          ownersForEntry.set(owner, (ownersForEntry.get(owner) || 0) + 1);
+          return;
+        }
+        productOwner.set(productId, entry);
+        uniqueProducts.push(product);
+      });
+
+      if (uniqueProducts.length) {
+        dedupedEvents.push({ ...entry, products: uniqueProducts });
+        continue;
+      }
+
+      const nearestOwner = [...ownersForEntry.entries()]
+        .sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (!nearestOwner) continue;
+      entry.mergedEvents.forEach(eventAd => {
+        const alreadyIncluded = nearestOwner.mergedEvents.some(existing =>
+          existing.name === eventAd.name
+          && existing.endMonth === eventAd.endMonth
+          && existing.endDay === eventAd.endDay
+        );
+        if (!alreadyIncluded) nearestOwner.mergedEvents.push(eventAd);
+      });
+    }
+    const limitedEvents = dedupedEvents.slice(0, 3);
+
+    if (limitedEvents.length === 0) return EVENT_ADS_INACTIVE_PAYLOAD;
+    return { active: true, events: limitedEvents };
   } catch (error) {
     console.error('[SERVICE] Error generating event ads:', error);
     throw error;
@@ -1112,6 +1210,11 @@ export const generateEventAds = async () => {
 // mag-query sa DB sa bawat bisita.
 const LIVE_EVENT_ADS_MEMO_MS = 60 * 1000;
 let liveEventAdsMemo = { payload: null, expiresAt: 0 };
+
+// Clear the homepage event-ad memo after an event is changed.
+export const invalidateLiveEventAdsMemo = () => {
+  liveEventAdsMemo = { payload: null, expiresAt: 0 };
+};
 
 export const getLiveEventAds = async () => {
   const now = Date.now();
