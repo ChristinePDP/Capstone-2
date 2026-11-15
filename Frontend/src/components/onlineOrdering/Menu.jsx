@@ -1447,42 +1447,96 @@ export default function Menu({ cart, setCart }) {
   const [toast, setToast] = useState(null); 
   const toastTimerRef = useRef(null);
   const productListRef = useRef(null);
+  const handledFocusKeyRef = useRef(null); // location.key na na-pulse na
+  const focusTimerRef = useRef(null);
 
+  // ── Galing sa Home (Promo Bundle card / Event Ad): lumipat ng tab, mag-scroll
+  // papunta sa card, tapos ISANG pulse lang. Isang beses lang kada navigation —
+  // hindi na uulit kapag nag-refresh ang catalog (60s / window focus).
+  const focusBundleParam = location.state?.focusBundleId;
+  const focusProductParam = location.state?.focusProductId;
+  const focusTargetId = focusBundleParam != null
+    ? `bundle-${focusBundleParam}`
+    : (focusProductParam ?? null);
+
+  // 1) Ilipat ang tab / i-clear ang search (isang beses kada navigation)
   useEffect(() => {
-    const bundleId = location.state?.focusBundleId;
-    const productId = location.state?.focusProductId;
-    const targetId = bundleId != null ? `bundle-${bundleId}` : productId;
-    if (targetId == null) return;
-
-    setActiveTab(bundleId != null ? 'Promo Bundle' : 'All');
+    if (focusTargetId == null) return;
+    setActiveTab(focusBundleParam != null ? 'Promo Bundle' : 'All');
     setSearchQuery('');
-    if (isLoading) return;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
-    let frameId;
-    let timeoutId;
-    frameId = window.requestAnimationFrame(() => {
-      frameId = window.requestAnimationFrame(() => {
-        const container = productListRef.current;
-        const target = Array.from(container?.querySelectorAll('[data-menu-product-id]') || [])
-          .find((element) => element.dataset.menuProductId === String(targetId));
-        if (!container || !target) return;
+  // 2) Pagka-load ng catalog: scroll -> hintayin tumigil -> pulse
+  useEffect(() => {
+    if (focusTargetId == null || isLoading) return undefined;
+    if (handledFocusKeyRef.current === location.key) return undefined;
 
-        const containerRect = container.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        container.scrollTo({
-          top: container.scrollTop + targetRect.top - containerRect.top - 16,
-          behavior: 'smooth',
-        });
-        setFocusedProductId(String(targetId));
-        timeoutId = window.setTimeout(() => setFocusedProductId(null), 2200);
-      });
-    });
+    let rafId = 0;
+    let tries = 0;
+    const targetKey = String(focusTargetId);
 
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      if (timeoutId) window.clearTimeout(timeoutId);
+    const findTarget = () => Array
+      .from(productListRef.current?.querySelectorAll('[data-menu-product-id]') || [])
+      .find((el) => el.dataset.menuProductId === targetKey);
+
+    // Desktop: nag-i-scroll ang loob ng list. Mobile: ang buong page (window) ang nag-i-scroll.
+    const scrollToTarget = (target) => {
+      const container = productListRef.current;
+      const rect = target.getBoundingClientRect();
+      const innerScrolls = container
+        && container.scrollHeight > container.clientHeight + 1
+        && /(auto|scroll)/.test(window.getComputedStyle(container).overflowY);
+
+      if (innerScrolls) {
+        const cRect = container.getBoundingClientRect();
+        const offset = Math.max(16, (container.clientHeight - rect.height) / 2);
+        container.scrollTo({ top: Math.max(0, container.scrollTop + rect.top - cRect.top - offset), behavior: 'smooth' });
+      } else {
+        const offset = Math.max(16, (window.innerHeight - rect.height) / 2);
+        window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - offset), behavior: 'smooth' });
+      }
     };
-  }, [location.key, location.state, isLoading, rawProducts, rawBundles]);
+
+    // Hintayin munang tumigil ang smooth scroll bago mag-pulse para kita ng customer.
+    const waitUntilSettled = (target, done) => {
+      let last = null;
+      let stable = 0;
+      let frames = 0;
+      const tick = () => {
+        const top = target.getBoundingClientRect().top;
+        stable = last !== null && Math.abs(top - last) < 0.5 ? stable + 1 : 0;
+        last = top;
+        frames += 1;
+        if (stable >= 6 || frames > 90) done();
+        else rafId = window.requestAnimationFrame(tick);
+      };
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    const begin = () => {
+      const target = findTarget();
+      if (!target) {
+        // Hindi pa na-render ang tab — subukan ulit sa susunod na frame (max ~12)
+        tries += 1;
+        if (tries > 12) { handledFocusKeyRef.current = location.key; return; }
+        rafId = window.requestAnimationFrame(begin);
+        return;
+      }
+      handledFocusKeyRef.current = location.key;
+      scrollToTarget(target);
+      waitUntilSettled(target, () => {
+        setFocusedProductId(targetKey);
+        window.clearTimeout(focusTimerRef.current);
+        // Safety net lang; ang onAnimationEnd ng card ang karaniwang nag-a-alis nito.
+        focusTimerRef.current = window.setTimeout(() => setFocusedProductId(null), 2000);
+      });
+    };
+
+    rafId = window.requestAnimationFrame(() => { rafId = window.requestAnimationFrame(begin); });
+    return () => window.cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, isLoading, focusTargetId]);
 
   const showToast = (message) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -1547,6 +1601,7 @@ export default function Menu({ cart, setCart }) {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
     };
   }, []);
 
@@ -1963,7 +2018,14 @@ export default function Menu({ cart, setCart }) {
               const inclusionText = p.type !== 'bundle' ? (p.inclusion || '') : '';
 
               return (
-                <div key={p.id} data-menu-product-id={String(p.id)} className={`bg-white rounded-2xl border overflow-hidden flex flex-col group shadow-sm relative transition-all duration-500 ${focusedProductId === String(p.id) ? 'border-[#3B1F0A] ring-4 ring-[#3B1F0A]/20' : 'border-[#EAE4E0]'}`}>
+                <div
+                  key={p.id}
+                  data-menu-product-id={String(p.id)}
+                  onAnimationEnd={(e) => {
+                    if (e.target === e.currentTarget && String(e.animationName).startsWith('menuCardPulse')) setFocusedProductId(null);
+                  }}
+                  className={`bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative ${focusedProductId === String(p.id) ? 'menu-card-pulse z-[5]' : ''}`}
+                >
                   <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
                     
                     {p.type === 'bundle' ? (
@@ -2084,6 +2146,26 @@ export default function Menu({ cart, setCart }) {
 
   return (
     <div className="bg-[#FCFAF9] lg:min-h-screen flex flex-col relative">
+      <style>{`
+        /* Isang smooth na pulse lang kapag galing sa Home (promo bundle / event ad) */
+        @keyframes menuCardPulse {
+          0%   { transform: scale(1);     border-color: #EAE4E0; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 0 rgba(59,31,10,.30); }
+          40%  { transform: scale(1.025); border-color: #3B1F0A; box-shadow: 0 12px 26px -10px rgba(59,31,10,.30), 0 0 0 5px rgba(59,31,10,.14); }
+          100% { transform: scale(1);     border-color: #EAE4E0; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 10px rgba(59,31,10,0); }
+        }
+        @keyframes menuCardPulseSoft {
+          0%   { border-color: #EAE4E0; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 0 rgba(59,31,10,0); }
+          40%  { border-color: #3B1F0A; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 4px rgba(59,31,10,.16); }
+          100% { border-color: #EAE4E0; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 4px rgba(59,31,10,0); }
+        }
+        .menu-card-pulse {
+          animation: menuCardPulse 1.3s cubic-bezier(.22,.61,.36,1) 1 both;
+          will-change: transform, box-shadow;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .menu-card-pulse { animation-name: menuCardPulseSoft; }
+        }
+      `}</style>
       {toast && (
         <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[6000] flex items-center gap-2.5 bg-white text-[#3B1F0A] border border-red-200 text-xs sm:text-sm font-semibold px-4 sm:px-5 py-3 rounded-xl shadow-xl ring-1 ring-black/5 max-w-[92vw] sm:max-w-md animate-in fade-in slide-in-from-top-4 duration-200">
           <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />

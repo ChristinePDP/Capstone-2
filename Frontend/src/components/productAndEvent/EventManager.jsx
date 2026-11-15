@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td, Modal, useUnsavedChanges } from '../ui';
+import { Button, Table, Tr, Td, Modal, useUnsavedChanges } from '../ui';
 
 // Base URL ng backend. Kinukuha mula sa VITE_API_URL sa .env
 // (hal. VITE_API_URL=http://localhost:3000/api — kasama na ang "/api"
@@ -448,6 +448,9 @@ function EventModal({
             Set as Active
           </label>
         </div>
+        <p className="text-[10px] text-[#8A7264] leading-snug -mt-2">
+          When on, the event goes live automatically during its date range every year. When off, it never runs.
+        </p>
 
       </div>
     </Modal>
@@ -511,6 +514,77 @@ const formatDate = (month, day) => {
   const label = MONTHS.find(m => m.val === Number(month))?.label.slice(0, 3);
   return `${label} ${day}`;
 };
+
+// ─────────────────────────────────────────────────────────────
+// EVENT STATUS — ang "Active" ay ibig sabihin lang na naka-ON ang event
+// (is_active). Hindi nito sinasabi kung tumatakbo ba ito NGAYON. Kaya ang
+// ipinapakita ay ang totoong estado ayon sa petsa ngayon:
+//   • Live now   — naka-ON at nasa loob ng date range ngayon
+//   • Scheduled  — naka-ON pero hindi pa/hindi na ang petsa (babalik taon-taon)
+//   • Inactive   — naka-OFF, hindi tatakbo kahit pumatak ang petsa
+// Ang mga event ay umuulit kada taon (buwan/araw lang ang tinatago), kaya
+// walang "Ended": pagkatapos ng end date, "Scheduled" ulit para sa susunod na taon.
+// ─────────────────────────────────────────────────────────────
+const MS_PER_DAY = 86400000;
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const daysBetween = (a, b) => Math.round((startOfDay(b) - startOfDay(a)) / MS_PER_DAY);
+const pluralDays = (n) => `${n} day${n === 1 ? '' : 's'}`;
+
+function getEventStatus(event, now = new Date()) {
+  if (!event.is_active) {
+    return { key: 'inactive', label: 'Inactive', detail: 'Turned off', sortKey: 1e9 };
+  }
+
+  const today = startOfDay(now);
+  const sm = Number(event.start_month), sd = Number(event.start_day);
+  const em = Number(event.end_month), ed = Number(event.end_day);
+  const wraps = em < sm || (em === sm && ed < sd); // hal. Dec 20 – Jan 5
+
+  let nextStart = null;
+  for (let year = today.getFullYear() - 1; year <= today.getFullYear() + 1; year += 1) {
+    const start = new Date(year, sm - 1, sd);
+    const end = new Date(wraps ? year + 1 : year, em - 1, ed);
+
+    if (today >= start && today <= end) {
+      const left = daysBetween(today, end);
+      return {
+        key: 'live',
+        label: 'Live now',
+        detail: left === 0 ? 'Last day today' : `Ends ${formatDate(em, ed)} · ${pluralDays(left)} left`,
+        sortKey: -1,
+      };
+    }
+    if (start > today && (!nextStart || start < nextStart)) nextStart = start;
+  }
+
+  const until = daysBetween(today, nextStart);
+  return {
+    key: 'scheduled',
+    label: 'Scheduled',
+    detail: until === 1 ? 'Starts tomorrow' : `Starts in ${pluralDays(until)}`,
+    sortKey: until,
+  };
+}
+
+const STATUS_STYLES = {
+  live:      { pill: 'bg-green-100 text-green-700',  dot: 'bg-green-500 animate-pulse' },
+  scheduled: { pill: 'bg-amber-50 text-amber-700 border border-amber-200', dot: 'bg-amber-500' },
+  inactive:  { pill: 'bg-[#F1EBE6] text-[#8A7264]',  dot: 'bg-[#B7A99F]' },
+};
+
+function EventStatus({ event, align = 'left' }) {
+  const status = getEventStatus(event);
+  const style = STATUS_STYLES[status.key];
+  return (
+    <div className={`flex flex-col gap-1 ${align === 'right' ? 'items-end' : 'items-start'}`}>
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-5 whitespace-nowrap ${style.pill}`}>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+        {status.label}
+      </span>
+      <span className="text-[11px] text-[#8A7264] leading-tight whitespace-nowrap">{status.detail}</span>
+    </div>
+  );
+}
 
 // Helper para consistent yung pag-handle ng response mula sa backend
 // (success/message/data shape, tulad ng ginagamit sa product endpoints)
@@ -663,6 +737,12 @@ export default function EventManager() {
     }
   };
 
+  // Live muna, tapos ang pinakamalapit na susunod, at Inactive sa dulo.
+  const sortedEvents = [...events].sort((a, b) => (
+    getEventStatus(a).sortKey - getEventStatus(b).sortKey
+    || String(a.event_name).localeCompare(String(b.event_name))
+  ));
+
   return (
     <div>
       {/* Palaging ipakita ang scrollbar ng page (kahit maikli lang ang laman
@@ -711,7 +791,7 @@ export default function EventManager() {
               { label: 'Event' }, { label: 'Event Tag' }, { label: 'Date Range' },
               { label: 'Status' }, { label: 'Action', align: 'right' },
             ]}>
-              {events.map((event) => (
+              {sortedEvents.map((event) => (
                 <Tr key={event.id}>
                   <Td className="font-semibold text-brand-900">{event.event_name}</Td>
                   <Td>{event.event_tag}</Td>
@@ -719,9 +799,7 @@ export default function EventManager() {
                     {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
                   </Td>
                   <Td>
-                    <Badge variant={event.is_active ? 'success' : 'default'}>
-                      {event.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
+                    <EventStatus event={event} />
                   </Td>
                   <Td align="right">
                     <div className="flex items-center justify-end gap-2">
@@ -742,7 +820,7 @@ export default function EventManager() {
               Kaparehong pill badge at bordered text+icon action buttons ng
               desktop table para consistent ang dalawang view. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-4">
-            {events.map((event) => (
+            {sortedEvents.map((event) => (
               <div
                 key={event.id}
                 className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow"
@@ -751,9 +829,7 @@ export default function EventManager() {
                   <h3 className="text-xs sm:text-sm font-bold text-[#3B1F0A] leading-snug break-words">
                     {event.event_name}
                   </h3>
-                  <Badge variant={event.is_active ? 'success' : 'default'} className="shrink-0">
-                    {event.is_active ? 'Active' : 'Inactive'}
-                  </Badge>
+                  <div className="shrink-0"><EventStatus event={event} align="right" /></div>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
