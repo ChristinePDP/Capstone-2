@@ -1119,7 +1119,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-6 lg:gap-10 px-5 sm:px-8 py-6 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
 
         {/* LEFT COLUMN: Step 1 */}
-        <div className={`${isPaymentStep ? 'hidden' : 'flex'} flex-1 flex-col lg:h-[calc(100vh-112px)] min-h-0 lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2 lg:overflow-y-auto scrollbar-thin`}>
+        <div className={`${isPaymentStep ? 'hidden' : 'flex'} flex-1 flex-col lg:min-h-[calc(100vh-112px)] lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2`}>
           <div className="flex flex-col lg:flex-1 lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
 
               <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:grow lg:rounded-none lg:border-0 lg:shadow-none">
@@ -1141,13 +1141,13 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                     </div>
                   )}
 
-<div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 lg:gap-x-6 lg:gap-y-5 shrink-0 lg:grow lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto_auto]">
+<div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 lg:gap-x-6 lg:gap-y-5 shrink-0 lg:grow lg:grid-rows-[1fr_auto_auto]">
 
                       {/* LEFT: two grouped sections that stretch to fill the height */}
-                      <div className="flex flex-col gap-4 lg:gap-5 min-w-0 lg:min-h-0">
+                      <div className="flex flex-col gap-4 lg:gap-5 min-w-0">
 
                         {/* Customer */}
-                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-5">
+                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-4">
                             <div className="hidden lg:flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.15em] text-[#B7A99F]">
                               <User size={13} />
                               <span>Customer</span>
@@ -1221,7 +1221,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                         </div>
 
                         {/* Pick-up schedule */}
-                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-5">
+                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-4">
                             <div className="hidden lg:flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.15em] text-[#B7A99F]">
                               <CalendarIcon size={13} />
                               <span>Pick-up Schedule</span>
@@ -1354,7 +1354,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       </div>
 
                       {/* RIGHT: special instructions, full height */}
-                      <div className="min-w-0 flex flex-col relative lg:h-full">
+                      <div className="min-w-0 flex flex-col relative">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions (Optional)</label>
                           <textarea
                             rows={5}
@@ -1396,7 +1396,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         </div>
 
         {/* RIGHT COLUMN: Step 2 (Payment) */}
-        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[780px] lg:max-w-[780px] lg:mx-auto lg:h-[calc(100vh-112px)] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 overflow-hidden flex-col`}>
+        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[780px] lg:max-w-[780px] lg:mx-auto lg:min-h-[calc(100vh-112px)] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 overflow-hidden flex-col`}>
 
           <div className="flex-1 min-h-0 px-5 lg:px-7 py-4 flex flex-col gap-5 overflow-y-auto scrollbar-thin">
               <div className="flex flex-col shrink-0 lg:flex-1 lg:min-h-0">
@@ -1436,6 +1436,19 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       Items reserved for {Math.floor(reservationSecondsRemaining / 60)}:{String(reservationSecondsRemaining % 60).padStart(2, '0')} minutes. Submit your payment proof before the timer ends.
                     </div>
                   )}
+                  {/* Awareness notice: limits and what happens when the order changes */}
+                  <div className="mb-3 shrink-0 rounded-xl border border-[#E8D9C6] bg-[#FBF6EF] px-4 py-3">
+                    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#8A5A2B] mb-2">
+                      <AlertCircle size={13} /> Before you pay
+                    </p>
+                    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] leading-snug text-[#5A453C] list-disc pl-4 marker:text-[#D4A87A]">
+                      <li>Send the exact amount of the option you selected (50% deposit or full payment).</li>
+                      <li>Your items are held only until the timer above ends. If it runs out, you'll need to check availability again before paying.</li>
+                      <li>If you change your order after uploading a screenshot (add or remove items), the total changes and your uploaded proof is removed. You'll need to upload a new one.</li>
+                      <li>Already paid but want to change your order? Please contact the shop first and don't pay a second time.</li>
+                      <li>Your screenshot is saved on this device only, so refreshing keeps it, but it won't appear on another phone, browser or device.</li>
+                    </ul>
+                  </div>
                   <div className="lg:grid lg:grid-cols-2 lg:grid-rows-1 lg:gap-6 lg:items-stretch lg:flex-1 lg:min-h-0">
                   <div className="min-w-0 flex flex-col">
                   <p className="text-[11px] text-[#8A7264] mb-3.5 shrink-0">We require at least a 50% deposit to process your order.</p>
