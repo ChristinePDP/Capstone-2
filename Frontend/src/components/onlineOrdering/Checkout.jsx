@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Loader2, ZoomIn, X } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Loader2, ZoomIn, X, User, Phone } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
@@ -77,6 +77,21 @@ function toDateStr(year, month, day) {
   const mm = String(month + 1).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
   return `${year}-${mm}-${dd}`;
+}
+
+// One labeled row (icon + label + value) used in the Customer Details panel of the order summary.
+function SummaryRow({ icon: Icon, label, children }) {
+  return (
+    <div className="flex items-start gap-2.5 min-w-0">
+      <div className="w-7 h-7 rounded-full bg-[#F5EFEB] text-[#8A7264] flex items-center justify-center shrink-0">
+        <Icon size={13} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold leading-none mb-1">{label}</p>
+        <div className="text-xs text-[#3B1F0A] font-semibold leading-snug break-words [overflow-wrap:anywhere]">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 // Self-contained month calendar used for Pre-Order date selection.
@@ -202,7 +217,7 @@ function MonthCalendar({ selectedDate, minDate, todayDate, triggerRef, popRef, o
       </div>
       <p className="mt-2 border-t border-[#EAE4E0] pt-2 text-[9px] leading-tight text-[#8A7264]">
         {availabilityLoading
-          ? 'Checking pickup date availabilityâ€¦'
+          ? 'Checking pickup date availability…'
           : 'Red dates are unavailable for one or more pre-order items in your cart. Pickup lead-time rules still apply.'}
       </p>
     </div>,
@@ -328,6 +343,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const [qrImageLoaded, setQrImageLoaded] = useState(false);
   const [isQrExpanded, setIsQrExpanded] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [summaryDetailsOpen, setSummaryDetailsOpen] = useState(true);
   const [expandedSummaryIndexes, setExpandedSummaryIndexes] = useState(() => new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReserving, setIsReserving] = useState(false);
@@ -809,6 +825,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     }
 
     setErrors({});
+    setSummaryDetailsOpen(true);
     setShowSummaryModal(true);
   };
 
@@ -901,7 +918,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     );
     if (missingImages.length > 0) {
       setShowSummaryModal(false);
-      setToastMessage(`Please add the required photo(s) â€” ${missingImages.join(', ')}.`);
+      setToastMessage(`Please add the required photo(s) — ${missingImages.join(', ')}.`);
       return;
     }
     if (!proofOfPayment) {
@@ -1124,16 +1141,25 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 shrink-0 lg:grow lg:grid-cols-[repeat(3,minmax(0,1fr))] lg:grid-rows-[repeat(3,minmax(auto,1fr))_auto_auto] lg:gap-x-5 lg:gap-y-5">
-                      {/* LEFT: name, numbers, pickup date/time */}
-                      <div className="contents">
-                          <div className="relative self-start lg:col-start-1 lg:col-span-2 lg:row-start-1">
+<div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 lg:gap-x-6 lg:gap-y-5 shrink-0 lg:grow lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto_auto]">
+
+                      {/* LEFT: two grouped sections that stretch to fill the height */}
+                      <div className="flex flex-col gap-4 lg:gap-5 min-w-0 lg:min-h-0">
+
+                        {/* Customer */}
+                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-5">
+                            <div className="hidden lg:flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.15em] text-[#B7A99F]">
+                              <User size={13} />
+                              <span>Customer</span>
+                              <span className="flex-1 h-px bg-[#EAE4E0]"></span>
+                            </div>
+                          <div className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
                                 placeholder="e.g. Juan Dela Cruz" 
                                 value={form.name}
-                                className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                                className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   setForm({...form, name: e.target.value});
                                   setErrors(prev => ({...prev, name: getNameError(e.target.value, { hadError: Boolean(prev.name) }) || false}));
@@ -1142,8 +1168,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               />
                               {errors.name && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.name}</span>}
                           </div>
-                      <div className="contents">
-                          <div className="relative self-start lg:col-start-1 lg:row-start-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-5">
+                          <div className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.phone ? 'text-red-500' : 'text-[#8A7264]'}`}>Contact Number <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
@@ -1157,7 +1183,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                   setErrors(prev => ({...prev, phone: getPhoneError(pasted, { hadError: Boolean(prev.phone), required: true }) || false}));
                                 }}
                                 value={formatPhone(form.phone)}
-                                className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                                className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors ${errors.phone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
                                   const onlyNums = normalizePhoneInput(e.target.value);
                                   setForm({...form, phone: onlyNums});
@@ -1167,7 +1193,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               />
                               {errors.phone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.phone}</span>}
                           </div>
-                      <div className="relative self-start sm:col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-2">
+                      <div className="relative">
                           <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.altPhone ? 'text-red-500' : 'text-[#8A7264]'}`}>Alternative Number</label>
                           <input 
                             type="text" 
@@ -1181,7 +1207,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               setErrors(prev => ({...prev, altPhone: getPhoneError(pasted, { hadError: Boolean(prev.altPhone) }) || false}));
                             }}
                             value={formatPhone(form.altPhone)}
-                            className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
+                            className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors ${errors.altPhone ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                             onChange={e => {
                                 const onlyNums = normalizePhoneInput(e.target.value);
                                 setForm({...form, altPhone: onlyNums});
@@ -1191,15 +1217,22 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                           />
                           {errors.altPhone && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.altPhone}</span>}
                       </div>
+                            </div>
+                        </div>
 
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-4 sm:col-span-2 lg:contents">
-                          <div className="relative lg:col-start-1 lg:row-start-3" ref={calendarWrapRef}>
+                        {/* Pick-up schedule */}
+                        <div className="flex flex-col gap-4 lg:gap-5 lg:flex-1 lg:justify-center lg:rounded-2xl lg:border lg:border-[#F1EBE6] lg:bg-[#FCFAF9] lg:p-5">
+                            <div className="hidden lg:flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.15em] text-[#B7A99F]">
+                              <CalendarIcon size={13} />
+                              <span>Pick-up Schedule</span>
+                              <span className="flex-1 h-px bg-[#EAE4E0]"></span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-5">
+                          <div className="relative" ref={calendarWrapRef}>
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupDate ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Date <span className="text-red-500">*</span></label>
 
                               {pickupType === 'now' ? (
-                                <div className="w-full border border-[#EAE4E0] px-3.5 py-3 text-[13px] rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
+                                <div className="w-full border border-[#EAE4E0] px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center gap-2">
                                   <Lock size={12} />
                                   {formatDateLong(getLiveNow().dateStr)} (Today)
                                 </div>
@@ -1211,7 +1244,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                     onClick={() => {
                                       setShowCalendar(s => !s);
                                     }}
-                                    className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
+                                    className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors text-left bg-white flex items-center justify-between ${errors.pickupDate ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`}
                                   >
                                     <span className={form.pickupDate ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}>
                                       {form.pickupDate ? formatDateLong(form.pickupDate) : 'Select pickup date'}
@@ -1244,14 +1277,14 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 </>
                               )}
                           </div>
-                          <div ref={timeDropdownRef} className="relative self-start lg:col-start-2 lg:row-start-3">
+                          <div ref={timeDropdownRef} className="relative">
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupTime ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Time <span className="text-red-500">*</span></label>
                               <div className="relative">
                                 <button
                                   type="button"
                                   onClick={() => setShowTimeDropdown(s => !s)}
                                   disabled={shopClosedNow}
-                                  className={`w-full border px-3.5 py-3 text-[13px] rounded-xl focus:outline-none transition-colors flex items-center justify-between text-left ${shopClosedNow ? 'bg-[#F5EFEB] opacity-70 cursor-not-allowed' : 'bg-white'} ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
+                                  className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors flex items-center justify-between text-left ${shopClosedNow ? 'bg-[#F5EFEB] opacity-70 cursor-not-allowed' : 'bg-white'} ${errors.pickupTime ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'} ${form.pickupTime ? 'text-[#3B1F0A]' : 'text-[#8A7264]'}`}
                                 >
                                   <span className="flex items-center gap-2 truncate">
                                     <Clock size={13} className="text-[#8A7264] shrink-0" />
@@ -1316,13 +1349,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                                 <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">Closed for Pick-up Today. Please choose Pre-Order.</span>
                               ) : errors.pickupTime && <span role="alert" className="absolute left-1 top-full mt-0.5 text-[10px] leading-3 text-red-500 whitespace-nowrap pointer-events-none">{errors.pickupTime}</span>}
                           </div>
+                            </div>
+                        </div>
                       </div>
 
-                      </div>
-
-                      {/* RIGHT: special instructions + actions */}
-                      <div className="contents">
-                      <div className="min-w-0 sm:col-span-2 lg:col-span-1 lg:col-start-3 lg:row-start-1 lg:row-span-3 lg:flex lg:flex-col lg:relative">
+                      {/* RIGHT: special instructions, full height */}
+                      <div className="min-w-0 flex flex-col relative lg:h-full">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions (Optional)</label>
                           <textarea
                             rows={5}
@@ -1330,19 +1362,20 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                             maxLength={300}
                             value={form.instructions}
                             onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
-                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y lg:flex-1 lg:max-h-none lg:resize-none lg:pb-7 border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-[13px] leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y lg:flex-1 lg:min-h-0 lg:max-h-none lg:resize-none lg:pb-7 border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-[13px] leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                           />
                           <p className="mt-1 text-right text-[10px] text-[#B7A99F] lg:absolute lg:bottom-2 lg:right-3.5 lg:mt-0 lg:pointer-events-none">{(form.instructions || '').length}/300</p>
                       </div>
 
-                      <div className="hidden lg:block lg:col-span-3 lg:row-start-4 h-px bg-[#F1EBE6]"></div>
+                      {/* Divider + actions */}
+                      <div className="hidden lg:block lg:col-span-2 h-px bg-[#F1EBE6]"></div>
 
-                      <div className="contents lg:flex lg:flex-row-reverse lg:items-center lg:gap-3 lg:col-start-3 lg:row-start-5">
+                      <div className="flex flex-col gap-2 lg:flex-row-reverse lg:items-center lg:justify-start lg:col-span-2 lg:gap-4">
                       <button
                         type="button"
                         onClick={handleContinueToPayment}
                         disabled={shopClosedNow || isReserving}
-                        className={`mt-1 lg:mt-0 w-full sm:col-span-2 lg:col-span-1 lg:flex-1 lg:py-[13px] rounded-full px-4 py-2.5 text-[13px] font-semibold text-white transition-colors ${shopClosedNow || isReserving ? 'bg-[#9C8B80] opacity-60 cursor-not-allowed' : 'bg-[#3B1F0A] hover:bg-[#2A1608]'}`}
+                        className={`mt-1 lg:mt-0 w-full lg:w-auto lg:min-w-[260px] lg:py-[13px] rounded-full px-6 py-2.5 text-[13px] font-semibold text-white transition-colors ${shopClosedNow || isReserving ? 'bg-[#9C8B80] opacity-60 cursor-not-allowed' : 'bg-[#3B1F0A] hover:bg-[#2A1608]'}`}
                       >
                         {isReserving ? 'Checking availability...' : 'Continue to Payment'}
                       </button>
@@ -1350,11 +1383,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <button
                         type="button"
                         onClick={() => navigate('/onlineOrdering/menu')}
-                        className="w-full sm:col-span-2 lg:col-span-1 lg:flex-1 text-[11px] font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
+                        className="w-full lg:w-auto lg:px-4 text-[11px] lg:text-xs font-bold text-[#8A7264] hover:text-[#4A3B36] text-center transition-colors"
                       >
                         &larr; Back to Menu
                       </button>
-                      </div>
                       </div>
 
                   </div>
@@ -1385,11 +1417,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                     </div>
                   ) : paymentReservationState === 'checking' ? (
                     <div role="status" aria-live="polite" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-                      Checking that the items shown here are still reserved for youâ€¦
+                      Checking that the items shown here are still reserved for you…
                     </div>
                   ) : paymentReservationState === 'unavailable' ? (
                     <div role="alert" className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-900">
-                      <p className="font-bold">We could not confirm this cartâ€™s reservation.</p>
+                      <p className="font-bold">We could not confirm this cart’s reservation.</p>
                       <p className="mt-1">{paymentReservationMessage} Your previous hold remains subject to its original timer.</p>
                       <button type="button" onClick={() => navigate('/onlineOrdering/checkout')} className="mt-2 rounded-full bg-[#3B1F0A] px-3 py-1.5 font-semibold text-white">
                         Return to Order Details
@@ -1411,30 +1443,32 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                   <div className="grid grid-cols-1 gap-3 shrink-0 lg:flex-1 lg:grid-rows-2">
                       <div
                           onClick={() => setPaymentType('half')}
-                          className={`border rounded-xl p-3 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'half' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
+                          className={`border rounded-xl p-3 lg:p-5 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'half' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
                       >
                           <div className="flex items-center gap-2 mb-1">
                               <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${paymentType === 'half' ? 'border-[#4A3B36]' : 'border-[#B7A99F]'}`}>
                                   {paymentType === 'half' && <div className="w-1.5 h-1.5 rounded-full bg-[#4A3B36]"></div>}
                               </div>
-                              <span className="text-xs font-bold text-[#3B1F0A]">50% Deposit</span>
+                              <span className="text-xs lg:text-sm font-bold text-[#3B1F0A]">50% Deposit</span>
                           </div>
-                          <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay half now, balance upon pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{halfAmount.toLocaleString()}</div>
+                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">Pay half now, balance upon pick-up.</p>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs lg:font-serif lg:font-normal lg:text-3xl lg:leading-none">₱{halfAmount.toLocaleString()}</div>
+                          <p className="hidden lg:block pl-[22px] mt-2 text-[11px] text-[#8A7264]">Balance of ₱{balanceAtPickup.toLocaleString()} due at pick-up · Total ₱{paymentTotal.toLocaleString()}</p>
                       </div>
 
                       <div
                           onClick={() => setPaymentType('full')}
-                          className={`border rounded-xl p-3 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'full' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
+                          className={`border rounded-xl p-3 lg:p-5 cursor-pointer transition-all lg:flex lg:flex-col lg:justify-center ${paymentType === 'full' ? 'border-[#4A3B36] bg-[#F5EFEB]' : 'border-[#EAE4E0] bg-white hover:border-[#DED4CC]'}`}
                       >
                           <div className="flex items-center gap-2 mb-1">
                               <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${paymentType === 'full' ? 'border-[#4A3B36]' : 'border-[#B7A99F]'}`}>
                                   {paymentType === 'full' && <div className="w-1.5 h-1.5 rounded-full bg-[#4A3B36]"></div>}
                               </div>
-                              <span className="text-xs font-bold text-[#3B1F0A]">Full Payment</span>
+                              <span className="text-xs lg:text-sm font-bold text-[#3B1F0A]">Full Payment</span>
                           </div>
-                          <p className="text-[10px] text-[#8A7264] pl-[22px] leading-snug mb-1 opacity-90">Pay in full for hassle-free pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs">₱{paymentTotal.toLocaleString()}</div>
+                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">Pay in full for hassle-free pick-up.</p>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs lg:font-serif lg:font-normal lg:text-3xl lg:leading-none">₱{paymentTotal.toLocaleString()}</div>
+                          <p className="hidden lg:block pl-[22px] mt-2 text-[11px] text-[#8A7264]">No balance at pick-up</p>
                       </div>
                       </div>
                   </div>
@@ -1454,7 +1488,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                         ) : paymentConfigLoading ? (
                           <div role="status" aria-live="polite" className="mx-auto my-3 flex h-64 w-64 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
                             <Loader2 size={24} className="animate-spin" />
-                            <span className="text-[11px] font-medium">Loading QR codeâ€¦</span>
+                            <span className="text-[11px] font-medium">Loading QR code…</span>
                           </div>
                         ) : paymentConfigError ? (
                           <div role="alert" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-center">
@@ -1477,7 +1511,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                             {!qrImageLoaded && (
                               <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
                                 <Loader2 size={24} className="animate-spin" />
-                                <span className="text-[11px] font-medium">Loading QR codeâ€¦</span>
+                                <span className="text-[11px] font-medium">Loading QR code…</span>
                               </div>
                             )}
                             <img
@@ -1553,8 +1587,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
           </div>
 
-          <div className="px-5 lg:px-7 pt-2.5 pb-3.5 lg:pt-4 lg:pb-5 shrink-0 border-t border-[#F1EBE6] bg-white lg:grid lg:grid-cols-2 lg:gap-6 lg:items-center">
-            <div className="mb-2 lg:mb-0">
+          <div className="px-5 lg:px-7 pt-2.5 pb-3.5 lg:pt-4 lg:pb-5 shrink-0 border-t border-[#F1EBE6] bg-white lg:flex lg:justify-center">
+            <div className="mb-2 lg:hidden">
               {/* Fixed-height rows: balance row stays in layout (invisible) on full payment so nothing shifts */}
               <div className="flex items-center justify-between mb-0.5">
                 <span className="text-[11px] text-[#8A7264]">{paymentType === 'half' ? 'To Pay Now (50%)' : 'To Pay Now'}</span>
@@ -1570,7 +1604,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                 <span className="font-serif text-base text-[#3B1F0A]">₱{paymentTotal.toLocaleString()}</span>
               </div>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 lg:w-full lg:max-w-sm">
             <button
               onClick={handleProceedToOrder}
               disabled={shopClosedNow || isProcessing || paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature || reservationExpired || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
@@ -1632,7 +1666,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       {/* --- REVISED TWO-COLUMN ORDER SUMMARY MODAL --- */}
       {showSummaryModal && (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 px-4 py-6 sm:px-5">
-          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] max-h-[90vh] flex flex-col overflow-hidden">
+          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-xl w-full max-w-[760px] h-[90vh] max-h-[90vh] flex flex-col overflow-hidden">
             
             {/* Header */}
             <div className="p-4 pb-3 sm:p-5 sm:pb-4 flex items-center gap-2.5 shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
@@ -1645,47 +1679,77 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
             <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-y-auto md:overflow-hidden scrollbar-thin">
               
               {/* Left Column: Customer & Pickup Details */}
-              <div className="w-full md:w-[300px] shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] p-4 sm:p-5 md:overflow-y-auto scrollbar-thin">
-                <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-3">Order Details</h4>
-                <div className="flex flex-col gap-2.5 text-xs">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[#B7A99F]">Order Type</span>
-                    <span className="text-[#3B1F0A] font-semibold">{pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}</span>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[#B7A99F]">Name</span>
-                    <span className="text-[#3B1F0A] font-semibold">{form.name || 'â€”'}</span>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[#B7A99F]">Contact</span>
-                    <span className="text-[#3B1F0A] font-semibold">{formatPhone(form.phone) || 'â€”'}</span>
-                  </div>
-                  {form.altPhone && (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[#B7A99F]">Alt Contact</span>
-                      <span className="text-[#3B1F0A] font-semibold">{formatPhone(form.altPhone)}</span>
-                    </div>
-                  )}
+              <div className={`relative shrink-0 border-b md:border-b-0 md:border-r border-[#F1EBE6] bg-[#FCFAF9] md:flex md:flex-col md:overflow-hidden md:transition-[width] md:duration-300 md:ease-in-out motion-reduce:transition-none ${summaryDetailsOpen ? 'w-full md:w-[300px]' : 'w-full md:w-12'}`}>
+                <div aria-hidden={!summaryDetailsOpen} className={`grid md:flex md:flex-1 md:min-h-0 transition-[grid-template-rows,opacity,visibility] duration-300 ease-in-out motion-reduce:transition-none ${summaryDetailsOpen ? 'grid-rows-[1fr] opacity-100 visible' : 'grid-rows-[0fr] opacity-0 invisible'}`}>
+                  <div className="min-h-0 overflow-hidden md:w-[300px] md:flex-1 md:overflow-y-auto scrollbar-thin p-4 sm:p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider">Customer Details</h4>
+                  <button
+                    type="button"
+                    onClick={() => setSummaryDetailsOpen(false)}
+                    aria-expanded="true"
+                    aria-label="Hide customer details"
+                    title="Hide customer details"
+                    className="ml-auto inline-flex items-center justify-center w-8 h-8 shrink-0 rounded-full text-[#8A7264] hover:bg-[#F5EFEB] active:bg-[#EAE4E0] transition-colors"
+                  >
+                    <ChevronUp size={16} className="md:hidden" />
+                    <ChevronLeft size={16} className="hidden md:block" />
+                  </button>
+                </div>
 
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[#B7A99F]">Date & Time</span>
-                    <span className="text-[#3B1F0A] font-semibold">
-                      {form.pickupDate || 'â€”'} {form.pickupTime && `â€¢ ${getSlotLabel(form.pickupTime)}`}
-                    </span>
+                <div className="flex flex-col gap-3 text-xs">
+                  {/* Customer */}
+                  <div className="bg-white border border-[#EAE4E0] rounded-xl p-3 flex flex-col gap-3">
+                    <SummaryRow icon={User} label="Name">{form.name || '—'}</SummaryRow>
+                    <SummaryRow icon={Phone} label="Contact">{formatPhone(form.phone) || '—'}</SummaryRow>
+                    {form.altPhone && (
+                      <SummaryRow icon={Phone} label="Alt Contact">{formatPhone(form.altPhone)}</SummaryRow>
+                    )}
+                  </div>
+
+                  {/* Pick-up */}
+                  <div className="bg-white border border-[#EAE4E0] rounded-xl p-3 flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold">Pick-up</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide bg-[#F5EFEB] text-[#4A3B36] px-2.5 py-1 rounded-full">
+                        {pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}
+                      </span>
+                    </div>
+                    <SummaryRow icon={CalendarIcon} label="Date">{formatDateLong(form.pickupDate) || '—'}</SummaryRow>
+                    <SummaryRow icon={Clock} label="Time">{getSlotLabel(form.pickupTime) || '—'}</SummaryRow>
                   </div>
 
                   {form.instructions && (
-                    <div className="flex flex-col gap-0.5 mt-2 p-2.5 bg-white border border-[#EAE4E0] rounded-xl min-w-0">
-                      <span className="text-[10px] text-[#B7A99F] uppercase font-semibold">Special Instructions</span>
+                    <div className="flex flex-col gap-0.5 p-3 bg-white border border-[#EAE4E0] rounded-xl min-w-0">
+                      <span className="text-[10px] text-[#B7A99F] uppercase font-semibold tracking-wider">Special Instructions</span>
                       <span className="text-[#3B1F0A] mt-0.5 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">{form.instructions}</span>
                     </div>
                   )}
                 </div>
+                  </div>
+                </div>
+                {!summaryDetailsOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setSummaryDetailsOpen(true)}
+                    aria-expanded="false"
+                    aria-label="Show customer details"
+                    title="Show customer details"
+                    className="flex md:flex-col items-center gap-2.5 md:gap-3 w-full md:absolute md:inset-0 px-4 py-3 md:px-0 md:py-4 text-left hover:bg-[#F5EFEB] active:bg-[#EAE4E0] transition-colors"
+                  >
+                    <ChevronRight size={14} className="hidden md:block text-[#8A7264]" />
+                    <User size={14} className="text-[#8A7264] shrink-0" />
+                    <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider md:[writing-mode:vertical-rl] md:rotate-180">Customer Details</span>
+                    <ChevronDown size={16} className="md:hidden ml-auto text-[#8A7264] shrink-0" />
+                  </button>
+                )}
               </div>
 
               {/* Right Column: Items */}
               <div className="flex-1 min-w-0 bg-white p-4 sm:p-5 md:overflow-y-auto scrollbar-thin flex flex-col gap-3.5">
-                  <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider mb-1">Items ({cart.length})</h4>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h4 className="text-xs font-bold text-[#8A7264] uppercase tracking-wider">Items ({cart.length})</h4>
+                  </div>
                   
                   {cart.map((item, i) => {
                     let imgSrc = item.custom_image_url || item.image_url || item.image;

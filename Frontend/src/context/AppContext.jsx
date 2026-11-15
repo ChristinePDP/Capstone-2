@@ -132,6 +132,14 @@ export function AppProvider({ children }) {
   useEffect(() => {
     let active = true;
 
+    // Public customer pages do not need an admin session check. Probing /me
+    // there creates a misleading 401 in the browser console for every guest.
+    if (!isAdminRoute && location.pathname !== '/login') {
+      return () => {
+        active = false;
+      };
+    }
+
     getProfile()
       .then(() => {
         if (active) {
@@ -151,7 +159,7 @@ export function AppProvider({ children }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isAdminRoute, location.pathname]);
 
   // ── State ──
   const [ingredients,    setIngredients]    = useState([]);

@@ -42,6 +42,85 @@ function EmptyCategoryNotice({ category }) {
   );
 }
 
+function bumpCartTarget(targetEl) {
+  if (!targetEl) return;
+  targetEl.classList.remove('menu-cart-bump');
+  void targetEl.offsetWidth;
+  targetEl.classList.add('menu-cart-bump');
+  const cleanup = (event) => {
+    if (event.target !== targetEl || event.animationName !== 'menuCartBump') return;
+    targetEl.classList.remove('menu-cart-bump');
+    targetEl.removeEventListener('animationend', cleanup);
+  };
+  targetEl.addEventListener('animationend', cleanup);
+}
+
+function findVisibleCartTarget() {
+  const targets = Array.from(document.querySelectorAll('[data-cart-target]'));
+  return targets.find(el => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) || null;
+}
+
+function flyToCart(sourceEl) {
+  if (typeof window === 'undefined') return;
+  const targetEl = findVisibleCartTarget();
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  if (!sourceEl || !sourceEl.isConnected || !targetEl) {
+    bumpCartTarget(targetEl);
+    return;
+  }
+
+  const from = sourceEl.getBoundingClientRect();
+  if (!from.width || !from.height) {
+    bumpCartTarget(targetEl);
+    return;
+  }
+  const to = targetEl.getBoundingClientRect();
+  const size = 92;
+  const startX = from.left + from.width / 2;
+  const startY = from.top + from.height / 2;
+  const endX = to.left + to.width / 2;
+  const endY = to.top + to.height / 2;
+  const dx = endX - startX;
+  const dy = endY - startY;
+  const arcLift = Math.min(120, Math.max(60, Math.abs(dy) * 0.35));
+  const imgSrc = sourceEl.querySelector('img')?.currentSrc || sourceEl.querySelector('img')?.src || null;
+
+  const flyer = document.createElement('div');
+  flyer.setAttribute('aria-hidden', 'true');
+  flyer.className = 'menu-fly-to-cart';
+  flyer.style.setProperty('--fly-dx', `${dx}px`);
+  flyer.style.setProperty('--fly-dy', `${dy}px`);
+  flyer.style.setProperty('--fly-mid-x', `${dx * 0.5}px`);
+  flyer.style.setProperty('--fly-mid-y', `${dy * 0.5 - arcLift}px`);
+  Object.assign(flyer.style, {
+    position: 'fixed',
+    left: `${startX - size / 2}px`,
+    top: `${startY - size / 2}px`,
+    width: `${size}px`,
+    height: `${size}px`,
+    borderRadius: '16px',
+    overflow: 'hidden',
+    zIndex: '9999',
+    pointerEvents: 'none',
+    background: imgSrc ? `#F5EFEB url("${imgSrc}") center / cover no-repeat` : '#3B1F0A',
+    border: '2px solid #fff',
+    boxShadow: '0 10px 25px rgba(59,31,10,0.35)',
+    animationDuration: reduceMotion ? '0.35s' : '0.75s',
+  });
+  document.body.appendChild(flyer);
+
+  const finish = () => {
+    flyer.remove();
+    bumpCartTarget(targetEl);
+  };
+  flyer.addEventListener('animationend', finish, { once: true });
+  flyer.addEventListener('animationcancel', () => flyer.remove(), { once: true });
+}
+
 // ─────────────────────────────────────────────────────────────
 // Builds "Product A (Option, Option) + Product B" text for a bundle —
 // same logic as the admin Promo Bundles card.
@@ -306,15 +385,15 @@ function CartItemRow({
 
   return (
     <div className="border-b border-[#F1EBE6] last:border-0 pb-4 last:pb-0">
-      <div className="grid overflow-hidden rounded-2xl">
-        <div className="[grid-area:1/1] bg-red-500 rounded-2xl flex items-center justify-end">
-          <button type="button" onClick={() => onRemove(index)} className="w-20 self-stretch flex flex-col items-center justify-center gap-1 text-white">
+      <div className="grid w-full min-w-0 overflow-hidden rounded-2xl bg-white">
+        <div className="[grid-area:1/1] bg-[#F5EFEB] rounded-2xl flex items-center justify-end">
+          <button type="button" onClick={() => onRemove(index)} className="w-20 self-stretch rounded-r-2xl bg-red-500 flex flex-col items-center justify-center gap-1 text-white">
             <Trash2 size={18} />
             <span className="text-[9px] font-bold uppercase tracking-wide">Delete</span>
           </button>
         </div>
         <div
-          className="[grid-area:1/1] bg-white transition-transform duration-200 ease-out touch-pan-y"
+          className="[grid-area:1/1] w-full min-w-0 rounded-2xl bg-white transition-transform duration-200 ease-out touch-pan-y"
           style={{ transform: openSwipeIndex === index ? 'translateX(-80px)' : 'translateX(0)' }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -1449,6 +1528,9 @@ export default function Menu({ cart, setCart }) {
   const productListRef = useRef(null);
   const handledFocusKeyRef = useRef(null); // location.key na na-pulse na
   const focusTimerRef = useRef(null);
+  const flySourceElRef = useRef(null);
+  const pendingFlyRef = useRef(null);
+  const prevCartCountRef = useRef(null);
 
   // ── Galing sa Home (Promo Bundle card / Event Ad): lumipat ng tab, mag-scroll
   // papunta sa card, tapos ISANG pulse lang. Isang beses lang kada navigation —
@@ -1832,6 +1914,8 @@ export default function Menu({ cart, setCart }) {
   }, [rawBundles]);
 
   const addToCart = (item) => {
+    pendingFlyRef.current = { el: flySourceElRef.current, expectedCount: cartCount + Number(item.qty || 0) };
+
     setCart(prev => {
       const currentSlipStr = slipSignature(item.order_slip_details);
       const currentOptionsStr = JSON.stringify(item.selected_price_options);
@@ -1939,6 +2023,57 @@ export default function Menu({ cart, setCart }) {
     if (cartCount === 0) setIsMobileCartOpen(false);
   }, [cartCount]);
 
+  useEffect(() => {
+    if (!isMobileCartOpen) return undefined;
+
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const root = document.documentElement;
+    const previousStyles = {
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyLeft: body.style.left,
+      bodyRight: body.style.right,
+      bodyWidth: body.style.width,
+      bodyOverflow: body.style.overflow,
+      rootOverflow: root.style.overflow,
+    };
+
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    root.style.overflow = 'hidden';
+
+    return () => {
+      body.style.position = previousStyles.bodyPosition;
+      body.style.top = previousStyles.bodyTop;
+      body.style.left = previousStyles.bodyLeft;
+      body.style.right = previousStyles.bodyRight;
+      body.style.width = previousStyles.bodyWidth;
+      body.style.overflow = previousStyles.bodyOverflow;
+      root.style.overflow = previousStyles.rootOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [isMobileCartOpen]);
+
+  useEffect(() => {
+    const previousCount = prevCartCountRef.current;
+    prevCartCountRef.current = cartCount;
+    if (previousCount === null) return undefined;
+
+    const pending = pendingFlyRef.current;
+    if (cartCount > previousCount && pending && cartCount === pending.expectedCount) {
+      pendingFlyRef.current = null;
+      const frameId = window.requestAnimationFrame(() => flyToCart(pending.el));
+      return () => window.cancelAnimationFrame(frameId);
+    }
+    if (cartCount !== previousCount) pendingFlyRef.current = null;
+    return undefined;
+  }, [cartCount]);
+
   const isSearching = (searchQuery || '').trim().length > 0;
   
   const displayItems = useMemo(() => {
@@ -2026,7 +2161,7 @@ export default function Menu({ cart, setCart }) {
                   }}
                   className={`bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative ${focusedProductId === String(p.id) ? 'menu-card-pulse z-[5]' : ''}`}
                 >
-                  <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
+                  <div data-fly-source className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
                     
                     {p.type === 'bundle' ? (
                        <BundleMenuImage products={p.products} customImageUrl={p.custom_image_url} />
@@ -2112,8 +2247,9 @@ export default function Menu({ cart, setCart }) {
                     </p>
 
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
                         if (isSoldOut) return;
+                        flySourceElRef.current = e.currentTarget.closest('[data-menu-product-id]')?.querySelector('[data-fly-source]') || null;
                         const needsModal = p.type === 'bundle' || p.type === 'package' || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
                         
                         needsModal ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
@@ -2147,6 +2283,24 @@ export default function Menu({ cart, setCart }) {
   return (
     <div className="bg-[#FCFAF9] lg:min-h-screen flex flex-col relative">
       <style>{`
+        @keyframes menuFlyToCart {
+          0% { transform: translate(0, 0) scale(1); opacity: 1; border-radius: 16px; }
+          55% { transform: translate(var(--fly-mid-x), var(--fly-mid-y)) scale(.6); opacity: .95; border-radius: 28px; }
+          100% { transform: translate(var(--fly-dx), var(--fly-dy)) scale(.18); opacity: .4; border-radius: 50%; }
+        }
+        @keyframes menuCartBump {
+          0%, 100% { transform: scale(1); }
+          40% { transform: scale(1.35); }
+          70% { transform: scale(.95); }
+        }
+        .menu-fly-to-cart {
+          animation: menuFlyToCart .75s cubic-bezier(.45,0,.55,1) 1 forwards;
+          will-change: transform, opacity;
+        }
+        .menu-cart-bump {
+          animation: menuCartBump .45s ease-out 1;
+          transform-origin: center;
+        }
         /* Isang smooth na pulse lang kapag galing sa Home (promo bundle / event ad) */
         @keyframes menuCardPulse {
           0%   { transform: scale(1);     border-color: #EAE4E0; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05), 0 0 0 0 rgba(59,31,10,.30); }
@@ -2164,6 +2318,8 @@ export default function Menu({ cart, setCart }) {
         }
         @media (prefers-reduced-motion: reduce) {
           .menu-card-pulse { animation-name: menuCardPulseSoft; }
+          .menu-fly-to-cart { animation-duration: .35s !important; }
+          .menu-cart-bump { animation-duration: .2s !important; }
         }
       `}</style>
       {toast && (
@@ -2247,7 +2403,7 @@ export default function Menu({ cart, setCart }) {
         <div className="hidden lg:flex flex-col w-full lg:w-[360px] shrink-0 bg-white rounded-3xl border border-[#EAE4E0] shadow-sm lg:max-h-[calc(100vh-112px)] overflow-hidden">
           <div className="p-6 pb-4 flex items-center justify-between shrink-0 border-b border-[#F1EBE6]">
             <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0"><ShoppingCart size={16} /></div>
+              <div data-cart-target className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0"><ShoppingCart size={16} /></div>
               <h3 className="text-lg font-serif text-[#3B1F0A]">Your Cart</h3>
             </div>
             {cartCount > 0 && <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#8A7264] bg-[#F5EFEB] px-2.5 py-1 rounded-full">{cartCount} item{cartCount > 1 ? 's' : ''}</span>}
@@ -2296,7 +2452,7 @@ export default function Menu({ cart, setCart }) {
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#EAE4E0] p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
           <div className="flex gap-3">
             <button onClick={() => setIsMobileCartOpen(true)} className="flex items-center justify-center gap-2 px-5 bg-[#F5EFEB] text-[#3B1F0A] rounded-xl font-semibold shadow-sm shrink-0">
-              <div className="relative">
+              <div data-cart-target className="relative">
                 <ShoppingBag size={18} />
                 <span className="absolute -top-1.5 -right-2.5 bg-[#3B1F0A] text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">{cartCount}</span>
               </div>
@@ -2324,7 +2480,7 @@ export default function Menu({ cart, setCart }) {
               <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
             </div>
 
-            <div className="overflow-y-auto p-5 flex flex-col gap-4">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 flex flex-col gap-4">
               {cart.map((item, i) => (
                 <CartItemRow
                   key={i}
