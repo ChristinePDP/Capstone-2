@@ -107,6 +107,13 @@ export default function IngredientsTab() {
     return acc;
   }, {});
 
+  const statusOptions = [
+    { key: 'all',          label: 'All',          count: ingredients.length },
+    { key: 'In Stock',     label: 'In Stock',     count: statusCounts['In Stock'] || 0 },
+    { key: 'Low Stock',    label: 'Low Stock',    short: 'Low',    count: statusCounts['Low Stock'] || 0 },
+    { key: 'Out of Stock', label: 'Out of Stock', short: 'Out', count: statusCounts['Out of Stock'] || 0 },
+  ];
+
   const handleSave = async (payload) => {
     if (payload.isNew) {
       await addIngredient(payload.newData);
@@ -163,8 +170,8 @@ export default function IngredientsTab() {
         </div>
 
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <div className="relative max-w-xs w-full">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 min-w-0 sm:flex-none sm:max-w-xs sm:w-full">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
               <input
                 type="text"
@@ -174,16 +181,38 @@ export default function IngredientsTab() {
                 className="w-full pl-8 pr-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white"
               />
             </div>
+            {/* Mobile: dropdown para malinis */}
             <select
               value={statusFilter}
               onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-              className="px-3 py-1.5 text-sm border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-full sm:w-auto"
+              className="sm:hidden px-2 py-2 text-xs border border-brand-200 rounded-lg outline-none focus:border-brand-400 bg-white font-semibold text-brand-700 cursor-pointer w-auto max-w-[45%] shrink-0"
             >
-              <option value="all">All Status ({ingredients.length})</option>
-              <option value="In Stock">In Stock ({statusCounts['In Stock'] || 0})</option>
-              <option value="Low Stock">Low Stock ({statusCounts['Low Stock'] || 0})</option>
-              <option value="Out of Stock">Out of Stock ({statusCounts['Out of Stock'] || 0})</option>
+              {statusOptions.map(opt => (
+                <option key={opt.key} value={opt.key} className="text-xs">{opt.short || opt.label} ({opt.count})</option>
+              ))}
             </select>
+
+            {/* Desktop: buttons */}
+            <div className="hidden sm:flex flex-wrap items-center gap-1.5">
+              {statusOptions.map(opt => {
+                const active = statusFilter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => { setStatusFilter(opt.key); setPage(1); }}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center gap-1.5 ${
+                      active
+                        ? 'bg-brand-800 border-brand-800 text-white'
+                        : 'bg-white border-brand-200 text-brand-700 hover:bg-brand-50'
+                    }`}
+                  >
+                    {opt.label}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20 text-white' : 'bg-brand-100 text-brand-600'}`}>{opt.count}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
