@@ -3,17 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
 import Footer from '../onlineOrdering/Footer';
-import { deleteFiles } from '../shared/cartImageStore';
 
 const DUMMY_CART = [
   { name: 'Package B', qty: 1, price: 550 },
   { name: 'Special Ensaymada', qty: 2, price: 70 },
 ];
-
-// Kailangang MAGKATUGMA ito sa CHECKOUT_DRAFT_KEY sa Checkout.jsx — dito lang
-// ito ini-clear, pagkatapos ma-confirm na successful na ang order.
-const CHECKOUT_DRAFT_KEY = 'aileen_cake_max_checkout_draft';
-const PAYMENT_PROOF_KEY = 'aileen_cake_max_payment_proof';
 
 function logQrRenderTime(id, phase, actualDuration) {
   console.info(`[QR generation] ${id} ${phase}: ${actualDuration.toFixed(2)} ms`);
@@ -39,8 +33,6 @@ export default function Confirm({ orderId }) {
   const halfAmount = totalAmount / 2;
   const amountPaid = paymentType === 'half' ? halfAmount : totalAmount;
   const balance = paymentType === 'half' ? halfAmount : 0;
-
-  const form = state.form || {};
 
   const orderDate = state.orderDate
     ? new Date(state.orderDate)

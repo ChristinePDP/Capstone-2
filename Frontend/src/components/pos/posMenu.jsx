@@ -1,8 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
 import { EmptyState, ErrorState } from '../ui';
+import { formatPeso } from '../../utils/numberGuards';
 import MultiImageField from '../shared/MultiImageField';
-import CartSlipImages from '../shared/CartSlipImages';
 import { isSlipAnswerEmpty, pruneEmptySlipAnswers } from '../shared/orderSlipUploads';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
@@ -410,7 +410,7 @@ function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1 truncate">{product.category}</span>
             <h2 className="text-xl sm:text-2xl font-serif text-[#3B1F0A] leading-tight mb-1.5 truncate">{product.name}</h2>
             <p className="text-sm font-bold text-[#5A453C]">
-              {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
+              {isVariable ? (allGroupsSelected && !missingCombo ? formatPeso(resolvedPrice) : 'Select options to see price') : formatPeso(product.price)}
             </p>
           </div>
           <button
@@ -673,7 +673,7 @@ function PosBundleModal({ bundle, onClose, onAddToCart, checkAndWarnLimit }) {
             <div className="flex-1 min-w-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Promo Bundle</span>
               <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{bundle.name}</h2>
-              <p className="text-sm font-bold text-[#5A453C]">₱{Number(bundle.price).toLocaleString()}</p>
+              <p className="text-sm font-bold text-[#5A453C]">{formatPeso(bundle.price)}</p>
               <p className="text-xs text-[#8A7264] leading-snug mt-1">{getBundleDescription(bundle)}</p>
             </div>
             <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
@@ -913,7 +913,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit }) {
             <div className="flex-1 min-w-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Package</span>
               <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{pkg.name}</h2>
-              <p className="text-sm font-bold text-[#5A453C]">₱{Number(pkg.price).toLocaleString()}</p>
+              <p className="text-sm font-bold text-[#5A453C]">{formatPeso(pkg.price)}</p>
               <p className="text-xs text-[#8A7264] leading-snug mt-1">{components.map(c => c.name).join(' + ')}</p>
             </div>
             <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
@@ -1415,10 +1415,10 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                     <p className="text-xs sm:text-sm lg:text-sm font-bold text-[#5A453C] mb-2 lg:mb-2 truncate">
                       {isBundle && p.discount_percent > 0 && p.original_price > 0 && (
                         <span className="text-[10px] sm:text-[11px] text-[#B7A99F] line-through font-normal mr-1.5">
-                          ₱{p.original_price.toLocaleString()}
+                          {formatPeso(p.original_price)}
                         </span>
                       )}
-                      ₱{Number(p.price).toLocaleString()}
+                      {formatPeso(p.price)}
                     </p>
                     <button
                       onClick={() => {

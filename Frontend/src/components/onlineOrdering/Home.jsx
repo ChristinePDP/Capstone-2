@@ -1,5 +1,5 @@
 // src/components/onlineOrdering/Home.jsx
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, ArrowRight, ShoppingBasket, Tag, Package, Plus
@@ -7,6 +7,7 @@ import {
 import Footer from '../onlineOrdering/Footer';
 import EventAdsModal from '../onlineOrdering/eventAdsModal';
 import { Skeleton } from '../ui';
+import { formatPeso } from '../../utils/numberGuards';
 
 const HERO_FILE = 'heroimg.png';
 
@@ -207,7 +208,7 @@ function BundleTicketImage({ products = [], customImageUrl }) {
   );
 }
 
-function BundleTicketCard({ bundle, navigate, idx = 0, innerRef, focusStyle, onFocusEnter, onFocusLeave }) {
+function BundleTicketCard({ bundle, navigate, innerRef, focusStyle, onFocusEnter, onFocusLeave }) {
   if (bundle.isLoading) {
     return (
       <div
@@ -308,11 +309,11 @@ function BundleTicketCard({ bundle, navigate, idx = 0, innerRef, focusStyle, onF
               <>
                 {originalTotal > bundlePrice && (
                   <p className="text-[11px] text-[#B7A99F] line-through mb-0.5">
-                    ₱{originalTotal.toLocaleString()}
+                    {formatPeso(originalTotal)}
                   </p>
                 )}
                 <p className="text-lg sm:text-xl font-black px-4 py-1.5 rounded-full bg-[#F5EFEB] text-[#3B1F0A]">
-                  ₱{Number(bundlePrice).toLocaleString()}
+                  {formatPeso(bundlePrice)}
                 </p>
               </>
             ) : (
@@ -329,29 +330,21 @@ function BundleTicketCard({ bundle, navigate, idx = 0, innerRef, focusStyle, onF
 
 function BundleCarousel({ bundles, isLoading, navigate }) {
   const trackRef = useRef(null);
-  const cardRefs = useRef([]);
-  const rafRef = useRef(null);
   const [atStart, setAtStart] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
-  const [focusVals, setFocusVals] = useState([]);
-  const [hoveredIdx, setHoveredIdx] = useState(null);
-
-  let displayBundles = [];
   const hasNoBundles = !isLoading && bundles.length === 0;
-  if (isLoading) {
-    displayBundles = [
+  const displayBundles = useMemo(() => isLoading
+    ? [
       { id: 'load-1', isLoading: true },
       { id: 'load-2', isLoading: true }
-    ];
-  } else if (bundles.length === 1) {
-    displayBundles = [
+    ]
+    : bundles.length === 1
+      ? [
       ...bundles,
       { id: 'dummy-card', isDummy: true, bundle_name: 'More Bundles Coming Soon!', event_tag: 'Stay Tuned', products: [] }
-    ];
-  } else {
-    displayBundles = bundles;
-  }
+      ]
+      : bundles, [bundles, isLoading]);
 
   const updateEdges = () => {
     const el = trackRef.current;
@@ -398,8 +391,8 @@ function BundleCarousel({ bundles, isLoading, navigate }) {
         onScroll={updateEdges}
         className={`no-scrollbar flex gap-5 sm:gap-6 overflow-x-auto overscroll-x-contain snap-x snap-proximity scroll-smooth pb-6 pt-6 px-1 ${hasOverflow ? '' : 'justify-center'}`}
       >
-        {displayBundles.map((b, idx) => (
-          <BundleTicketCard key={b.id} bundle={b} navigate={navigate} idx={idx} />
+        {displayBundles.map(b => (
+          <BundleTicketCard key={b.id} bundle={b} navigate={navigate} />
         ))}
       </div>
 
@@ -608,7 +601,7 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-10 sm:gap-x-8 sm:gap-y-12 lg:gap-12">
-              {STEPS.map((step, idx) => (
+              {STEPS.map(step => (
                 <div key={step.n} className="flex flex-col items-center text-center">
                   <span className="block font-serif text-5xl sm:text-6xl lg:text-[72px] text-[#CDBAB0] mb-3 sm:mb-5 leading-none">
                     {step.n}

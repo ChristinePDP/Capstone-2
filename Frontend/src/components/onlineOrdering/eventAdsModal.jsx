@@ -32,6 +32,7 @@ import {
   X, ArrowRight, ChevronLeft, ChevronRight, ChevronDown, Sparkles, Heart, Gift, Cake, Star,
   Snowflake, Ghost, Flower2, PartyPopper
 } from 'lucide-react';
+import { formatPeso } from '../../utils/numberGuards';
 
 const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -226,7 +227,7 @@ function ProductStrip({ products, Icon, onProductClick }) {
                         style={{ backgroundColor: BRAND.cream }}
                       />
                       <span className="text-[10px] md:text-[11px] font-mono font-bold whitespace-nowrap" style={{ color: BRAND.cream }}>
-                        {isVariable ? 'From ' : ''}₱{Number(minPrice).toLocaleString()}
+                        {isVariable ? 'From ' : ''}{formatPeso(minPrice)}
                       </span>
                     </div>
                   </div>

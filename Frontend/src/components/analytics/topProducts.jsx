@@ -124,7 +124,7 @@ export default function TopProductsList({
                 </div>
                 <div className="flex items-baseline gap-1 shrink-0">
                   <span className="text-[16px] font-extrabold text-[#241406] tabular-nums whitespace-nowrap">
-                    {(g.sold || 0).toLocaleString()}
+                    {Number(g.sold || 0).toLocaleString('en-PH')}
                   </span>
                   <span className="text-[11px] font-semibold text-[#9a8b7a]">pcs</span>
                 </div>

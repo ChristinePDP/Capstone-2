@@ -3,6 +3,7 @@ import { Search, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Table, Tr, Td, Card, Pagination, CardSkeleton, TableSkeleton, EmptyState, ErrorState } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
+import { formatCount } from '../../utils/numberGuards';
 
 const PER_PAGE = 10;
 
@@ -146,7 +147,7 @@ export default function ProductLogTab() {
                         <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
                       </div>
                       <span className="shrink-0 whitespace-nowrap text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
-                        +{pl.produced} {pl.yieldUnit}
+                        +{formatCount(pl.produced)} {pl.yieldUnit}
                       </span>
                     </div>
                   ))}
@@ -165,7 +166,7 @@ export default function ProductLogTab() {
                       <Td><strong>{pl.product}</strong></Td>
                       <Td>
                         <span className="inline-flex items-center gap-1 text-sm font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-md">
-                          +{pl.produced} {pl.yieldUnit}
+                          +{formatCount(pl.produced)} {pl.yieldUnit}
                         </span>
                       </Td>
                     </Tr>

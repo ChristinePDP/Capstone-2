@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Edit2, Trash2, X, Search, Package, Loader2, Tag, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
 import { Modal, ConfirmModal, useUnsavedChanges, ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
+import { formatPeso } from '../../utils/numberGuards';
 import { getBundleDeleteImpact } from './bundleDeleteContent';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
@@ -439,11 +440,11 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
         <div className="mt-auto">
           {discountPercent > 0 && originalTotal > 0 && (
             <span className="text-[11px] text-[#8A7264] line-through mr-1.5">
-              ₱{originalTotal.toLocaleString()}
+              {formatPeso(originalTotal)}
             </span>
           )}
           <span className="text-sm sm:text-[15px] font-extrabold text-[#3B1F0A]">
-            ₱{bundlePrice.toLocaleString()}
+            {formatPeso(bundlePrice)}
           </span>
         </div>
       </div>
@@ -518,8 +519,6 @@ const ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
 
 export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
   const [form, setForm] = useState(emptyForm);
-  const [productSearch, setProductSearch] = useState('');
-  const [productListOpen, setProductListOpen] = useState(false);
   const [pendingBundleProductId, setPendingBundleProductId] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -681,8 +680,6 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       }
       setForm(initialForm);
       initialFormRef.current = JSON.stringify(initialForm);
-      setProductSearch('');
-      setProductListOpen(false);
       setPendingPackageProductId('');
       setPendingPackageQty(1);
       setPendingBundleProductId('');
@@ -747,11 +744,6 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   };
 
 
-  const filteredProducts = useMemo(() => {
-    if (!productSearch) return allProducts;
-    return allProducts.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()));
-  }, [allProducts, productSearch]);
-
   const selectedProducts = useMemo(
     () => allProducts.filter(p => form.product_items.some(item => item.productId === p.id)),
     [allProducts, form.product_items]
@@ -812,12 +804,6 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions }] };
     });
 
-    // Pagkatapos makapili at naabot na ang max (3), isasara na ang picker
-    // kasabay ng pag-display ng computed price sa itaas. Puwede pa ring
-    // buksan ulit gamit ang "Edit Products" button kung magkakamali.
-    if (!exists && form.product_items.length + 1 >= MAX_BUNDLE_PRODUCTS) {
-      setProductListOpen(false);
-    }
   };
 
   const updateItemOption = (productId, groupName, value) => {
@@ -1131,7 +1117,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                       <div className="px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold h-[38px] flex items-center justify-between gap-2">
                         {packageComputedTotal > 0 ? (
                           <>
-                            <span>₱{packageComputedTotal.toLocaleString()}</span>
+                            <span>{formatPeso(packageComputedTotal)}</span>
                             <button
                               type="button"
                               onClick={() => setForm(prev => ({ ...prev, price: packageComputedTotal }))}
@@ -1159,8 +1145,8 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                         <div className="px-3 sm:px-3.5 py-2.5 text-xs rounded-xl bg-[#F5EFEB] text-[#3B1F0A] font-bold min-h-[38px] flex flex-wrap items-center gap-x-1.5">
                           {originalTotal > 0 ? (
                             <>
-                              <span className="line-through text-[#8A7264] font-normal">₱{originalTotal.toLocaleString()}</span>
-                              <span>₱{computedPrice.toLocaleString()}</span>
+                              <span className="line-through text-[#8A7264] font-normal">{formatPeso(originalTotal)}</span>
+                              <span>{formatPeso(computedPrice)}</span>
                             </>
                           ) : (
                             <span className="font-normal text-[#8A7264]">Add products first</span>
@@ -1254,7 +1240,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
               placeholder={atMaxProducts ? `Max of ${MAX_BUNDLE_PRODUCTS} products reached` : 'Select a product...'}
               options={availableBundleProducts.map(p => ({
                 value: p.id,
-                label: `${p.name} — ${p.pricing_mode === 'variable' ? 'Variable Pricing' : `₱${Number(p.price).toLocaleString()}`}`,
+                label: `${p.name} — ${p.pricing_mode === 'variable' ? 'Variable Pricing' : formatPeso(p.price)}`,
               }))}
             />
             <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="w-full sm:w-auto">
@@ -1276,7 +1262,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                     <div key={p.id} className="flex flex-col gap-2 p-2.5 sm:p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
                       <div className="flex items-center gap-2.5">
                         <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{p.name}</span>
-                        <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">₱{currentPrice.toLocaleString()}</span>
+                        <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">{formatPeso(currentPrice)}</span>
                         <button type="button" onClick={() => toggleProduct(p)} className="text-red-500 p-1.5 hover:bg-red-50 rounded-lg transition-colors">
                           <Trash2 size={14} />
                         </button>

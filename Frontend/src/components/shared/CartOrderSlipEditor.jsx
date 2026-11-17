@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Save, ImagePlus, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import MultiImageField, { MAX_IMAGE_BYTES } from './MultiImageField';
 import { isSlipAnswerEmpty, setSlipValue } from './orderSlipUploads';
+import { formatPeso } from '../../utils/numberGuards';
 
 const isOptionalField = (field) => field.optional === true || field.isOptional === true || field.required === false;
 
@@ -148,7 +149,7 @@ export default function CartOrderSlipEditor({ item, onClose, onSave }) {
               {item.inclusion
                 ? <p className="flex-1 min-w-0 text-xs text-[#8A7264] leading-snug line-clamp-1" title={item.inclusion}>{item.inclusion}</p>
                 : <span className="flex-1" />}
-              <span className="shrink-0 rounded-full bg-[#F5EFEB] px-2.5 py-0.5 text-xs font-bold text-[#3B1F0A] tabular-nums">₱{Number(item.price).toLocaleString()}</span>
+              <span className="shrink-0 rounded-full bg-[#F5EFEB] px-2.5 py-0.5 text-xs font-bold text-[#3B1F0A] tabular-nums">{formatPeso(item.price)}</span>
             </div>
           )}
         </div>

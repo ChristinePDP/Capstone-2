@@ -12,12 +12,12 @@ import ProductAndEventPage from './pages/productAndEventPage.jsx';
 import PosPage from './pages/posPage.jsx';
 import SettingsPage from './pages/settingsPage.jsx'; // <-- ADDED
 
-import { ToastProvider } from './components/ui/index.jsx';
+import { ToastProvider, ErrorState } from './components/ui/index.jsx';
 import { Layout } from './components/Sidebar.jsx';
 import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
 
 function ProtectedAdminRoute({ children }) {
-  const { isAuthed, authReady } = useApp();
+  const { isAuthed, authReady, authError, retryAuth } = useApp();
   const navigate = useNavigate();
 
   if (!authReady) {
@@ -29,6 +29,14 @@ function ProtectedAdminRoute({ children }) {
     // nang hindi pa naka-login, "/unauthorized" na ang lalabas, hindi na
     // deretsong "/login" — para malinaw sa user na bawal siyang pumunta doon.
     return <Navigate to="/unauthorized" replace />;
+  }
+
+  if (authError) {
+    return (
+      <div className="min-h-screen bg-brand-50 px-4 py-12 flex items-center justify-center">
+        <ErrorState title="Unable to verify your session" description={authError} actionLabel="Retry connection" onRetry={retryAuth} className="w-full max-w-xl" />
+      </div>
+    );
   }
 
   const handleLogout = async () => {

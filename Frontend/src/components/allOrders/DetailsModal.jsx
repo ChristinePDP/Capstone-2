@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Phone, Calendar, Image as ImageIcon, ReceiptText, Clock, Wallet, User, FileText, MessageSquareText, Download, ChevronLeft, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 import { ConfirmModal } from '../ui';
+import { formatCount } from '../../utils/numberGuards';
 
 // ── formatting helpers ──────────────────────────────────────────
 function fmt(n) {
@@ -24,12 +25,6 @@ function formatTime(t) {
   return `${hour12}:${m} ${period}`;
 }
 
-function formatDateTime(ts) {
-  if (!ts) return null;
-  const date = new Date(ts);
-  if (isNaN(date)) return null;
-  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
 
 const STATUS_STYLES = {
   Confirmed: 'bg-blue-50 text-blue-700',
@@ -100,7 +95,7 @@ function groupOrderItems(items) {
 }
 
 function itemLineTotal(item) {
-  return Number(item.total ?? item.total_price ?? (item.unit_price * item.quantity) ?? 0) || 0;
+  return Number(item.total ?? item.total_price ?? (Number(item.unit_price ?? 0) * Number(item.quantity ?? 0))) || 0;
 }
 
 function parseSlipDetails(raw) {
@@ -251,7 +246,7 @@ function SlipField({ label, value }) {
 
 function IconTile({ icon: Icon }) {
   return (
-    <span className="w-11 h-11 rounded-xl bg-[#F5EFEB] text-[#5A453C] flex items-center justify-center shrink-0">
+    <span className="w-10 h-10 rounded-xl bg-[#F5EFEB] text-[#5A453C] flex items-center justify-center shrink-0">
       <Icon size={20} />
     </span>
   );
@@ -284,7 +279,7 @@ function TabButton({ active, icon: Icon, children, onClick }) {
 }
 
 // ── DETAILS MODAL ────────────────────────────────────────────
-export default function DetailsModal({ order, isOpen, onClose, onStatusChange, onPaymentVerification }) {
+function DetailsModalContent({ order, isOpen, onClose, onStatusChange, onPaymentVerification }) {
   const [activeTab, setActiveTab] = useState('order');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [paymentAction, setPaymentAction] = useState(null);
@@ -307,17 +302,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
   const hasReferenceImageCheck = !!(order?.customerReference || order?.customer_reference_url);
 
-  useEffect(() => {
-    if (activeTab === 'slip' && !hasOrderSlipCheck && !hasReferenceImageCheck) {
-      setActiveTab('order');
-    }
-  }, [order?.id, hasOrderSlipCheck, hasReferenceImageCheck, activeTab]);
-
-  useEffect(() => {
-    setConfirmCancel(false);
-    setPaymentAction(null);
-    setStatusAction(null);
-  }, [order?.id, isOpen]);
+  const visibleTab = activeTab === 'slip' && !hasOrderSlipCheck && !hasReferenceImageCheck
+    ? 'order'
+    : activeTab;
 
   useEffect(() => {
     if (!lightbox) return;
@@ -357,6 +344,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
   const subtotal         = order.subtotal || 0;
   const additionalCharge = order.additionalCharge || order.additional_charge || 0;
+  const additionalChargeDetails = order.additionalChargeDetails || order.additional_charge_details || {};
   const discount          = order.discount;
   const discountAmount    = Number(discount?.amount ?? discount?.value ?? 0) || 0;
   const grandTotal        = order.grandTotal || order.grand_total || 0;
@@ -370,8 +358,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
   const pickupTime     = order.pickupTime || order.pickup_time;
   const pickupTimeEnd = order.pickupTimeEnd || order.pickup_time_end;
 
-  const createdAt = order.createdAt || order.created_at;
-  const updatedAt = order.updatedAt || order.updated_at;
 
   const globalReferenceImage = order.customerReference || order.customer_reference_url;
 
@@ -431,7 +417,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
     if (g.isBundle) {
       const bundleTotal = g.items.reduce((sum, it) => sum + itemLineTotal(it), 0);
       itemRows.push(
-        <li key={`bundle-${g.groupId}-${i}`} className="py-3.5">
+        <li key={`bundle-${g.groupId}-${i}`} className="py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
               <span className="text-[15px] font-bold text-[#3B1F0A] break-words">{g.bundleName}</span>
@@ -443,7 +429,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
             {g.items.map((item, j) => (
               <li key={`bundle-${g.groupId}-item-${j}`} className="flex items-start justify-between gap-3 text-sm text-[#5A453C]">
                 <span className="min-w-0 break-words">
-                  {item.name || item.product_name} <QtyChip>{item.qty || item.quantity}</QtyChip>
+                  {item.name || item.product_name} <QtyChip>{formatCount(item.qty || item.quantity)}</QtyChip>
                 </span>
                 <span className="text-[#8A7264] shrink-0 tabular-nums">{fmt(itemLineTotal(item))}</span>
               </li>
@@ -454,9 +440,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
     } else {
       const item = g.item;
       itemRows.push(
-        <li key={`item-${i}`} className="flex items-start justify-between gap-3 py-3.5">
+        <li key={`item-${i}`} className="flex items-start justify-between gap-3 py-3">
           <span className="min-w-0 text-[15px] font-semibold text-[#3B1F0A] break-words">
-            {item.name || item.product_name} <QtyChip>{item.qty || item.quantity}</QtyChip>
+            {item.name || item.product_name} <QtyChip>{formatCount(item.qty || item.quantity)}</QtyChip>
           </span>
           <span className="text-[15px] font-bold text-[#3B1F0A] shrink-0 tabular-nums">{fmt(itemLineTotal(item))}</span>
         </li>
@@ -474,8 +460,6 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
       {[
         orderType && { k: 'Type', node: <TagBadge>{orderType}</TagBadge> },
         source && { k: 'Source', node: <TagBadge>{placedByAdmin ? 'Walk-in' : source === 'online' ? 'Online' : source}</TagBadge> },
-        createdAt && { k: 'Placed', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(createdAt)}</span>, wide: true },
-        updatedAt && updatedAt !== createdAt && { k: 'Updated', node: <span className="text-sm font-semibold text-[#5A453C]">{formatDateTime(updatedAt)}</span>, wide: true },
       ].filter(Boolean).map(({ k, node, wide }) => (
         <div key={k} className={`flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-2 ${wide ? 'col-span-2 sm:col-auto' : ''}`}>
           <span className="text-xs sm:text-[11px] font-semibold sm:font-bold sm:uppercase sm:tracking-wider text-[#8A7264]">{k}</span>
@@ -494,17 +478,31 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
       onClick={event => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
-        className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[92dvh] sm:max-h-[90dvh] mt-auto sm:m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
+        className="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[92dvh] sm:max-h-[90dvh] mt-auto sm:m-auto flex flex-col overflow-hidden border border-[#EAE4E0]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile grab handle */}
         <div className="sm:hidden mx-auto mt-2.5 h-1 w-10 rounded-full bg-[#DED4CC] shrink-0" aria-hidden="true" />
 
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-4 sm:px-7 pt-3 pb-3 sm:py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <div className="flex items-center gap-x-3 gap-y-1 flex-wrap min-w-0">
-            <h2 id="order-details-heading" className="text-xl sm:text-2xl font-bold text-[#3B1F0A]">Order #{orderNumber}</h2>
-            <StatusBadge status={order.status} />
+        <div className="flex items-start justify-between gap-3 px-4 sm:px-6 pt-3 pb-3 sm:pt-5 sm:pb-4 border-b border-[#EAE4E0] bg-white shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+              <h2 id="order-details-heading" className="text-xl sm:text-[22px] font-bold text-[#3B1F0A] leading-tight">Order #{orderNumber}</h2>
+              <StatusBadge status={order.status} />
+            </div>
+            {/* Desktop: meta lives right under the title as one quiet line */}
+            <p className="hidden sm:flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1.5 text-[13px] text-[#8A7264]">
+              {[
+                orderType,
+                source && (placedByAdmin ? 'Walk-in' : source === 'online' ? 'Online' : source),
+              ].filter(Boolean).map((part, i) => (
+                <span key={i} className="inline-flex items-center gap-2">
+                  {i > 0 && <span aria-hidden="true" className="w-1 h-1 rounded-full bg-[#DED4CC]" />}
+                  <span className="font-semibold text-[#5A453C]">{part}</span>
+                </span>
+              ))}
+            </p>
           </div>
           <button
             type="button"
@@ -516,20 +514,15 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
           </button>
         </div>
 
-        {/* Desktop meta strip */}
-        <div className="hidden sm:block px-7 pt-5 pb-4 border-b border-[#EAE4E0] shrink-0">
-          {metaStrip}
-        </div>
-
         {/* Tabs */}
         {TABS.length > 1 && (
-          <div className="px-4 sm:px-7 pt-3 sm:pt-4 pb-3 sm:pb-0 border-b border-[#EAE4E0] sm:border-b-0 shrink-0">
+          <div className="px-4 sm:px-6 pt-3 sm:pt-2 pb-3 sm:pb-0 border-b border-[#EAE4E0] sm:border-b-0 shrink-0 bg-white">
             <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5EFEB] rounded-xl sm:flex sm:gap-8 sm:p-0 sm:bg-transparent sm:rounded-none sm:border-b sm:border-[#EAE4E0]">
               {TABS.map(tab => (
                 <TabButton
                   key={tab.id}
                   icon={tab.icon}
-                  active={activeTab === tab.id}
+                  active={visibleTab === tab.id}
                   onClick={() => setActiveTab(tab.id)}
                 >
                   {tab.label}
@@ -540,10 +533,10 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
         )}
 
         {/* Body */}
-        <div className="px-4 sm:px-7 py-4 sm:py-6 overflow-y-auto overscroll-contain flex-1 bg-[#FAF7F4]">
+        <div className="px-4 sm:px-6 py-4 overflow-y-auto overscroll-contain flex-1 bg-[#FAF7F4] border-t border-[#EAE4E0]">
 
-          {activeTab === 'order' && (
-            <div className="flex flex-col gap-4">
+          {visibleTab === 'order' && (
+            <div className="flex flex-col gap-3">
 
               {/* Mobile-only meta card */}
               <section className="sm:hidden bg-white border border-[#EAE4E0] rounded-2xl p-4">
@@ -552,11 +545,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
               {/* Customer + Pick-up */}
               <section className="bg-white border border-[#EAE4E0] rounded-2xl divide-y divide-[#EAE4E0] md:grid md:grid-cols-2 md:divide-y-0 md:divide-x">
-                <div className="flex items-center gap-3.5 p-4 sm:p-5 min-w-0">
+                <div className="flex items-center gap-3 px-4 py-3.5 min-w-0">
                   <IconTile icon={User} />
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-[#8A7264]">Customer</p>
-                    <p className="text-base sm:text-lg font-bold text-[#3B1F0A] leading-snug break-words">{customer.name || 'Walk-in'}</p>
+                    <p className="text-base font-bold text-[#3B1F0A] leading-snug break-words">{customer.name || 'Walk-in'}</p>
                     {customer.phone && (
                       <a href={`tel:${customer.phone}`} className="inline-flex items-center gap-1.5 mt-0.5 text-sm font-semibold text-[#5A453C] hover:underline underline-offset-2">
                         <Phone size={14} className="text-[#8A7264]" />
@@ -565,11 +558,11 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3.5 p-4 sm:p-5 min-w-0">
+                <div className="flex items-center gap-3 px-4 py-3.5 min-w-0">
                   <IconTile icon={Calendar} />
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-[#8A7264]">Pick-up</p>
-                    <p className="text-base sm:text-lg font-bold text-[#3B1F0A] leading-snug">{formatDate(pickupDate) || '—'}</p>
+                    <p className="text-base font-bold text-[#3B1F0A] leading-snug">{formatDate(pickupDate) || '—'}</p>
                     {pickupTimeLabel && (
                       <p className="inline-flex items-center gap-1.5 mt-0.5 text-sm font-semibold text-[#5A453C]">
                         <Clock size={14} className="text-[#8A7264]" />
@@ -582,27 +575,39 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
               {/* Order Items */}
               <section className="bg-white border border-[#EAE4E0] rounded-2xl overflow-hidden">
-                <div className="px-4 sm:px-5 pt-4 pb-1">
+                <div className="px-4 pt-3.5 pb-0.5">
                   <SectionLabel icon={ReceiptText}>
                     Order items <span className="text-[#8A7264] font-semibold">({items.length})</span>
                   </SectionLabel>
                 </div>
-                <ul className="px-4 sm:px-5 divide-y divide-[#F0EAE5]">
+                <ul className="px-4 divide-y divide-[#F0EAE5]">
                   {itemRows}
                 </ul>
-                <div className="bg-[#FAF7F4] border-t border-[#EAE4E0] px-4 sm:px-5 py-4 space-y-2">
+                <div className="bg-[#FAF7F4] border-t border-[#EAE4E0] px-4 py-3 space-y-1.5">
                   <InfoRow label="Subtotal" value={fmt(subtotal || grandTotal)} />
-                  {additionalCharge > 0 && <InfoRow label="Additional Charge" value={fmt(additionalCharge)} />}
-                  {discountAmount > 0 && <InfoRow label="Discount" value={`−${fmt(discountAmount)}`} />}
-                  <div className="flex items-baseline justify-between gap-3 pt-3 mt-1 border-t border-[#EAE4E0]">
+                  {additionalCharge > 0 && (
+                    <>
+                      <InfoRow
+                        label={additionalChargeDetails.reason ? `Additional Charge (${additionalChargeDetails.reason})` : 'Additional Charge'}
+                        value={fmt(additionalCharge)}
+                      />
+                    </>
+                  )}
+                  {discountAmount > 0 && (
+                    <InfoRow
+                      label={discount?.name ? `Discount (${discount.name}${discount.percentage ? `, ${discount.percentage}%` : ''})` : 'Discount'}
+                      value={`−${fmt(discountAmount)}`}
+                    />
+                  )}
+                  <div className="flex items-baseline justify-between gap-3 pt-2.5 mt-1 border-t border-[#EAE4E0]">
                     <span className="text-base font-bold text-[#3B1F0A]">Grand Total</span>
-                    <span className="text-2xl sm:text-3xl font-bold text-green-700 tabular-nums">{fmt(grandTotal)}</span>
+                    <span className="text-2xl font-bold text-green-700 tabular-nums">{fmt(grandTotal)}</span>
                   </div>
                 </div>
               </section>
 
               {/* Payment Section */}
-              <section className="bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
+              <section className="bg-white border border-[#EAE4E0] rounded-2xl p-4">
                 <SectionLabel icon={Wallet}>Payment</SectionLabel>
                 <div className="mt-3 flex items-center justify-between gap-3">
                   {isDeposit ? (
@@ -661,7 +666,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
             </div>
           )}
 
-          {activeTab === 'slip' && showSlipTab && (
+          {visibleTab === 'slip' && showSlipTab && (
             <div className="flex flex-col gap-4 items-start">
 
               {/* Product Component Cards */}
@@ -733,7 +738,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
 
               {/* Global Reference Fallback */}
               {globalReferenceImage && !hasOrderSlip && (
-                <section className="w-full bg-white border border-[#EAE4E0] rounded-2xl p-4 sm:p-5">
+                <section className="w-full bg-white border border-[#EAE4E0] rounded-2xl p-4">
                   <SectionLabel icon={ImageIcon} className="mb-3">Order reference</SectionLabel>
                   <div className="rounded-xl overflow-hidden bg-[#F5EFEB] border border-[#EAE4E0] flex items-center justify-center max-w-sm">
                     <button
@@ -757,7 +762,7 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-[#EAE4E0] bg-white px-4 sm:px-7 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+        <div className="shrink-0 border-t border-[#EAE4E0] bg-white px-4 sm:px-6 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-4">
           {order.status === 'Pending Verification' ? (
             <div className="flex gap-3">
               <button
@@ -931,4 +936,9 @@ export default function DetailsModal({ order, isOpen, onClose, onStatusChange, o
       />
     </div>
   );
+}
+
+export default function DetailsModal(props) {
+  const instanceKey = `${props.order?.id ?? 'no-order'}:${props.isOpen ? 'open' : 'closed'}`;
+  return <DetailsModalContent key={instanceKey} {...props} />;
 }

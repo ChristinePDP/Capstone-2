@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Plus, Trash2, CheckCircle2, Search, CalendarDays, AlertTriangle, ShoppingCart, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { formatPeso, formatCount } from '../../utils/numberGuards';
 import { useToast, Button, Modal, Card, CardSkeleton, ConfirmModal, useUnsavedChanges } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, convertToBase } from '../../utils/unitUtils';
@@ -291,7 +292,7 @@ function PreOrderProduction({ tabBar }) {
         >
           {it.productName}
         </span>
-        <span className="font-bold shrink-0">×{it.qty}</span>
+        <span className="font-bold shrink-0">×{formatCount(it.qty)}</span>
       </div>
       {!compact && it.canUseStock && (
         <div
@@ -310,7 +311,7 @@ function PreOrderProduction({ tabBar }) {
             onClick={() => setSource(order, it, 'stock')}
             className={`flex-1 py-1 border-l border-brand-200 transition-colors ${usesStock(order, it) ? 'bg-brand-600 text-white' : 'bg-white text-brand-500 hover:bg-brand-50'}`}
           >
-            From stock ({it.stockQty})
+            From stock ({formatCount(it.stockQty)})
           </button>
         </div>
       )}
@@ -757,7 +758,7 @@ function PreOrderProduction({ tabBar }) {
 
             <div className="flex justify-between items-center pt-3 border-t border-brand-100 text-sm">
               <span className="text-brand-500 font-medium">Total expenses</span>
-              <strong className="text-brand-900">₱{totalExpenses.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+              <strong className="text-brand-900">{formatPeso(totalExpenses)}</strong>
             </div>
           </div>
         )}

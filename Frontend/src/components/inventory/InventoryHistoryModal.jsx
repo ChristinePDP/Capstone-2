@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { History as HistoryIcon } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { formatPeso, formatCount } from '../../utils/numberGuards';
 import { ConfirmModal, useToast, Pagination, Skeleton } from '../ui';
 
 const formatDT = (iso) => {
@@ -34,6 +35,14 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
   const [voidingId, setVoidingId] = useState(null);
 
   const [page, setPage] = useState(1);
+  const historyIdentity = `${itemType}:${itemId ?? ''}:${itemName ?? ''}`;
+  const [previousHistoryIdentity, setPreviousHistoryIdentity] = useState(historyIdentity);
+  if (previousHistoryIdentity !== historyIdentity) {
+    setPreviousHistoryIdentity(historyIdentity);
+    setPage(1);
+    setSelectedIds([]);
+    setSelectionMode(false);
+  }
   const historyRequestRef = useRef(0);
 
   const fetchRef = useRef(fetchInventoryHistory);
@@ -64,10 +73,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
   }, [itemName, itemId, itemType]);
 
   useEffect(() => {
-    setPage(1);
-    setSelectedIds([]);
-    setSelectionMode(false);
-    loadHistory();
+    Promise.resolve().then(loadHistory);
   }, [itemName, itemType, itemId, loadHistory]);
 
   useEffect(() => {
@@ -290,8 +296,8 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
                         )}
                       </div>
                       <div className="text-right shrink-0">
-                        <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity} {log.unit}</p>
-                        {log.cost > 0 && <p className="text-[11px] text-brand-500">₱{Number(log.cost).toFixed(2)}</p>}
+                        <p className={`font-bold text-sm ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{formatCount(log.quantity)} {log.unit}</p>
+                        {log.cost > 0 && <p className="text-[11px] text-brand-500">{formatPeso(log.cost)}</p>}
                       </div>
                     </div>
                   </div>
@@ -349,8 +355,8 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
                       <td className="px-3 py-2 text-[11px] font-medium text-amber-600 whitespace-nowrap">
                         {log.expiration_date ? new Date(log.expiration_date).toLocaleDateString('en-PH') : '—'}
                       </td>
-                      <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{log.quantity} {log.unit}</td>
-                      <td className="px-3 py-2 text-right text-xs text-brand-600 font-medium">{log.cost > 0 ? `₱${Number(log.cost).toFixed(2)}` : '—'}</td>
+                      <td className={`px-3 py-2 text-right font-bold text-xs ${isVoided ? 'line-through text-brand-400' : 'text-green-600'}`}>+{formatCount(log.quantity)} {log.unit}</td>
+                      <td className="px-3 py-2 text-right text-xs text-brand-600 font-medium">{log.cost > 0 ? formatPeso(log.cost) : '—'}</td>
                     </tr>
                   );
                 })}

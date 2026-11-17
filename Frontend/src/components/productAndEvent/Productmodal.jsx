@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, forwardRef } from 'react';
 import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
 import { Modal, useUnsavedChanges } from '../ui';
+import { formatPeso } from '../../utils/numberGuards';
 
 const PRODUCT_CATEGORIES = ['Cake', 'Pastry', 'Celebration Material'];
 
@@ -601,7 +602,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
                   </div>
                   <div className={`min-[400px]:col-span-2 sm:col-span-1 rounded-2xl border p-3 flex flex-col justify-center ${negative ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50/70'}`}>
                     <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${negative ? 'text-red-700' : 'text-emerald-700'}`}>Profit per piece</p>
-                    <p className={`text-lg font-bold ${negative ? 'text-red-700' : 'text-emerald-800'}`}>{hasBoth ? `₱${profit.toFixed(2)}` : '—'}</p>
+                    <p className={`text-lg font-bold ${negative ? 'text-red-700' : 'text-emerald-800'}`}>{hasBoth ? formatPeso(profit) : '—'}</p>
                     <p className={`text-[10px] ${negative ? 'text-red-600' : 'text-emerald-700'}`}>
                       {negative ? 'Selling below cost. Raise the price to save.' : margin !== null ? `${margin.toFixed(0)}% margin` : 'Enter cost and price'}
                     </p>

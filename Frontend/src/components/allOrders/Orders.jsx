@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge, Button, Table, Tr, Td, Skeleton, EmptyState, ErrorState } from '../ui';
 import QrScanner from './QrScanner';
+import { formatCount } from '../../utils/numberGuards';
 
 const ORDER_STATUSES = ['All', 'Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
 const PER_PAGE = 8;
@@ -24,19 +25,8 @@ function formatTime(t) {
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${hour12}:${m} ${period}`;
 }
-function pickupLabel(date, time, timeEnd) {
-  const d = formatDate(date);
-  if (!d) return '—';
-  const start = formatTime(time);
-  const end = formatTime(timeEnd);
-  if (!start) return d;
-  return `${d} — ${start}${end ? ` – ${end}` : ''}`;
-}
 function statusVariant(s) {
   return { 'Pending Verification': 'pending', Confirmed: 'confirmed', Ready: 'ready', Completed: 'completed', Cancelled: 'cancelled' }[s] || 'default';
-}
-function typeVariant(t) {
-  return t === 'Pre-Order' ? 'preorder' : 'buynow';
 }
 function sourceLabel(order) {
   const placedByAdmin = order.placedByAdmin || order.placed_by_admin;
@@ -248,11 +238,8 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
   });
 
   const maxPage = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  useEffect(() => {
-    if (page > maxPage) setPage(maxPage);
-  }, [maxPage, page]);
-
-  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const visiblePage = Math.min(page, maxPage);
+  const paged = filtered.slice((visiblePage - 1) * PER_PAGE, visiblePage * PER_PAGE);
   // Background refreshes keep the current list on screen; the loading state only
   // replaces it on the very first load (no flicker, no scroll jump).
   const showLoading = loading && orders.length === 0;
@@ -289,7 +276,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
 
       <div className="lg:hidden">
         {showLoading ? (
-          <div role="status" aria-label="Loading orders" aria-live="polite" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div role="status" aria-label="Loading orders" aria-live="polite" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,21rem),1fr))] gap-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="rounded-2xl border border-[#EAE4E0] bg-white p-4 shadow-sm space-y-4">
                 <div className="flex justify-between gap-4"><div className="flex-1 space-y-2"><Skeleton w="w-20" h="h-3" /><Skeleton w="w-2/3" h="h-4" /><Skeleton w="w-1/3" h="h-3" /></div><Skeleton w="w-20" h="h-6" className="rounded-full" /></div>
@@ -299,7 +286,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
             ))}
           </div>
         ) : paged.length ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,21rem),1fr))] gap-4">
             {paged.map(order => {
               const customer   = order.customer   || order.customers || {};
               const grandTotal = order.grandTotal || order.grand_total || 0;
@@ -340,7 +327,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
                       {items.slice(0, 3).map((item, i) => (
                         <div key={i} className="flex justify-between gap-3 text-sm text-[#3B1F0A]">
                           <span className="truncate">{item.name || item.product_name}</span>
-                          <span className="text-[#8A7264] font-semibold shrink-0 tabular-nums">×{item.qty || item.quantity}</span>
+                          <span className="text-[#8A7264] font-semibold shrink-0 tabular-nums">×{formatCount(item.qty || item.quantity)}</span>
                         </div>
                       ))}
                       {items.length > 3 && (
@@ -348,14 +335,14 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
                       )}
                     </div>
                   )}
-                  <div className="flex items-end justify-between border-t border-[#EAE4E0] pt-3.5 mt-auto gap-3">
-                    <div className="min-w-0">
+                  <div className="flex flex-wrap items-end justify-between border-t border-[#EAE4E0] pt-3.5 mt-auto gap-x-3 gap-y-2.5">
+                    <div className="min-w-[9.5rem] flex-1">
                       <p className="text-xs text-[#8A7264]">Total</p>
                       <p className="text-lg font-bold text-[#3B1F0A] leading-tight tabular-nums">{fmt(grandTotal)}</p>
                       <PaymentDisplay order={order} />
                     </div>
                     <button type="button" onClick={() => onViewOrder(order)}
-                      className="shrink-0 min-h-[44px] px-5 rounded-xl border border-[#DED4CC] bg-white text-sm font-semibold text-[#3B1F0A] hover:bg-[#F5EFEB] active:bg-[#EFE6DF] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5A453C] focus-visible:ring-offset-2">
+                      className="shrink-0 ml-auto min-h-[44px] px-5 rounded-xl border border-[#D9C2B0] bg-[#F1E4D8] text-sm font-semibold text-[#3B1F0A] hover:bg-[#EAD8C8] active:bg-[#E2CDBB] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5A453C] focus-visible:ring-offset-2">
                       More Details
                     </button>
                   </div>
@@ -369,7 +356,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
             : <EmptyState title={search || statusFilter !== 'All' ? 'No matching orders' : 'No orders yet'} description={search || statusFilter !== 'All' ? 'Change the search or status filter to see more orders.' : 'New customer orders will appear here.'} />
         )}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mt-4">
-          <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+          <Pagination page={visiblePage} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
         </div>
       </div>
 
@@ -404,7 +391,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
                 <Td><PickupCell date={pickupDate} time={pickupTime} timeEnd={pickupTimeEnd} /></Td>
                 <Td className="whitespace-nowrap"><Badge variant={statusVariant(order.status)} className="font-medium px-2 py-0.5 text-xs shadow-none whitespace-nowrap">{order.status}</Badge></Td>
                 <Td align="center">
-                  <Button size="sm" variant="secondary" className="font-medium border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs px-3 py-1.5"
+                  <Button size="sm" variant="secondary" className="font-semibold border border-[#D9C2B0] bg-[#F1E4D8] text-[#3B1F0A] hover:bg-[#EAD8C8] text-xs px-3 py-1.5"
                     onClick={() => onViewOrder(order)}>
                     More Details
                   </Button>
@@ -419,7 +406,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
           )}
         </Table>
         <div className="px-4 py-3 border-t border-slate-200">
-          <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+          <Pagination page={visiblePage} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
         </div>
       </div>
     </div>

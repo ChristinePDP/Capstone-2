@@ -90,7 +90,7 @@ export default function Notification() {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
+    Promise.resolve().then(fetchNotifications);
     const handleDataChanged = (event) => {
       const change = event.detail;
       if (change?.table !== 'notifications') return;
@@ -125,19 +125,23 @@ export default function Notification() {
   }, []);
 
   const markRead = async (id) => {
+    const previousItems = items;
     setItems(prev => prev.map(n => (n.id === id ? { ...n, is_read: true } : n)));
-    try { await api(`/notifications/${id}/read`, { method: 'PATCH' }); } catch (e) {}
+    try { await api(`/notifications/${id}/read`, { method: 'PATCH' }); }
+    catch { setItems(previousItems); }
   };
 
   const markAllRead = async () => {
+    const previousItems = items;
     setItems(prev => prev.map(n => ({ ...n, is_read: true })));
-    try { await api('/notifications/read-all', { method: 'PATCH' }); } catch (e) {}
+    try { await api('/notifications/read-all', { method: 'PATCH' }); }
+    catch { setItems(previousItems); }
   };
 
   const deleteNotification = async (id) => {
     const prevItems = items;
     setItems(prev => prev.filter(n => n.id !== id));
-    try { await api(`/notifications/${id}`, { method: 'DELETE' }); } catch (e) { setItems(prevItems); }
+    try { await api(`/notifications/${id}`, { method: 'DELETE' }); } catch { setItems(prevItems); }
   };
 
   const openNotification = (n) => {
@@ -146,7 +150,7 @@ export default function Notification() {
 
     let parsedData = {};
     if (typeof n.data === 'string') {
-      try { parsedData = JSON.parse(n.data); } catch(e) {}
+      try { parsedData = JSON.parse(n.data); } catch { /* Keep empty metadata when stored JSON is malformed. */ }
     } else if (typeof n.data === 'object' && n.data !== null) {
       parsedData = n.data;
     }

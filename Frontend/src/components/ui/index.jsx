@@ -294,14 +294,22 @@ export function EmptyState({ title = 'Nothing here yet', description, icon: Icon
 }
 
 export function ErrorState({ title = 'Unable to load this data', description, actionLabel = 'Try again', onRetry, className = '' }) {
+  const [isRetrying, setIsRetrying] = useState(false);
   const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-  const connectionFailure = /network error|failed to fetch|load failed|network request failed|econnrefused/i.test(String(description || ''));
+  const connectionFailure = /network error|failed to fetch|load failed|network request failed|econnrefused|econnaborted|timeout/i.test(String(description || ''));
+  const handleRetry = async () => {
+    if (!onRetry || isRetrying) return;
+    setIsRetrying(true);
+    try { await onRetry(); }
+    catch { /* The screen keeps its error state; the user can retry again. */ }
+    finally { setIsRetrying(false); }
+  };
   return (
     <div role="alert" className={`flex min-h-48 flex-col items-center justify-center rounded-2xl border border-red-100 bg-red-50/60 px-6 py-10 text-center ${className}`}>
       <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600"><WifiOff size={22} aria-hidden="true" /></span>
       <h3 className="text-sm font-bold text-brand-900">{offline ? 'No internet connection' : title}</h3>
       <p className="mt-1.5 max-w-md text-sm text-brand-600">{offline ? 'Reconnect to the internet, then try loading this data again.' : connectionFailure ? 'Check your internet connection. The server may also be temporarily unavailable.' : description || 'Check your connection. The server may be temporarily unavailable.'}</p>
-      {onRetry && <button type="button" onClick={onRetry} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"><RefreshCw size={15} aria-hidden="true" />{actionLabel}</button>}
+      {onRetry && <button type="button" onClick={handleRetry} disabled={isRetrying} aria-live="polite" className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:cursor-wait disabled:opacity-75"><RefreshCw size={15} className={isRetrying ? 'animate-spin' : ''} aria-hidden="true" />{isRetrying ? 'Checking connection…' : actionLabel}</button>}
     </div>
   );
 }

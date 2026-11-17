@@ -60,6 +60,23 @@ export function formatWithCommas(value) {
   return decPart !== undefined ? `${withCommas}.${decPart}` : withCommas;
 }
 
+/** Format a monetary value for user-facing peso displays (never for inputs). */
+export function formatPeso(value) {
+  const amount = Number(value);
+  return `₱${(Number.isFinite(amount) ? amount : 0).toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/** Format a quantity/count while retaining useful fractional stock precision. */
+export function formatCount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString('en-PH', { maximumFractionDigits: MAX_DECIMALS })
+    : '0';
+}
+
 /**
  * Katulad ng formatWithCommas, pero ginawa para sa LIVE na pag-format
  * habang nagta-type ang user sa loob mismo ng input field (hindi lang

@@ -657,6 +657,7 @@ CREATE TABLE public.orders (
     status public.order_status DEFAULT 'Confirmed'::public.order_status NOT NULL,
     subtotal numeric(10,2) DEFAULT 0 NOT NULL,
     additional_charge numeric(10,2) DEFAULT 0 NOT NULL,
+    additional_charge_details jsonb DEFAULT '{}'::jsonb NOT NULL,
     discount jsonb DEFAULT '{}'::jsonb NOT NULL,
     grand_total numeric(10,2) DEFAULT 0 NOT NULL,
     payment_type public.payment_type DEFAULT 'full'::public.payment_type NOT NULL,

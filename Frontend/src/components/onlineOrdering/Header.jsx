@@ -31,7 +31,7 @@ function MobileSteps({ page }) {
           style={{ width: `${progressPct * 0.75}%` }}
         />
         <div className="flex justify-between relative z-10">
-          {STEPS.map((s, idx) => {
+          {STEPS.map(s => {
             const state = getState(s.id);
             const isDone = state === 'completed' || (s.id === 4 && page === 'confirm');
             const isActive = state === 'active';

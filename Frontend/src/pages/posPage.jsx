@@ -8,6 +8,7 @@ import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
 import { usePersistedCart } from '../components/shared/usePersistedCart';
 import { slipSignature } from '../components/shared/orderSlipUploads';
 import { ProductGridSkeleton } from '../components/ui';
+import { formatPeso } from '../utils/numberGuards';
 
 // FIX: dating naka-loob ito sa useEffect ng component (component state),
 // kaya tuwing mag-uunmount/mag-remount ang PosPage (nangyayari tuwing
@@ -69,6 +70,22 @@ export default function PosPage() {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const updateDocumentOverflow = () => {
+      document.documentElement.style.overflowY = mediaQuery.matches ? 'hidden' : '';
+      document.body.style.overflowY = mediaQuery.matches ? 'hidden' : '';
+    };
+
+    updateDocumentOverflow();
+    mediaQuery.addEventListener('change', updateDocumentOverflow);
+    return () => {
+      mediaQuery.removeEventListener('change', updateDocumentOverflow);
+      document.documentElement.style.overflowY = '';
+      document.body.style.overflowY = '';
     };
   }, []);
 
@@ -355,7 +372,7 @@ export default function PosPage() {
         </div>
         {cart.length > 0 && (
           <span className="font-semibold text-sm">
-            ₱{cart.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}
+            {formatPeso(cart.reduce((sum, item) => sum + (item.price * item.qty), 0))}
           </span>
         )}
       </button>

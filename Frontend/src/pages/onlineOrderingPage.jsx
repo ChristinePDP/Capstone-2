@@ -104,7 +104,6 @@ export default function OnlineOrderingPage() {
     saveCartToDb(cart);
   }, [cart, cartHydrated]);
 
-  const [confirmedOrderId, setConfirmedOrderId] = useState('');
 
   const location = useLocation();
   // '/onlineOrdering/menu' -> 'menu', '/onlineOrdering/checkout' -> 'checkout', atbp.
@@ -148,7 +147,7 @@ export default function OnlineOrderingPage() {
       
       
       
-      <Route path="confirm" element={<Confirm orderId={confirmedOrderId} setCart={setCart} />} />
+      <Route path="confirm" element={<Confirm setCart={setCart} />} />
       
       {/* 404 Fallback sa loob ng ordering page */}
       <Route path="*" element={<Navigate to="/onlineOrdering/home" replace />} />

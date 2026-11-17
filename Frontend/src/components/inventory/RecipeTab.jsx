@@ -464,10 +464,10 @@ export default function RecipeTab() {
     // raw ingredients (Recipe) go to `rows`, materials (Product Materials) go to `addonRows`.
     const savedIngredientRows = mappedRows
       .filter(row => row.sourceType !== 'material')
-      .map(({ sourceType, ...row }) => row);
+      .map(row => { const { sourceType, ...rest } = row; void sourceType; return rest; });
     const savedAddonRows = mappedRows
       .filter(row => row.sourceType === 'material')
-      .map(({ sourceType, ...row }) => row);
+      .map(row => { const { sourceType, ...rest } = row; void sourceType; return rest; });
 
     setRows(savedIngredientRows.length ? savedIngredientRows : [{ itemId: '', qty: '', unit: '' }]);
     setAddonRows(savedAddonRows);
@@ -553,18 +553,10 @@ export default function RecipeTab() {
     }, 50);
   };
 
-  // Mawawala agad ang error ng field/row na naayos na habang nag-e-edit.
-  useEffect(() => {
-    setFormErrors(prev => {
-      const keys = Object.keys(prev);
-      if (keys.length === 0) return prev;
-      const latest = computeFormErrors();
-      const next = {};
-      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
-      return Object.keys(next).length === keys.length ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, yld, yldUnit, rows, addonRows]);
+  const currentFormErrors = computeFormErrors();
+  const visibleFormErrors = Object.fromEntries(
+    Object.entries(formErrors).filter(([key]) => currentFormErrors[key])
+  );
 
   // Kapag may inalis na row, nagbabago ang index kaya nililinis ang error ng section na iyon.
   const clearSectionErrors = (section) => {
@@ -655,9 +647,9 @@ export default function RecipeTab() {
     const rowItem = inventoryById[row.itemId];
     const liveQtyErr = row.qty ? getQtyError(String(row.qty), { max: MAX_QTY, label: `Quantity for ${rowItem?.name || noun}` }) : null;
     const err = {
-      item: formErrors[`${section}:${i}:item`],
-      qty:  formErrors[`${section}:${i}:qty`] || liveQtyErr,
-      unit: formErrors[`${section}:${i}:unit`],
+      item: visibleFormErrors[`${section}:${i}:item`],
+      qty:  visibleFormErrors[`${section}:${i}:qty`] || liveQtyErr,
+      unit: visibleFormErrors[`${section}:${i}:unit`],
     };
     const rowMessage = err.item || err.qty || err.unit;
     const ctl = (bad) => `w-full px-2.5 py-1.5 text-sm border rounded-lg outline-none bg-white transition-colors ${bad ? 'border-red-500 focus:border-red-500' : 'border-brand-200 focus:border-brand-400'}`;
@@ -891,7 +883,7 @@ export default function RecipeTab() {
               <FormSelect
                 label="Product Name"
                 required
-                error={formErrors.product}
+                error={visibleFormErrors.product}
                 value={productId}
                 onChange={e => setProductId(e.target.value)}
               >
@@ -902,7 +894,7 @@ export default function RecipeTab() {
               <FormInput
                 label="Items per Batch"
                 required
-                error={formErrors.yield || (yld ? getQtyError(String(yld), { max: MAX_QTY, label: 'Items per batch' }) : '')}
+                error={visibleFormErrors.yield || (yld ? getQtyError(String(yld), { max: MAX_QTY, label: 'Items per batch' }) : '')}
                 type="text"
                 inputMode="decimal"
                 value={yld}
@@ -912,7 +904,7 @@ export default function RecipeTab() {
               <FormInput
                 label="Unit"
                 required
-                error={formErrors.yieldUnit}
+                error={visibleFormErrors.yieldUnit}
                 value={yldUnit}
                 onChange={e => setYldUnit(e.target.value)}
                 placeholder="pcs"

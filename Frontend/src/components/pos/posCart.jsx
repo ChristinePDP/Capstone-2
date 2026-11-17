@@ -5,10 +5,16 @@ import {
 } from 'lucide-react';
 import PosEReceipt from './posEreceipt';
 import OrderSummaryModal, { getLiveNow, addDaysToDateString, formatDateLong, getSlotLabel, isSlotPast, TIME_SLOTS } from './orderSum';
-import MultiImageField from '../shared/MultiImageField';
 import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
 import { countReferenceFiles, countSlipFiles, pruneEmptySlipAnswers, slipHasFiles, uploadSlipImages, findMissingRequiredSlipImages } from '../shared/orderSlipUploads';
 import { getOrderErrorMessage } from '../../services/orderErrorMessage';
+import {
+  MAX_COST,
+  formatNumberLive,
+  formatPeso,
+  formatCount,
+  sanitizeNumericText,
+} from '../../utils/numberGuards';
 
 const POS_CHECKOUT_RESERVATION_KEY = 'aileen_cake_max_pos_checkout_reservation_id';
 
@@ -95,6 +101,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   }, []);
 
   const [additionalCharge, setAdditionalCharge] = useState(() => localStorage.getItem('pos_additionalCharge') || '');
+  const [additionalChargeReason, setAdditionalChargeReason] = useState(() => localStorage.getItem('pos_additionalChargeReason') || '');
   const [discountName, setDiscountName] = useState(() => localStorage.getItem('pos_discountName') || '');
   const [discountPercentage, setDiscountPercentage] = useState(() => localStorage.getItem('pos_discountPercentage') || '');
   const [paymentMode, setPaymentMode] = useState(() => localStorage.getItem('pos_paymentMode') || 'Full Payment'); 
@@ -163,6 +170,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     }
   }, [isPreOrderOnly, isBuyNowOnly, orderType, setOrderType]);
 
+  useEffect(() => {
+    if (orderType === 'Buy Now' && paymentMode !== 'Full Payment') {
+      setPaymentMode('Full Payment');
+    }
+  }, [orderType, paymentMode]);
+
   const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, hasStrictPreOrder ? 3 : 1);
 
@@ -181,6 +194,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
   useEffect(() => { localStorage.setItem('pos_form', JSON.stringify(form)); }, [form]);
   useEffect(() => { localStorage.setItem('pos_additionalCharge', additionalCharge); }, [additionalCharge]);
+  useEffect(() => { localStorage.setItem('pos_additionalChargeReason', additionalChargeReason); }, [additionalChargeReason]);
   useEffect(() => { localStorage.setItem('pos_discountName', discountName); }, [discountName]);
   useEffect(() => { localStorage.setItem('pos_discountPercentage', discountPercentage); }, [discountPercentage]);
   useEffect(() => { localStorage.setItem('pos_paymentMode', paymentMode); }, [paymentMode]);
@@ -237,6 +251,9 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         errors.pickupTime = 'That time slot has already passed. Please choose another.';
       }
     }
+    if ((Number(additionalCharge) || 0) > 0 && !additionalChargeReason.trim()) {
+      errors.additionalChargeReason = 'Please provide a reason for the additional charge.';
+    }
     return errors;
   };
 
@@ -252,7 +269,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         Object.keys(next).every(k => next[k] === prev[k]) ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, orderType]);
+  }, [form, orderType, additionalCharge, additionalChargeReason]);
 
   const validateOrderForm = () => {
     const errors = computeFormErrors();
@@ -403,6 +420,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       percentage: percentageNumberVal,
       amount: discountAmountCalc
     } : {};
+    const additionalChargeDetails = chargeAmountCalc > 0 ? {
+      amount: chargeAmountCalc,
+      reason: additionalChargeReason.trim()
+    } : {};
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
     const livePickupDate = orderType === 'Buy Now' ? getLiveNow().dateStr : form.pickupDate;
@@ -419,7 +440,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         amountDueNow: amountDueCalc,
         balance: grandTotalCalc - amountDueCalc,
         discount: discountPayload,
-        additionalCharge: chargeAmountCalc
+        additionalCharge: chargeAmountCalc,
+        additionalChargeDetails
       },
       pickup: {
         date: livePickupDate,
@@ -481,6 +503,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       setForm({ name: '', phone: '', altPhone: '', pickupDate: getLiveNow().dateStr, pickupTime: '', instructions: '' });
       setFormErrors({});
       setAdditionalCharge('');
+      setAdditionalChargeReason('');
       setDiscountName('');
       setDiscountPercentage('');
       setPaymentMode('Full Payment');
@@ -488,6 +511,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       localStorage.removeItem('pos_orderType');
       localStorage.removeItem('pos_form');
       localStorage.removeItem('pos_additionalCharge');
+      localStorage.removeItem('pos_additionalChargeReason');
       localStorage.removeItem('pos_discountName');
       localStorage.removeItem('pos_discountPercentage');
       localStorage.removeItem('pos_paymentMode');
@@ -509,7 +533,23 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   };
 
   const handleToggleDiscounts = () => {
+    if (cart.length === 0) return;
     setIsDiscountsOpen(s => !s);
+  };
+
+  const handleAdditionalChargeChange = (rawValue) => {
+    const sanitized = sanitizeNumericText(rawValue);
+    if (sanitized === '') {
+      setAdditionalCharge('');
+      return;
+    }
+
+    setAdditionalCharge(String(Math.min(Number(sanitized), MAX_COST)));
+  };
+
+  const adjustAdditionalCharge = (delta) => {
+    const nextValue = Math.max(0, Math.min(Number(additionalCharge || 0) + delta, MAX_COST));
+    setAdditionalCharge(String(nextValue));
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
@@ -601,34 +641,54 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           <div className="shrink-0 border-b border-[#F1EBE6] bg-[#FCFAF9]">
             <button 
               onClick={handleToggleDiscounts}
-              className="w-full flex items-center justify-between px-5 py-3 hover:bg-[#F5EFEB] transition-colors"
+              disabled={cart.length === 0}
+              className={`w-full flex items-center justify-between px-5 py-3 transition-colors ${
+                cart.length === 0 ? 'cursor-not-allowed opacity-50' : 'hover:bg-[#F5EFEB]'
+              }`}
             >
               <div className="flex items-center gap-2">
                 <Tag size={14} className="text-[#8A7264]" />
-                <span className="text-xs font-semibold text-[#8A7264]">Discounts & Options</span>
+                <span className="text-xs font-semibold text-[#8A7264]">Price Adjustments</span>
               </div>
-              {isDiscountsOpen ? <ChevronUp size={16} className="text-[#8A7264]" /> : <ChevronDown size={16} className="text-[#8A7264]" />}
+              {isDiscountsOpen && cart.length > 0 ? <ChevronUp size={16} className="text-[#8A7264]" /> : <ChevronDown size={16} className="text-[#8A7264]" />}
             </button>
 
-            {isDiscountsOpen && (
+            {isDiscountsOpen && cart.length > 0 && (
               <div className="px-5 pb-4 flex flex-col gap-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-[#4A3B36]">Additional Charge</label>
                   <div className="relative">
-                    <input 
-                      type="number" 
-                      min="0"
+                    <input
+                      type="text"
+                      inputMode="decimal"
                       placeholder="0"
-                      value={additionalCharge}
-                      onChange={(e) => setAdditionalCharge(e.target.value)}
-                      className="w-24 border border-[#EAE4E0] rounded-xl px-3 py-2 pr-6 text-right text-xs text-[#3B1F0A] focus:outline-none focus:border-[#5A453C] bg-white transition-colors"
+                      value={formatNumberLive(additionalCharge)}
+                      onChange={(e) => handleAdditionalChargeChange(e.target.value)}
+                      className="w-32 sm:w-36 border border-[#EAE4E0] rounded-xl px-3 py-2 pr-7 text-right text-xs text-[#3B1F0A] focus:outline-none focus:border-[#5A453C] bg-white transition-colors"
                     />
                     <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex flex-col text-[#8A7264]">
-                      <ChevronUp size={12} className="cursor-pointer hover:text-[#5A453C]" onClick={() => setAdditionalCharge(String(Number(additionalCharge) + 1))} />
-                      <ChevronDown size={12} className="cursor-pointer hover:text-[#5A453C]" onClick={() => setAdditionalCharge(String(Math.max(0, Number(additionalCharge) - 1)))} />
+                      <ChevronUp size={12} className="cursor-pointer hover:text-[#5A453C]" onClick={() => adjustAdditionalCharge(1)} />
+                      <ChevronDown size={12} className="cursor-pointer hover:text-[#5A453C]" onClick={() => adjustAdditionalCharge(-1)} />
                     </div>
                   </div>
                 </div>
+                {Number(additionalCharge) > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-[#4A3B36] mb-1">Reason for Additional Charge *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Rush order, delivery"
+                      value={additionalChargeReason}
+                      onChange={(e) => setAdditionalChargeReason(e.target.value)}
+                      className={`w-full border rounded-xl px-3 py-2 text-xs text-[#3B1F0A] focus:outline-none focus:border-[#5A453C] bg-white transition-colors ${
+                        formErrors.additionalChargeReason ? 'border-red-400' : 'border-[#EAE4E0]'
+                      }`}
+                    />
+                    {formErrors.additionalChargeReason && (
+                      <p className="mt-1 text-[11px] text-red-600">{formErrors.additionalChargeReason}</p>
+                    )}
+                  </div>
+                )}
                 
                 <div className="border-t border-[#F1EBE6]"></div>
                 
@@ -681,7 +741,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                         <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
                         {expandedCartIndexes.has(idx) ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
                       </button>
-                      {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
+                      {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {formatCount(item.qty)}</p>}
                       {expandedCartIndexes.has(idx) && item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
 
                       {expandedCartIndexes.has(idx) && item.selected_price_options && Object.entries(item.selected_price_options).map(([key, val]) => (
@@ -709,14 +769,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
                       <div className="flex items-center gap-2 mt-2">
                         <button onClick={() => handleUpdateQty(idx, -1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Minus size={12} /></button>
-                        <span className="font-mono text-xs w-4 text-center">{item.qty}</span>
+                        <span className="font-mono text-xs w-4 text-center">{formatCount(item.qty)}</span>
                         <button onClick={() => handleUpdateQty(idx, 1)} className="w-6 h-6 rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]"><Plus size={12} /></button>
                       </div>
                     </div>
 
                     {/* Presyo sa itaas, Delete Button sa mismong BABA ng presyo */}
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="font-semibold text-sm text-[#5A453C]">₱{(item.price * item.qty).toLocaleString()}</span>
+                      <span className="font-semibold text-sm text-[#5A453C]">{formatPeso(item.price * item.qty)}</span>
                       <button
                         type="button"
                         onClick={() => onRemoveItem?.(idx)}
@@ -739,31 +799,31 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
             {(discountAmount > 0 || chargeAmount > 0) && (
               <div className="flex items-center justify-between text-[11px] text-[#8A7264]">
                 <span>Subtotal</span>
-                <span>₱{subtotal.toLocaleString()}</span>
+                <span>{formatPeso(subtotal)}</span>
               </div>
             )}
             {discountAmount > 0 && (
               <div className="flex items-center justify-between text-[11px] text-green-600">
                 <span>{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
-                <span>-₱{discountAmount.toLocaleString()}</span>
+                <span>-{formatPeso(discountAmount)}</span>
               </div>
             )}
             {chargeAmount > 0 && (
               <div className="flex items-center justify-between text-[11px] text-red-500">
                 <span>Additional Charge</span>
-                <span>+₱{chargeAmount.toLocaleString()}</span>
+                <span>+{formatPeso(chargeAmount)}</span>
               </div>
             )}
             
             <div className="flex items-center justify-between mt-1">
               <span className="text-xs font-semibold text-[#8A7264]">Grand Total</span>
-              <span className="font-serif text-base text-[#8A7264] font-semibold">₱{cartTotal.toLocaleString()}</span>
+              <span className="font-serif text-base text-[#8A7264] font-semibold">{formatPeso(cartTotal)}</span>
             </div>
           </div>
 
           <div className="flex items-center justify-between gap-3 mt-2 pt-3 border-t border-[#EAE4E0] mb-3">
             <div className="flex bg-[#F5EFEB] rounded-lg p-1 gap-1 shrink-0">
-              {['Full Payment', '50% Deposit'].map(mode => (
+              {(orderType === 'Buy Now' ? ['Full Payment'] : ['Full Payment', '50% Deposit']).map(mode => (
                 <button
                   key={mode}
                   onClick={() => setPaymentMode(mode)}
@@ -778,7 +838,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
             <div className="flex flex-col items-end gap-0 min-w-0">
               <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">Amount Due</span>
-              <span className="font-serif text-lg text-[#3B1F0A] font-semibold truncate">₱{amountDue.toLocaleString()}</span>
+              <span className="font-serif text-lg text-[#3B1F0A] font-semibold truncate">{formatPeso(amountDue)}</span>
             </div>
           </div>
 

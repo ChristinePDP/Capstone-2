@@ -1,6 +1,7 @@
 import { Profiler, useRef, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import html2canvas from 'html2canvas';
+import { formatCount } from '../../utils/numberGuards';
 
 function logQrRenderTime(id, phase, actualDuration) {
   console.info(`[QR generation] ${id} ${phase}: ${actualDuration.toFixed(2)} ms`);
@@ -163,7 +164,7 @@ export default function PosEReceipt({
             <div className="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[140px] md:max-h-[16vh] scrollbar-thin pr-1">
               {cart.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-start text-[11px] sm:text-xs text-[#5A453C]">
-                  <span className="pr-2 leading-snug">{item.qty}x {item.name}</span>
+                  <span className="pr-2 leading-snug">{formatCount(item.qty)}x {item.name}</span>
                   <span className="font-medium text-[#3B1F0A] shrink-0">
                     {formatPeso((item.price ?? 0) * (item.qty ?? 1))}
                   </span>

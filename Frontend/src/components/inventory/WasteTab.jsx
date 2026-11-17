@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
-import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
+import { sanitizeNumericText, getQtyError, MAX_QTY, formatPeso, formatCount } from '../../utils/numberGuards';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
@@ -89,6 +89,11 @@ function SearchableSelect({
 
   const close = () => { setOpen(false); setQuery(''); };
   const choose = (opt) => { onChange(opt.value); close(); };
+  const openDropdown = () => {
+    const idx = options.findIndex(o => o.value === value);
+    setActiveIdx(idx >= 0 ? idx : 0);
+    setOpen(true);
+  };
 
   // click sa labas = isara
   useEffect(() => {
@@ -98,16 +103,6 @@ function SearchableSelect({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // pagbukas: i-start sa napiling item
-  useEffect(() => {
-    if (!open) return;
-    const idx = options.findIndex(o => o.value === value);
-    setActiveIdx(idx >= 0 ? idx : 0);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // balik sa unang resulta kapag nagbago ang search
-  useEffect(() => { setActiveIdx(0); }, [query]);
-
   // panatilihing kita ang active item habang nag-a-arrow key
   useEffect(() => {
     if (!open) return;
@@ -116,7 +111,7 @@ function SearchableSelect({
 
   const onKeyDown = (e) => {
     if (!open) {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openDropdown(); }
       return;
     }
     if (e.key === 'Escape') { e.stopPropagation(); close(); }
@@ -131,7 +126,7 @@ function SearchableSelect({
       <div ref={wrapRef} className="relative" onKeyDown={onKeyDown}>
         <div
           className={`w-full flex items-center gap-2 border rounded-xl px-3 py-2.5 text-xs bg-white transition-colors cursor-text ${error ? 'border-red-500' : open ? 'border-[#5A453C]' : 'border-[#DED4CC]'}`}
-          onClick={() => { setOpen(true); searchRef.current?.focus(); }}
+          onClick={() => { openDropdown(); searchRef.current?.focus(); }}
         >
           <input
             ref={searchRef}
@@ -144,8 +139,8 @@ function SearchableSelect({
             data-invalid={error ? 'true' : undefined}
             autoComplete="off"
             value={open ? query : (selected ? selected.label : '')}
-            onFocus={() => setOpen(true)}
-            onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+            onFocus={openDropdown}
+            onChange={e => { setQuery(e.target.value); setActiveIdx(0); if (!open) setOpen(true); }}
             placeholder={open && selected ? selected.label : (open ? searchPlaceholder : placeholder)}
             className={`min-w-0 flex-1 truncate text-xs outline-none bg-transparent ${selected && !open ? 'text-[#3B1F0A]' : 'text-[#3B1F0A]'} ${open && selected ? 'placeholder:text-[#3B1F0A]' : 'placeholder:text-[#8A7264]'}`}
           />
@@ -154,7 +149,7 @@ function SearchableSelect({
             tabIndex={-1}
             aria-label={open ? 'Close list' : 'Open list'}
             onMouseDown={e => e.preventDefault()}
-            onClick={e => { e.stopPropagation(); if (open) close(); else { setOpen(true); searchRef.current?.focus(); } }}
+            onClick={e => { e.stopPropagation(); if (open) close(); else { openDropdown(); searchRef.current?.focus(); } }}
             className="shrink-0 text-[#8A7264]"
           >
             {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -415,18 +410,10 @@ export default function WasteTab() {
     return { errs, payload };
   };
 
-  // Mawawala agad ang error ng field na naayos na habang nagta-type.
-  useEffect(() => {
-    setFormErrors(prev => {
-      const keys = Object.keys(prev);
-      if (keys.length === 0) return prev;
-      const latest = buildLog().errs;
-      const next = {};
-      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
-      return Object.keys(next).length === keys.length ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logType, ingName, ingQty, matName, matQty, productName, productQty]);
+  const currentFormErrors = buildLog().errs;
+  const visibleFormErrors = Object.fromEntries(
+    Object.entries(formErrors).filter(([key]) => currentFormErrors[key])
+  );
 
   const handleLog = async () => {
     if (isSaving) return;
@@ -602,7 +589,7 @@ export default function WasteTab() {
           <div className="flex items-center justify-between xl:justify-end gap-2 bg-red-50/80 border border-red-200/80 px-3.5 py-2 rounded-lg w-full xl:w-auto shrink-0">
             <span className="text-xs font-bold text-red-900/80 uppercase tracking-wider">Estimated Loss:</span>
             <span className="text-base font-black text-red-600 whitespace-nowrap">
-              ₱{totalCostFiltered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatPeso(totalCostFiltered)}
             </span>
           </div>
         </div>
@@ -668,11 +655,11 @@ export default function WasteTab() {
                   <div className={`grid grid-cols-2 gap-2 text-xs p-2 rounded-lg border ${isSelected ? 'bg-white/80 border-red-200' : 'bg-brand-50/50 border-brand-100/50'}`}>
                     <div>
                       <span className="text-gray-400 block text-[10px] font-medium">Quantity</span>
-                      <span className="font-bold text-gray-800">{log.qty}</span>
+                      <span className="font-bold text-gray-800">{formatCount(log.qty)}</span>
                     </div>
                     <div>
                       <span className="text-gray-400 block text-[10px] font-medium">Loss</span>
-                      <span className="font-bold text-red-600">₱{log.cost?.toFixed(2)}</span>
+                      <span className="font-bold text-red-600">{formatPeso(log.cost)}</span>
                     </div>
                   </div>
 
@@ -743,8 +730,8 @@ export default function WasteTab() {
                       </Badge>
                     </Td>
                     <Td className="font-bold text-brand-900">{log.item}</Td>
-                    <Td>{log.qty}</Td>
-                    <Td className="font-semibold text-red-600">₱{log.cost?.toFixed(2)}</Td>
+                    <Td>{formatCount(log.qty)}</Td>
+                    <Td className="font-semibold text-red-600">{formatPeso(log.cost)}</Td>
                     <Td>
                       <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded">
                         {log.reason}
@@ -816,7 +803,7 @@ export default function WasteTab() {
               <SearchableSelect
                 label="Select Ingredient"
                 required
-                error={formErrors.item}
+                error={visibleFormErrors.item}
                 placeholder="— Select an ingredient —"
                 value={ingName}
                 options={ingredients.map(i => ({ value: i.name, label: `${i.name} (In stock: ${i.stock} ${i.unit})` }))}
@@ -830,7 +817,7 @@ export default function WasteTab() {
                 <FormInput
                   label="Quantity Lost"
                   required
-                  error={formErrors.qty}
+                  error={visibleFormErrors.qty}
                   type="text"
                   inputMode="decimal"
                   value={ingQty}
@@ -850,7 +837,7 @@ export default function WasteTab() {
               <SearchableSelect
                 label="Select Product Material"
                 required
-                error={formErrors.item}
+                error={visibleFormErrors.item}
                 placeholder="— Select a product material —"
                 value={matName}
                 options={productMaterials.map(m => ({ value: m.name, label: `${m.name} (In stock: ${m.stock} ${m.unit})` }))}
@@ -864,7 +851,7 @@ export default function WasteTab() {
                 <FormInput
                   label="Quantity Lost"
                   required
-                  error={formErrors.qty}
+                  error={visibleFormErrors.qty}
                   type="text"
                   inputMode="decimal"
                   value={matQty}
@@ -884,10 +871,10 @@ export default function WasteTab() {
               <SearchableSelect
                 label="Select Product"
                 required
-                error={formErrors.item}
+                error={visibleFormErrors.item}
                 placeholder="— Select a product —"
                 value={productName}
-                options={products.filter(p => p.stock > 0).map(p => ({ value: p.name, label: `${p.name} (Current Stock: ${p.stock} pcs)` }))}
+                options={products.filter(p => p.stock > 0).map(p => ({ value: p.name, label: `${p.name} (Current Stock: ${formatCount(p.stock)} pcs)` }))}
                 onChange={val => {
                   setProductName(val); setProductQty(''); setProductUnit('pcs');
                 }}
@@ -896,7 +883,7 @@ export default function WasteTab() {
                 <FormInput
                   label="Quantity"
                   required
-                  error={formErrors.qty}
+                  error={visibleFormErrors.qty}
                   type="text"
                   inputMode="numeric"
                   value={productQty}

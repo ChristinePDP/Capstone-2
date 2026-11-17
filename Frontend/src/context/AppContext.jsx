@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AppContext.jsx
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { apiClient } from '../services/apiClient';
 import { getProfile } from '../services/authService.js';
@@ -126,8 +126,9 @@ export function AppProvider({ children }) {
   // dapat tawagin mula sa Login page pagka-success ng login — ito na ang
   // magse-set ng flag AT magpapa-trigger ng fetch, nang hindi na
   // aasa/naghihintay pa ng page refresh.
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem('isLoggedIn') === 'true');
   const [authReady, setAuthReady] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -144,13 +145,28 @@ export function AppProvider({ children }) {
       .then(() => {
         if (active) {
           localStorage.setItem('isLoggedIn', 'true');
+          setAuthError(null);
           setIsAuthed(true);
         }
-      })
-      .catch(() => {
-        localStorage.removeItem('isLoggedIn');
-        localStorage.removeItem('admin');
-        if (active) setIsAuthed(false);
+      }).catch(err => {
+        if (!active) return;
+        const status = err.response?.status;
+        if (status === 401 || status === 403) {
+          localStorage.removeItem('isLoggedIn');
+          localStorage.removeItem('admin');
+          setAuthError(null);
+          setIsAuthed(false);
+          return;
+        }
+
+        // Network/server failures do not prove the session expired. Keep the
+        // locally known session and show a retry state instead of logging out.
+        if (localStorage.getItem('isLoggedIn') === 'true') {
+          setIsAuthed(true);
+          setAuthError(err.message || 'Unable to reach the server.');
+        } else {
+          setIsAuthed(false);
+        }
       })
       .finally(() => {
         if (active) setAuthReady(true);
@@ -170,8 +186,25 @@ export function AppProvider({ children }) {
   const [products,       setProducts]       = useState([]);
   const [orders,         setOrders]         = useState([]);
   const [pendingMaterialFulfillment, setPendingMaterialFulfillment] = useState([]);
+  const [previousAdminRoute, setPreviousAdminRoute] = useState(isAdminRoute);
+  if (previousAdminRoute !== isAdminRoute) {
+    setPreviousAdminRoute(isAdminRoute);
+    if (!isAdminRoute) {
+      setIngredients([]);
+      setMaterials([]);
+      setRecipes([]);
+      setProductionLogs([]);
+      setWasteLogs([]);
+      setProducts([]);
+      setOrders([]);
+      setPendingMaterialFulfillment([]);
+      setLoading(false);
+    }
+  }
   const dashboardRowsRef = useRef({ ingredients: [], materials: [] });
-  dashboardRowsRef.current = { ingredients, materials };
+  useLayoutEffect(() => {
+    dashboardRowsRef.current = { ingredients, materials };
+  }, [ingredients, materials]);
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
@@ -323,23 +356,33 @@ export function AppProvider({ children }) {
     }
   }, []);
 
+  const retryAuth = useCallback(async () => {
+    try {
+      await getProfile();
+      localStorage.setItem('isLoggedIn', 'true');
+      setIsAuthed(true);
+      setAuthError(null);
+      if (isAdminRoute) await fetchAll();
+      return true;
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('admin');
+        setIsAuthed(false);
+        setAuthError(null);
+      } else {
+        setAuthError(err.message || 'Unable to reach the server.');
+      }
+      return false;
+    }
+  }, [fetchAll, isAdminRoute]);
+
   // FIX: nakadepende na ang effect sa `isAuthed` STATE (hindi sa isang
   // beses-lang-na-check sa mount). Kaya sa sandaling magbago ang isAuthed
   // (mula false -> true, via login() sa ibaba), agad itong magra-refire at
   // magfe-fetch — kahit walang page refresh/remount.
   useEffect(() => {
-    if (!isAdminRoute) {
-      setIngredients([]);
-      setMaterials([]);
-      setRecipes([]);
-      setProductionLogs([]);
-      setWasteLogs([]);
-      setProducts([]);
-      setOrders([]);
-      setPendingMaterialFulfillment([]);
-      setLoading(false);
-      return;
-    }
     if (isAuthed && isAdminRoute) {
       fetchAll();
     }
@@ -561,12 +604,14 @@ export function AppProvider({ children }) {
   // sa parehong render pass — kaya walang refresh na kailangan.
   const login = useCallback(() => {
     localStorage.setItem('isLoggedIn', 'true');
+    setAuthError(null);
     setIsAuthed(true); // triggers useEffect above -> fetchAll()
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('isLoggedIn');
     setIsAuthed(false);
+    setAuthError(null);
     // Linisin din ang datos para walang stale info na makikita ng susunod
     // na maglo-login sa parehong browser/tab.
     setIngredients([]);
@@ -883,7 +928,7 @@ export function AppProvider({ children }) {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     pendingMaterialFulfillment,
     loading, error, loadErrors,
-    isAuthed, authReady, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
+    isAuthed, authReady, authError, retryAuth, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,
     fetchOrders, fetchOrderById, updateOrderStatus, verifyOrderPayment,
     addProduct, updateProduct, deleteProduct, uploadProductImage,

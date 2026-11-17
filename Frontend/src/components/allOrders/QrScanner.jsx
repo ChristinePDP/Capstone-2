@@ -3,6 +3,7 @@ import { QrCode, Search, CheckCircle2, ReceiptText } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { Badge, Button, Modal, Input, ConfirmModal, useToast } from '../ui';
+import { formatCount } from '../../utils/numberGuards';
 
 function fmt(n) {
   return '₱' + Number(n).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -56,7 +57,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
   }, [scannerOpen, resultOpen, resultOrder, locKey]);
 
   const processOrderSearch = (scannedId) => {
-    let foundOrder = null;
+    let foundOrder;
     try {
       let payloadStr = String(scannedId);
       const firstBrace = payloadStr.indexOf('{');
@@ -159,7 +160,7 @@ export default function QrScanner({ orders, onStatusChange, onViewOrder }) {
                 {items.map((item, i) => (
                   <li key={i} className="flex items-start justify-between gap-3 py-2.5 text-sm text-brand-950">
                     <span className="min-w-0 break-words">{item.name || item.product_name}</span>
-                    <span className="shrink-0 font-bold text-brand-900 tabular-nums">×{item.qty || item.quantity}</span>
+                    <span className="shrink-0 font-bold text-brand-900 tabular-nums">×{formatCount(item.qty || item.quantity)}</span>
                   </li>
                 ))}
               </ul>

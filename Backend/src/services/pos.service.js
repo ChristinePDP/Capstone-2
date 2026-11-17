@@ -280,11 +280,19 @@ export const createPosOrder = async (payload) => {
   const shouldCompleteImmediately = isBuyNow;
   const orderStatus = shouldCompleteImmediately ? 'Completed' : 'Confirmed';
 
+  // Buy Now orders leave with the walk-in customer immediately, so they must
+  // always be fully paid even if an old or invalid client sends a deposit.
+  const isDeposit = !isBuyNow && payload.payment?.type === '50% Deposit';
+  const grandTotal = Number(payload.payment?.grandTotal) || 0;
+  const amountPaid = isBuyNow
+    ? grandTotal
+    : (Number(payload.payment?.amountDueNow) || 0);
+  const balance = isBuyNow
+    ? 0
+    : (Number(payload.payment?.balance) || 0);
   let dbPaymentType = 'full';
-  if (payload.payment?.type === '50% Deposit') {
+  if (isDeposit) {
     dbPaymentType = 'deposit'; 
-  } else if (payload.payment?.type === 'Full Payment') {
-    dbPaymentType = 'full';
   }
 
   const orderToInsert = {
@@ -296,12 +304,13 @@ export const createPosOrder = async (payload) => {
     
     // BAGO: Idinagdag ang additional_charge at discount (JSONB format)
     additional_charge: payload.payment?.additionalCharge || 0,
+    additional_charge_details: payload.payment?.additionalChargeDetails || {},
     discount: payload.payment?.discount || {}, // Ito ay tatanggapin na bilang object dahil ginawa nating JSONB sa database
     
-    grand_total: payload.payment?.grandTotal || 0,
+    grand_total: grandTotal,
     payment_type: dbPaymentType, 
-    amount_paid: payload.payment?.amountDueNow || 0,
-    balance: payload.payment?.balance || 0,
+    amount_paid: amountPaid,
+    balance,
     // FIX: Buy Now = kukunin ngayon, kaya ang SERVER (Asia/Manila) ang
     // nagde-decide ng pickup_date — hindi na pinagkakatiwalaan ang petsa
     // galing sa frontend (pwedeng stale ang form o mali ang oras ng device).

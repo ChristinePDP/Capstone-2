@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
-import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
+import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY, formatPeso, formatCount } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { useIsCompact } from '../../hooks/useIsCompact';
@@ -92,12 +92,16 @@ function getMaterialViewKey(material) {
   return type === 'product' ? 'product' : 'celebration';
 }
 
+const isPreOrderOnly = product =>
+  String(product.order_type ?? product.orderType ?? '').toLowerCase().replace(/[^a-z]/g, '') === 'preorder';
+const needsNoStock = product => product.sourcing_type === 'partner' || isPreOrderOnly(product);
+
 export default function CelebrationTab() {
   const context = useApp() || {};
   const { addMaterial, updateMaterial, deleteMaterial, restockMaterial } = context;
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const pendingFulfillment = context.pendingMaterialFulfillment || [];
-  const allProducts = context.products || [];
+  const allProducts = useMemo(() => context.products || [], [context.products]);
   // Celebration Materials ay naka-link sa Celebration Material products
   // (hal. tarpaulin/balloons na binebenta bilang add-on). Product
   // Materials naman ay para sa packaging ng REGULAR products (hal. mga
@@ -117,9 +121,6 @@ export default function CelebrationTab() {
   // inventory stock. These rows come straight from Product Management and only
   // show the order limit (no restock).
   // Compare order type loosely so "Pre-order", "pre_order", "Preorder" all match.
-  const isPreOrderOnly = (p) =>
-    String(p.order_type ?? p.orderType ?? '').toLowerCase().replace(/[^a-z]/g, '') === 'preorder';
-  const needsNoStock = (p) => p.sourcing_type === 'partner' || isPreOrderOnly(p);
   const partnerProducts = useMemo(
     () => allProducts.filter(p =>
       p.category === 'Celebration Material' &&
@@ -439,7 +440,7 @@ export default function CelebrationTab() {
                               {partner
                                 ? `Order limit: ${mat.orderLimit > 0 ? `${mat.orderLimit} / day` : 'none set'}`
                                 : unset ? 'No stock record yet'
-                                : <>Stock: <span className="font-bold text-brand-700">{mat.stock} {mat.unit}</span></>}
+                                : <>Stock: <span className="font-bold text-brand-700">{formatCount(mat.stock)} {mat.unit}</span></>}
                             </p>
                           </div>
                           {partner
@@ -454,7 +455,7 @@ export default function CelebrationTab() {
                           </div>
                         ) : partner ? (
                           <p className="text-[11px] text-brand-500 pt-3 mt-auto border-t border-brand-50 wrap-break-word">
-                            {mat.isPartnerSource ? `Cost ₱${(mat.partnerCost ?? 0).toFixed(2)} / ` : ''}Price {`₱${mat.price.toFixed(2)}`}. Managed in Product Management.
+                            {mat.isPartnerSource ? `Cost ${formatPeso(mat.partnerCost ?? 0)} / ` : ''}Price {formatPeso(mat.price)}. Managed in Product Management.
                           </p>
                         ) : (
                           <>
@@ -489,11 +490,11 @@ export default function CelebrationTab() {
                           <strong>{mat.name}</strong>
                           {partner && (
                             <p className="text-[11px] text-brand-500 font-normal mt-0.5">
-                              {mat.isPartnerSource ? `Cost ₱${(mat.partnerCost ?? 0).toFixed(2)} / ` : ''}Price {`₱${mat.price.toFixed(2)}`}
+                              {mat.isPartnerSource ? `Cost ${formatPeso(mat.partnerCost ?? 0)} / ` : ''}Price {formatPeso(mat.price)}
                             </p>
                           )}
                         </Td>
-                        <Td>{partner || unset ? <span className="text-brand-400">-</span> : <><strong>{mat.stock}</strong> {mat.unit}</>}</Td>
+                        <Td>{partner || unset ? <span className="text-brand-400">-</span> : <><strong>{formatCount(mat.stock)}</strong> {mat.unit}</>}</Td>
                         <Td>{partner ? <span className="text-xs text-brand-600 font-semibold">Order limit: {mat.orderLimit > 0 ? `${mat.orderLimit} / day` : 'none set'}</span> : unset ? <span className="text-xs text-brand-500">No stock record yet</span> : <LevelBar stock={mat.stock} min={mat.min} />}</Td>
                         <Td>{partner
                           ? <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
@@ -536,7 +537,7 @@ export default function CelebrationTab() {
       </Card>
 
       <MaterialModal
-        key={currentEditMat?.id ?? (currentEditMat?.productId ? `new-product-${currentEditMat.productId}` : `new-${materialView}`)}
+        key={`${modalOpen ? 'open' : 'closed'}:${currentEditMat?.id ?? (currentEditMat?.productId ? `new-product-${currentEditMat.productId}` : `new-${materialView}`)}`}
         isOpen={modalOpen}
         material={currentEditMat}
         existingMaterials={materials}
@@ -682,7 +683,7 @@ function ProductLinkedNameField({ label = 'Material Name', value, onChange, prod
   );
 }
 
-function MaterialModal({ isOpen, onClose, material, existingMaterials = [], celebrationProducts = [], regularProducts = [], productsById = {}, defaultView = 'celebration', onSave }) {
+function MaterialModal({ isOpen, onClose, material, existingMaterials = [], celebrationProducts = [], regularProducts = [], defaultView = 'celebration', onSave }) {
   const [name, setName] = useState(material?.name ?? '');
   const [unit, setUnit] = useState(material?.unit ?? 'pcs');
   const [stock, setStock] = useState(material?.id ? '' : '0');
@@ -713,11 +714,13 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
   const [editingDetails, setEditingDetails] = useState(false);
   const [savedDetails, setSavedDetails] = useState({ name: material?.name ?? '', unit: material?.unit ?? 'pcs', min: material?.min ?? '', costPerUnit: material?.costPerUnit ?? '', productId: material?.productId || material?.product_id || '' });
   const [currentStock, setCurrentStock] = useState(Number(material?.stock ?? 0));
+  const [previousMaterial, setPreviousMaterial] = useState(material);
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
 
-  useEffect(() => {
-    if (material?.id) setCurrentStock(Number(material.stock ?? 0));
-  }, [material?.id, material?.stock]);
+  if (material?.id && (previousMaterial?.id !== material.id || previousMaterial?.stock !== material.stock)) {
+    setPreviousMaterial(material);
+    setCurrentStock(Number(material.stock ?? 0));
+  }
 
   const [isSaving, setIsSaving] = useState(false);
   const [confirmPayload, setConfirmPayload] = useState(null);
@@ -799,34 +802,18 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
     }, 50);
   };
 
-  // Fresh na form sa tuwing bubukas ang modal.
-  useEffect(() => {
-    if (isOpen) {
-      setErrors({});
-      setServerError(null);
-    }
-  }, [isOpen]);
-
-  // Mawawala agad ang error ng field na naayos na habang nagta-type.
-  useEffect(() => {
-    setErrors(prev => {
-      const keys = Object.keys(prev);
-      if (keys.length === 0) return prev;
-      const latest = computeErrors();
-      const next = {};
-      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
-      return Object.keys(next).length === keys.length ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, unit, stock, min, cost, detailsCost, productId, editingDetails]);
+  const currentErrors = computeErrors();
+  const visibleErrors = Object.fromEntries(
+    Object.entries(errors).filter(([key]) => currentErrors[key])
+  );
 
   // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
   const fieldErr = {
-    name:        errors.name || exactNameError,
-    stock:       errors.stock || qtyError,
-    min:         errors.min || minError,
-    cost:        errors.cost || costError,
-    detailsCost: errors.detailsCost || detailsCostError,
+    name:        visibleErrors.name || exactNameError,
+    stock:       visibleErrors.stock || qtyError,
+    min:         visibleErrors.min || minError,
+    cost:        visibleErrors.cost || costError,
+    detailsCost: visibleErrors.detailsCost || detailsCostError,
   };
 
   const clearDetailsErrors = (prev) => {
@@ -1015,12 +1002,12 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
   const confirmMessage = confirmPayload?.unitChange
     ? <><strong className="text-brand-800">{confirmPayload.unitChange.oldStock} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newStock} {confirmPayload.unitChange.newUnit}</strong><br />Minimum stock: {confirmPayload.unitChange.oldMin} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newMin} {confirmPayload.unitChange.newUnit}. The total value of existing stock will be preserved. This conversion will be saved when you click Save Changes.</>
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''}. Are you sure?`
+    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${formatCount(confirmPayload.addedQty)} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (${formatPeso(confirmPayload.totalCost)})` : ''}. Are you sure?`
     : confirmPayload?.restockPayload
-      ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
+      ? `Add ${formatCount(confirmPayload?.addedQty)} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ${formatPeso(confirmPayload?.totalCost)}` : ''}?`
       : `Save the new details for "${confirmPayload?.itemName}"?`;
 
-  const bannerMessage = serverError || errors.general;
+  const bannerMessage = serverError || (currentErrors.general ? errors.general : null);
 
   const closeGuard = useUnsavedChanges({
     isOpen,
@@ -1103,10 +1090,10 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Current Stock</p>
                 <p className="text-2xl font-black text-brand-900 leading-tight">
-                  {Number(currentStock || 0).toLocaleString('en-PH', { maximumFractionDigits: 4 })}
+                  {formatCount(currentStock || 0)}
                   <span className="text-sm font-bold text-brand-500 ml-1.5">{savedDetails.unit}</span>
                 </p>
-                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">₱{((material?.stock || 0) * (material?.costPerUnit || 0)).toFixed(2)}</span></p>
+                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">{formatPeso((material?.stock || 0) * (material?.costPerUnit || 0))}</span></p>
               </div>
             </div>
           )}
@@ -1180,7 +1167,7 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
                     label="Total Amount / Receipt"
                     required={isEdit ? Boolean(stock) : addedQty > 0}
                     error={fieldErr.cost}
-                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ₱${(parseFloat(cost) / addedQty).toFixed(2)} per ${unit} (${addedQty} ${unit})` : undefined}
+                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ${formatPeso(parseFloat(cost) / addedQty)} per ${unit} (${formatCount(addedQty)} ${unit})` : undefined}
                     type="text"
                     inputMode="decimal"
                     value={formatPesoLive(cost)}
@@ -1313,7 +1300,7 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
                   <FormInput
                     label="Total Amount / Receipt"
                     error={fieldErr.cost}
-                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ₱${(parseFloat(cost) / addedQty).toFixed(2)} per ${material?.unit} (${addedQty} ${material?.unit})` : undefined}
+                    hint={!fieldErr.cost && cost && addedQty > 0 ? `≈ ${formatPeso(parseFloat(cost) / addedQty)} per ${material?.unit} (${formatCount(addedQty)} ${material?.unit})` : undefined}
                     type="text"
                     inputMode="decimal"
                     value={formatPesoLive(cost)}

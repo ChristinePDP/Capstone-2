@@ -42,6 +42,7 @@ export async function logout() {
 export async function getProfile() {
   const res = await axios.get(`${API_BASE}/me`, {
     withCredentials: true,
+    timeout: 8000,
   });
   return res.data;
 }

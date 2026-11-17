@@ -6,6 +6,7 @@ import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
 import { getBundleDeleteImpact } from './bundleDeleteContent';
 import { ConfirmModal, ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
+import { formatPeso, formatCount } from '../../utils/numberGuards';
 
 const PRODUCTS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 // Admin list lang ang /catalog (GET). Ang delete/edit ay nasa /products/:id — hindi /catalog/:id.
@@ -197,7 +198,7 @@ function ProductCard({ product, onEdit, onDelete }) {
             </span>
           )}
           <p className="text-sm sm:text-[15px] font-extrabold text-[#3B1F0A]">
-            ₱{Number(product.price).toLocaleString()}.00
+            {formatPeso(product.price)}
           </p>
         </div>
       </div>
@@ -233,7 +234,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const [bundles, setBundles] = useState([]);
   const [posAvailabilityById, setPosAvailabilityById] = useState({});
-  const [bundlesLoading, setBundlesLoading] = useState(true);
+  const [, setBundlesLoading] = useState(true);
   const [deleteBundleTarget, setDeleteBundleTarget] = useState(null);
 
   // Edit ng Bundle/Package: bubuksan ang form modal DITO MISMO (hindi na lilipat
@@ -668,7 +669,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
           const inventoryEffect = isPartnerOrPreOrder
             ? ' This item is also listed under Inventory > Stocks > Celebration/ Product Materials as a Partner or Pre-order item. Deleting the product will remove that inventory row and its order limit; it has no separate stock record.'
             : linkedMaterial
-            ? ` It is also linked to inventory material "${linkedMaterial.name}" with ${Number(linkedMaterial.stock_quantity || 0)} ${linkedMaterial.unit || 'unit(s)'} in stock. Deleting this product will keep the inventory material and its stock; it will only clear the product link.`
+            ? ` It is also linked to inventory material "${linkedMaterial.name}" with ${formatCount(linkedMaterial.stock_quantity || 0)} ${linkedMaterial.unit || 'unit(s)'} in stock. Deleting this product will keep the inventory material and its stock; it will only clear the product link.`
             : isCelebrationMaterial
               ? ' This product is also listed under Inventory > Stocks > Celebration/ Product Materials as an own-stock item. Deleting it will remove that product row; any separately linked inventory material and stock will remain.'
               : '';

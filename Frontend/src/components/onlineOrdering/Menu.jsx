@@ -7,6 +7,7 @@ import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
 import { isSlipAnswerEmpty, pruneEmptySlipAnswers, slipSignature } from '../shared/orderSlipUploads';
+import { formatPeso, formatCount } from '../../utils/numberGuards';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
 // ng customer, para hindi mabilis maubos ang Supabase Storage.
@@ -334,9 +335,9 @@ function CartItemRow({
         )}
         <div className="min-w-0 flex-1">
           <p className="font-bold text-sm text-[#3B1F0A] truncate">{item.name}</p>
-          {!expanded && <p className="text-[11px] text-[#8A7264] mt-0.5">Qty {item.qty}</p>}
+          {!expanded && <p className="text-[11px] text-[#8A7264] mt-0.5">Qty {formatCount(item.qty)}</p>}
         </div>
-        <span className="font-bold text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+        <span className="font-bold text-sm text-[#5A453C] shrink-0">{formatPeso(item.price * item.qty)}</span>
         <ChevronDown size={16} className={`text-[#B7A99F] shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
       </button>
 
@@ -361,7 +362,7 @@ function CartItemRow({
           <div className="flex items-center justify-between mt-2.5">
             <div className="flex items-center gap-2">
               <button onClick={() => changeQty(index, -1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Minus size={qtyIconSize} /></button>
-              <span className={`font-mono ${isMobile ? 'text-sm w-6' : 'text-xs w-4'} text-center`}>{item.qty}</span>
+              <span className={`font-mono ${isMobile ? 'text-sm w-6' : 'text-xs w-4'} text-center`}>{formatCount(item.qty)}</span>
               <button onClick={() => changeQty(index, 1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Plus size={qtyIconSize} /></button>
             </div>
             <button
@@ -412,7 +413,7 @@ function CartItemRow({
 // ─────────────────────────────────────────────────────────────
 // Bundle Stepper Modal
 // ─────────────────────────────────────────────────────────────
-function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
+function BundleModal({ bundle, onClose, onAddToCart }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [bundleAnswers, setBundleAnswers] = useState({});
   const [bundleImages, setBundleImages] = useState({});
@@ -507,7 +508,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
             <div className="flex-1 min-w-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Promo Bundle</span>
               <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{bundle.name}</h2>
-              <p className="text-sm font-bold text-[#5A453C]">₱{Number(bundle.price).toLocaleString()}</p>
+              <p className="text-sm font-bold text-[#5A453C]">{formatPeso(bundle.price)}</p>
               <p className="text-xs text-[#8A7264] leading-snug mt-1">{getBundleDescription(bundle)}</p>
             </div>
             <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
@@ -663,7 +664,7 @@ function BundleModal({ bundle, onClose, onAddToCart, showToast }) {
 // ─────────────────────────────────────────────────────────────
 // Package Stepper Modal
 // ─────────────────────────────────────────────────────────────
-function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
+function PackageModal({ pkg, onClose, onAddToCart }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [packageAnswers, setPackageAnswers] = useState({});
   const [packageImages, setPackageImages] = useState({}); 
@@ -759,7 +760,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
             <div className="flex-1 min-w-0">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#B7A99F] block mb-1">Package</span>
               <h2 className="text-xl font-serif text-[#3B1F0A] leading-tight truncate">{pkg.name}</h2>
-              <p className="text-sm font-bold text-[#5A453C]">₱{Number(pkg.price).toLocaleString()}</p>
+              <p className="text-sm font-bold text-[#5A453C]">{formatPeso(pkg.price)}</p>
               <p className="text-xs text-[#8A7264] leading-snug mt-1">{components.map(c => c.name).join(' + ')}</p>
             </div>
             <button onClick={onClose} className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors"><X size={18} /></button>
@@ -908,7 +909,7 @@ function PackageModal({ pkg, onClose, onAddToCart, showToast }) {
 // ─────────────────────────────────────────────────────────────
 // Normal Product Modal
 // ─────────────────────────────────────────────────────────────
-function ProductModal({ product, onClose, onAddToCart, showToast }) {
+function ProductModal({ product, onClose, onAddToCart }) {
   const [slipAnswers, setSlipAnswers] = useState({});
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
@@ -1033,7 +1034,7 @@ function ProductModal({ product, onClose, onAddToCart, showToast }) {
               <p className="text-xs text-[#8A7264] mb-1.5 leading-snug">{product.inclusion}</p>
             )}
             <p className="text-sm font-bold text-[#5A453C]">
-              {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
+              {isVariable ? (allGroupsSelected && !missingCombo ? formatPeso(resolvedPrice) : 'Select options to see price') : formatPeso(product.price)}
             </p>
           </div>
 
@@ -1385,7 +1386,7 @@ const ORDER_TYPE_LABELS = { 'Buy Now': 'Pick-up Today', 'Pre-Order': 'Pre-Order'
 function readStoredOrderType() {
   try {
     return localStorage.getItem(ORDER_TYPE_STORAGE_KEY) === 'Pre-Order' ? 'Pre-Order' : 'Buy Now';
-  } catch (err) {
+  } catch {
     return 'Buy Now';
   }
 }
@@ -1628,7 +1629,7 @@ export default function Menu({ cart, setCart }) {
 
     rafId = window.requestAnimationFrame(() => { rafId = window.requestAnimationFrame(begin); });
     return () => window.cancelAnimationFrame(rafId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [location.key, isLoading, focusTargetId]);
 
   const showToast = (message) => {
@@ -1724,7 +1725,7 @@ export default function Menu({ cart, setCart }) {
     let cancelled = false;
 
     const refreshCatalog = () => {
-      Promise.all([getMenuProducts(true), getMenuBundles(true)]).then(([productsData, bundlesData]) => {
+      return Promise.all([getMenuProducts(true), getMenuBundles(true)]).then(([productsData, bundlesData]) => {
         if (cancelled) return;
         setRawProducts(productsData);
         setRawBundles(bundlesData);
@@ -2261,10 +2262,10 @@ export default function Menu({ cart, setCart }) {
                     <p className="text-xs sm:text-sm lg:text-xs font-bold text-[#5A453C] mb-2 lg:mb-2">
                        {p.type === 'bundle' && p.discount_percent > 0 && p.original_price > 0 && (
                          <span className="text-[10px] sm:text-[11px] text-[#B7A99F] line-through font-normal mr-1.5">
-                           ₱{p.original_price.toLocaleString()}
+                           {formatPeso(p.original_price)}
                          </span>
                        )}
-                       ₱{Number(p.price).toLocaleString()}
+                       {formatPeso(p.price)}
                     </p>
 
                     <button
@@ -2465,7 +2466,7 @@ export default function Menu({ cart, setCart }) {
               <div className="px-6 pt-4 pb-6 shrink-0 border-t border-[#F1EBE6] bg-white">
                 <div className="flex items-center justify-between mb-5">
                   <span className="text-sm font-semibold text-[#5A453C]">Subtotal</span>
-                  <span className="font-serif text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+                  <span className="font-serif text-xl text-[#3B1F0A]">{formatPeso(cartTotal)}</span>
                 </div>
                 <button onClick={handleProceedToCheckout} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-full text-sm font-semibold hover:bg-[#2A1608] transition-colors">Proceed to Checkout</button>
               </div>
@@ -2485,7 +2486,7 @@ export default function Menu({ cart, setCart }) {
             </button>
             <button onClick={handleProceedToCheckout} className="flex-1 bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-between px-5">
               <span>Checkout</span>
-              <span>₱{cartTotal.toLocaleString()}</span>
+              <span>{formatPeso(cartTotal)}</span>
             </button>
           </div>
         </div>
@@ -2529,7 +2530,7 @@ export default function Menu({ cart, setCart }) {
             <div className="p-5 border-t border-[#EAE4E0] bg-[#FCFAF9]">
               <div className="flex items-center justify-between mb-4">
                 <span className="text-sm font-semibold text-[#5A453C]">Subtotal</span>
-                <span className="font-serif text-xl text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+                <span className="font-serif text-xl text-[#3B1F0A]">{formatPeso(cartTotal)}</span>
               </div>
               <button onClick={() => { if (handleProceedToCheckout()) setIsMobileCartOpen(false); }} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-[#2A1608] active:scale-[0.98] transition-all">Proceed to Checkout</button>
             </div>

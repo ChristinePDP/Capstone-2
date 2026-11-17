@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import MultiImageField from '../shared/MultiImageField';
 import { pruneEmptySlipAnswers } from '../shared/orderSlipUploads';
+import { formatPeso } from '../../utils/numberGuards';
 
 // Rate limiter: 5MB max para sa mga reference/inspiration image na iuupload
 // ng customer, para hindi mabilis maubos ang Supabase Storage.
@@ -152,7 +153,7 @@ export default function OrderSlip({ product, onClose, onConfirm }) {
               <p className="text-xs text-[#8A7264] mb-1.5 leading-snug">{product.inclusion}</p>
             )}
             <p className="text-sm font-bold text-[#5A453C]">
-              {isVariable ? (allGroupsSelected && !missingCombo ? `₱${Number(resolvedPrice).toLocaleString()}` : 'Select options to see price') : `₱${Number(product.price).toLocaleString()}`}
+              {isVariable ? (allGroupsSelected && !missingCombo ? formatPeso(resolvedPrice) : 'Select options to see price') : formatPeso(product.price)}
             </p>
           </div>
 

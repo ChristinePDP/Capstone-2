@@ -7,6 +7,7 @@ import {
 import CartSlipImages from '../shared/CartSlipImages';
 import UploadProgressNote, { getProcessingLabel } from '../shared/UploadProgressNote';
 import { formatSlipValueForCart } from '../shared/orderSlipUploads';
+import { formatPeso, formatCount } from '../../utils/numberGuards';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTH_LABELS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -791,10 +792,10 @@ export default function OrderSummaryModal({
                 <div className="min-w-0 flex-1 flex flex-col">
                   <div className="flex justify-between items-start gap-2 mb-1">
                     <button type="button" onClick={() => toggleItemExpanded(i)} className="flex min-w-0 items-center gap-1 text-left">
-                      <span className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{item.qty}x {item.name}</span>
+                      <span className="font-bold text-xs sm:text-sm text-[#3B1F0A] line-clamp-2 leading-snug">{formatCount(item.qty)}x {item.name}</span>
                       {expandedItemIndexes.has(i) ? <ChevronUp size={14} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={14} className="text-[#8A7264] shrink-0" />}
                     </button>
-                    <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">₱{(item.price * item.qty).toLocaleString()}</span>
+                    <span className="font-bold text-xs sm:text-sm text-[#5A453C] shrink-0">{formatPeso(item.price * item.qty)}</span>
                   </div>
                   {!expandedItemIndexes.has(i) && <p className="text-[10px] text-[#8A7264]">Tap item to view details</p>}
 
@@ -870,30 +871,30 @@ export default function OrderSummaryModal({
                   {discountAmount > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-[#8A7264]">Subtotal</span>
-                      <span className="text-xs text-[#8A7264] font-medium">₱{subtotal.toLocaleString()}</span>
+                      <span className="text-xs text-[#8A7264] font-medium">{formatPeso(subtotal)}</span>
                     </div>
                   )}
                   {discountAmount > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-green-600">{discountName ? `${discountName} (${percentageNumber}%)` : `Discount (${percentageNumber}%)`}</span>
-                      <span className="text-xs text-green-600 font-medium">-₱{discountAmount.toLocaleString()}</span>
+                      <span className="text-xs text-green-600 font-medium">-{formatPeso(discountAmount)}</span>
                     </div>
                   )}
                   {chargeAmount > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-red-500">Additional Charge</span>
-                      <span className="text-xs text-red-500 font-medium">+₱{chargeAmount.toLocaleString()}</span>
+                      <span className="text-xs text-red-500 font-medium">+{formatPeso(chargeAmount)}</span>
                     </div>
                   )}
                   {isDeposit && (
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-[#8A7264]">To Pay Now (50%)</span>
-                        <span className="text-xs text-[#8A7264] font-medium">₱{amountDue.toLocaleString()}</span>
+                        <span className="text-xs text-[#8A7264] font-medium">{formatPeso(amountDue)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-[#8A7264]">Balance at Pick-up</span>
-                        <span className="text-xs text-[#8A7264] font-medium">₱{(cartTotal - amountDue).toLocaleString()}</span>
+                        <span className="text-xs text-[#8A7264] font-medium">{formatPeso(cartTotal - amountDue)}</span>
                       </div>
                     </>
                   )}
@@ -902,7 +903,7 @@ export default function OrderSummaryModal({
 
               <div className={`flex items-center ${hasBreakdown ? 'justify-between border-t border-[#EAE4E0] pt-2' : 'justify-center gap-4'}`}>
                 <span className="text-xs font-semibold uppercase tracking-wide text-[#5A453C]">Grand Total</span>
-                <span className="font-serif text-2xl sm:text-3xl leading-none text-[#3B1F0A]">₱{cartTotal.toLocaleString()}</span>
+                <span className="font-serif text-2xl sm:text-3xl leading-none text-[#3B1F0A]">{formatPeso(cartTotal)}</span>
               </div>
             </div>
 
@@ -1077,16 +1078,6 @@ export default function OrderSummaryModal({
             <p className="text-xs sm:text-sm text-[#8A7264] mb-6 leading-relaxed">
               Please double-check the customer details, items, and payment amount.
             </p>
-            <div className="w-full rounded-xl bg-[#FCFAF9] border border-[#EAE4E0] px-3 py-2.5 mb-5 text-xs">
-              <div className="flex items-center justify-between text-[#8A7264]">
-                <span>Cash tendered</span>
-                <span className="font-semibold text-[#3B1F0A]">{formatMoney(cashTenderedAmount)}</span>
-              </div>
-              <div className="flex items-center justify-between mt-1 text-[#8A7264]">
-                <span>Change</span>
-                <span className="font-bold text-emerald-700">{formatMoney(changeDue)}</span>
-              </div>
-            </div>
             <div className="flex gap-2.5 w-full">
               <button
                 onClick={() => setShowConfirm(false)}

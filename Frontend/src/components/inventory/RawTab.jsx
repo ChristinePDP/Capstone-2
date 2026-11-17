@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
-import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
+import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY, formatPeso, formatCount } from '../../utils/numberGuards';
 import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
@@ -236,7 +236,7 @@ export default function IngredientsTab() {
                           <div className="min-w-0">
                             <h4 className="font-bold text-brand-800 text-sm wrap-break-word">{ing.name}</h4>
                             <p className="text-xs text-brand-500 mt-0.5">
-                              Stock: <span className="font-bold text-brand-700">{ing.stock} {ing.unit}</span>
+                              Stock: <span className="font-bold text-brand-700">{formatCount(ing.stock)} {ing.unit}</span>
                             </p>
                           </div>
                           <Badge variant={st.cls} className="shrink-0">{st.label}</Badge>
@@ -265,7 +265,7 @@ export default function IngredientsTab() {
                     return (
                       <Tr key={ing.id}>
                         <Td><strong>{ing.name}</strong></Td>
-                        <Td><strong>{ing.stock}</strong> {ing.unit}</Td>
+                        <Td><strong>{formatCount(ing.stock)}</strong> {ing.unit}</Td>
                         <Td><LevelBar stock={ing.stock} min={ing.min} /></Td>
                         <Td><Badge variant={st.cls}>{st.label}</Badge></Td>
                         <Td align="right">
@@ -296,7 +296,7 @@ export default function IngredientsTab() {
       </Card>
 
       <IngredientModal
-        key={currentEditIng?.id ?? 'new'} 
+        key={`${modalOpen ? 'open' : 'closed'}:${currentEditIng?.id ?? 'new'}`}
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         ingredient={currentEditIng}
@@ -327,11 +327,13 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
   const [detailsCost, setDetailsCost] = useState(String(ingredient?.costPerUnit ?? ''));
   const [savedDetails, setSavedDetails] = useState({ name: ingredient?.name ?? '', unit: ingredient?.unit ?? 'kg', min: ingredient?.min ?? '', costPerUnit: ingredient?.costPerUnit ?? '' });
   const [currentStock, setCurrentStock] = useState(Number(ingredient?.stock ?? 0));
+  const [previousIngredient, setPreviousIngredient] = useState(ingredient);
   const [unitConversionConfirmed, setUnitConversionConfirmed] = useState(false);
 
-  useEffect(() => {
-    if (ingredient?.id) setCurrentStock(Number(ingredient.stock ?? 0));
-  }, [ingredient?.id, ingredient?.stock]);
+  if (ingredient?.id && (previousIngredient?.id !== ingredient.id || previousIngredient?.stock !== ingredient.stock)) {
+    setPreviousIngredient(ingredient);
+    setCurrentStock(Number(ingredient.stock ?? 0));
+  }
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [isSaving, setIsSaving]             = useState(false);
@@ -422,34 +424,18 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
     }, 50);
   };
 
-  // Fresh na form sa tuwing bubukas ang modal.
-  useEffect(() => {
-    if (isOpen) {
-      setErrors({});
-      setServerError(null);
-    }
-  }, [isOpen]);
-
-  // Mawawala agad ang error ng field na naayos na habang nagta-type.
-  useEffect(() => {
-    setErrors(prev => {
-      const keys = Object.keys(prev);
-      if (keys.length === 0) return prev;
-      const latest = computeErrors();
-      const next = {};
-      keys.forEach(k => { if (latest[k]) next[k] = latest[k]; });
-      return Object.keys(next).length === keys.length ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, unit, stock, min, cost, detailsCost, editingDetails]);
+  const currentErrors = computeErrors();
+  const visibleErrors = Object.fromEntries(
+    Object.entries(errors).filter(([key]) => currentErrors[key])
+  );
 
   // Error na ipapakita sa field: required/submit error muna, kung wala ay live format error.
   const fieldErr = {
-    name:        errors.name || exactNameError,
-    stock:       errors.stock || qtyError,
-    min:         errors.min || minError,
-    cost:        errors.cost || costError,
-    detailsCost: errors.detailsCost || detailsCostError,
+    name:        visibleErrors.name || exactNameError,
+    stock:       visibleErrors.stock || qtyError,
+    min:         visibleErrors.min || minError,
+    cost:        visibleErrors.cost || costError,
+    detailsCost: visibleErrors.detailsCost || detailsCostError,
   };
 
   const handleDetailsHeaderClick = () => {
@@ -632,12 +618,12 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
   const confirmMessage = confirmPayload?.unitChange
     ? <><strong className="text-brand-800">{confirmPayload.unitChange.oldStock} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newStock} {confirmPayload.unitChange.newUnit}</strong><br />Minimum stock: {confirmPayload.unitChange.oldMin} {confirmPayload.unitChange.oldUnit} → {confirmPayload.unitChange.newMin} {confirmPayload.unitChange.newUnit}. The total value of existing stock will be preserved. This conversion will be saved when you click Save Changes.</>
     : confirmPayload?.detailsPayload && confirmPayload?.restockPayload
-    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${confirmPayload.addedQty} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (₱${confirmPayload.totalCost.toFixed(2)})` : ''} to stock. Are you sure?`
+    ? `This will save the new details for "${confirmPayload.itemName}" AND add ${formatCount(confirmPayload.addedQty)} ${confirmPayload.itemUnit}${confirmPayload.totalCost > 0 ? ` (${formatPeso(confirmPayload.totalCost)})` : ''} to stock. Are you sure?`
     : confirmPayload?.restockPayload
-      ? `Add ${confirmPayload?.addedQty} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ₱${confirmPayload?.totalCost.toFixed(2)}` : ''}?`
+      ? `Add ${formatCount(confirmPayload?.addedQty)} ${confirmPayload?.itemUnit} to ${confirmPayload?.itemName}${confirmPayload?.totalCost > 0 ? ` for a total cost of ${formatPeso(confirmPayload?.totalCost)}` : ''}?`
       : `Save the new details for "${confirmPayload?.itemName}"?`;
 
-  const bannerMessage = serverError || errors.general;
+  const bannerMessage = serverError || (currentErrors.general ? errors.general : null);
 
   const closeGuard = useUnsavedChanges({
     isOpen,
@@ -683,10 +669,10 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-brand-400">Current Stock</p>
                 <p className="text-2xl font-black text-brand-900 leading-tight">
-                  {Number(currentStock || 0).toLocaleString('en-PH', { maximumFractionDigits: 4 })}
+                  {formatCount(currentStock || 0)}
                   <span className="text-sm font-bold text-brand-500 ml-1.5">{savedDetails.unit}</span>
                 </p>
-                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">₱{((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0)).toFixed(2)}</span></p>
+                <p className="text-[11px] text-brand-400 mt-0.5">Estimated total value: <span className="font-semibold">{formatPeso((ingredient?.stock || 0) * (ingredient?.costPerUnit || 0))}</span></p>
               </div>
             </div>
           )}
