@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { AlertTriangle, Search, Filter, Plus, RotateCcw, ListChecks, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
+import { useToast, Button, Modal, Textarea, Table, Tr, Td, Pagination, Badge, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
@@ -220,6 +220,8 @@ export default function WasteTab() {
     products = [], 
     materials = [],
     loading,
+    loadErrors = {},
+    fetchAll,
   } = useApp() || {};
 
   // Product materials lang ang may stock sa shop; ang celebration materials
@@ -553,9 +555,9 @@ export default function WasteTab() {
         </div>
 
         {/* SEARCH, FILTER & RESPONSIVE ESTIMATED LOSS */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/30">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 min-w-0">
-            <div className="relative w-full sm:w-64">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/30">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+            <div className="relative w-full sm:w-56 lg:w-64">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input 
                 type="text" 
@@ -566,19 +568,27 @@ export default function WasteTab() {
               />
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700 min-w-[130px]">
                 <Filter size={13} className="text-gray-400 shrink-0" />
-                <select className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" value={filterType} onChange={e => { setFilterType(e.target.value); setPage(1); }}>
+                <select 
+                  className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" 
+                  value={filterType} 
+                  onChange={e => { setFilterType(e.target.value); setPage(1); }}
+                >
                   <option value="All">All Categories</option>
-                  <option value="ingredient"> Ingredient</option>
+                  <option value="ingredient">Ingredient</option>
                   <option value="product">Finished Product</option>
                   <option value="material">Product Material</option>
                 </select>
               </div>
 
-              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700">
-                <select className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(1); }}>
+              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700 min-w-[110px]">
+                <select 
+                  className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" 
+                  value={filterDate} 
+                  onChange={e => { setFilterDate(e.target.value); setPage(1); }}
+                >
                   <option value="All">All Time</option>
                   <option value="Today">Today</option>
                   <option value="This Week">This Week</option>
@@ -588,10 +598,12 @@ export default function WasteTab() {
             </div>
           </div>
 
-          {/* ESTIMATED LOSS STAT - RESPONSIVE MOBILE DISPLAY */}
-          <div className="flex items-center justify-between md:justify-end gap-2 bg-red-50/80 border border-red-200/80 px-3.5 py-2 rounded-lg w-full md:w-auto shrink-0">
+          {/* ESTIMATED LOSS STAT */}
+          <div className="flex items-center justify-between xl:justify-end gap-2 bg-red-50/80 border border-red-200/80 px-3.5 py-2 rounded-lg w-full xl:w-auto shrink-0">
             <span className="text-xs font-bold text-red-900/80 uppercase tracking-wider">Estimated Loss:</span>
-            <span className="text-base font-black text-red-600 whitespace-nowrap">₱{totalCostFiltered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            <span className="text-base font-black text-red-600 whitespace-nowrap">
+              ₱{totalCostFiltered.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
           </div>
         </div>
 
@@ -617,11 +629,11 @@ export default function WasteTab() {
         )}
 
         {/* CONTENT AREA */}
-        <div ref={containerRef} className="p-4">
+        <div ref={containerRef} className="@container p-4">
           
           {isCompact ? (
           /* CARDS WITH RED HIGHLIGHT ON SELECTION */
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
             {pagedLogs.map(log => {
               const isSelected = selectionMode && selectedIds.has(log.id);
               return (
@@ -644,7 +656,7 @@ export default function WasteTab() {
                         />
                       )}
                       <div className="min-w-0">
-                        <h4 className="font-bold text-brand-900 text-sm truncate">{log.item}</h4>
+                        <h4 className="font-bold text-brand-900 text-sm wrap-break-word">{log.item}</h4>
                         <p className="text-[11px] text-gray-400">{formatLocal(log.dt)}</p>
                       </div>
                     </div>
@@ -670,7 +682,7 @@ export default function WasteTab() {
                       <span className="font-semibold text-red-700 bg-red-100/70 px-1.5 py-0.5 rounded text-[11px]">{log.reason}</span>
                     </div>
                     {log.notes && (
-                      <p className="text-gray-600 text-[11px] truncate">
+                      <p className="text-gray-600 text-[11px] line-clamp-2 wrap-break-word">
                         <span className="text-gray-400">Notes:</span> {log.notes}
                       </p>
                     )}
@@ -704,7 +716,9 @@ export default function WasteTab() {
               {!filteredLogs.length && !loading && (
                 <tr>
                   <td colSpan={7} className="text-center text-gray-400 py-10 text-sm">
-                    No waste records found.
+                    {loadErrors.waste
+                      ? <ErrorState description={loadErrors.waste} onRetry={() => fetchAll?.()} />
+                      : <EmptyState title={search || filterDate !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />}
                   </td>
                 </tr>
               )}
@@ -745,9 +759,9 @@ export default function WasteTab() {
           )}
 
           {isCompact && !filteredLogs.length && !loading && (
-            <div className="text-center text-gray-400 py-10 text-sm">
-              No waste records found.
-            </div>
+            loadErrors.waste
+              ? <ErrorState description={loadErrors.waste} onRetry={() => fetchAll?.()} />
+              : <EmptyState title={search || filterDate !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />
           )}
 
           {!!loading && (

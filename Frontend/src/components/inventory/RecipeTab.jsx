@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } fr
 import { createPortal } from 'react-dom';
 import { Plus, Trash2, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 import { useIsCompact } from '../../hooks/useIsCompact';
@@ -769,7 +769,7 @@ export default function RecipeTab() {
           </div>
         </div>
 
-        <div ref={containerRef} className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="@container px-4 pb-4 mt-4">
           {isLoading && (
             <>
               <CardSkeleton count={3} />
@@ -781,30 +781,34 @@ export default function RecipeTab() {
           <>
           {isCompact ? (
           /* Compact (cards) View */
-          <div className="space-y-3">
-            {paged.map(r => (
-              <div key={r.id} className="p-3 sm:p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
-                <div className="flex justify-between items-start gap-2">
+          <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
+            {paged.map(r => {
+              const cost = getRecipeCost(r);
+              return (
+                <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm flex flex-col gap-3 min-w-0">
                   <div className="min-w-0">
-                    <h4 className="font-bold text-brand-900 text-base break-words">{r.product}</h4>
-                    <p className="text-[11px] text-brand-400 mt-0.5">Yield: {r.yield} {r.yieldUnit}</p>
-                    {(() => {
-                      const cost = getRecipeCost(r);
-                      return (
-                        <p className="text-[11px] text-brand-600 font-semibold mt-1">
-                          Est. cost per batch: {cost.total > 0 ? formatPeso(cost.total) : '—'}
-                          {cost.total > 0 && <span className="font-normal text-brand-400"> · ≈ {formatPeso(cost.perItem)} per item</span>}
-                        </p>
-                      );
-                    })()}
+                    <h4 className="font-bold text-brand-900 text-sm sm:text-base wrap-break-word leading-snug">{r.product}</h4>
                   </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <button onClick={() => openEdit(r)} className="p-1.5 text-brand-500 bg-brand-50 rounded-lg"><Edit2 size={13} /></button>
-                    <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-500 bg-red-50 rounded-lg"><Trash2 size={13} /></button>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs p-2.5 rounded-lg border border-brand-100/60 bg-brand-50/50">
+                    <div className="min-w-0">
+                      <span className="text-brand-400 block text-[10px] font-medium">Items per batch</span>
+                      <span className="font-bold text-brand-800">{r.yield} {r.yieldUnit}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-brand-400 block text-[10px] font-medium">Est. cost per batch</span>
+                      <span className="font-bold text-brand-800">{cost.total > 0 ? formatPeso(cost.total) : '—'}</span>
+                      {cost.total > 0 && <span className="block text-[10px] text-brand-400">≈ {formatPeso(cost.perItem)} per item</span>}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 mt-auto">
+                    <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openEdit(r)}><Edit2 size={13} /> Edit</Button>
+                    <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(r)}><Trash2 size={13} /> Delete</Button>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           ) : (
           /* Table View */
@@ -832,7 +836,10 @@ export default function RecipeTab() {
           </Table>
           )}
 
-          {!paged.length && <div className="text-center py-8 text-brand-300">No formulas found.</div>}
+          {!paged.length && (context.loadErrors?.recipes
+            ? <ErrorState className="my-3" description={context.loadErrors.recipes} onRetry={() => context.fetchAll()} />
+            : <EmptyState className="my-3" title={search ? 'No matching formulas' : 'No recipes yet'} description={search ? 'Try another search term.' : 'Create a recipe to connect products with inventory ingredients.'} />
+          )}
           </>
           )}
         </div>

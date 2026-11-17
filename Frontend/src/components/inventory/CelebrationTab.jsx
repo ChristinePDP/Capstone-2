@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
@@ -349,13 +349,13 @@ export default function CelebrationTab() {
           </Button>
         </div>
 
-        <div className="flex gap-6 border-b-2 border-brand-100 px-4 mt-3">
+        <div className="flex gap-4 sm:gap-6 border-b-2 border-brand-100 px-4 mt-3">
           {MATERIAL_VIEWS.map(view => (
             <button
               key={view.key}
               type="button"
               onClick={() => handleViewChange(view.key)}
-              className={`pb-2.5 text-sm font-bold border-b-2 transition-all -mb-0.5 flex items-center gap-2 ${
+              className={`pb-2.5 text-xs sm:text-sm font-bold border-b-2 transition-all -mb-0.5 flex items-center gap-1.5 sm:gap-2 ${
                 materialView === view.key
                   ? 'border-brand-800 text-brand-900'
                   : 'border-transparent text-brand-400 hover:text-brand-600'
@@ -414,7 +414,7 @@ export default function CelebrationTab() {
           </div>
         </div>
 
-        <div ref={containerRef} className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="@container px-4 pb-4 mt-4">
           {isLoading && (
               <>
                 <CardSkeleton count={3} />
@@ -425,16 +425,16 @@ export default function CelebrationTab() {
           {!isLoading && (
             <>
               {isCompact ? (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
                   {paged.map(mat => {
                     const partner = isPartnerMaterial(mat);
                     const unset = mat.isUnsetOwn === true;
                     const st = ingStatus(mat.stock, mat.min);
                     return (
-                      <div key={mat.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h4 className="font-bold text-brand-800 text-sm">{mat.name}</h4>
+                      <div key={mat.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm flex flex-col min-w-0">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-brand-800 text-sm wrap-break-word">{mat.name}</h4>
                             <p className="text-xs text-brand-500 mt-0.5">
                               {partner
                                 ? `Order limit: ${mat.orderLimit > 0 ? `${mat.orderLimit} / day` : 'none set'}`
@@ -443,17 +443,17 @@ export default function CelebrationTab() {
                             </p>
                           </div>
                           {partner
-                            ? <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
+                            ? <span className="shrink-0 text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
                             : unset
-                              ? <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
-                              : <Badge variant={st.cls}>{st.label}</Badge>}
+                              ? <span className="shrink-0 text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
+                              : <Badge variant={st.cls} className="shrink-0">{st.label}</Badge>}
                         </div>
                         {unset ? (
-                          <div className="flex justify-end pt-2 border-t border-brand-50">
-                            <Button size="sm" variant="secondary" onClick={() => openSetup(mat)}>Set Up Stock</Button>
+                          <div className="pt-3 mt-auto border-t border-brand-50">
+                            <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openSetup(mat)}>Set Up Stock</Button>
                           </div>
                         ) : partner ? (
-                          <p className="text-[11px] text-brand-500 pt-2 border-t border-brand-50">
+                          <p className="text-[11px] text-brand-500 pt-3 mt-auto border-t border-brand-50 wrap-break-word">
                             {mat.isPartnerSource ? `Cost ₱${(mat.partnerCost ?? 0).toFixed(2)} / ` : ''}Price {`₱${mat.price.toFixed(2)}`}. Managed in Product Management.
                           </p>
                         ) : (
@@ -461,9 +461,9 @@ export default function CelebrationTab() {
                             <div className="my-3">
                               <LevelBar stock={mat.stock} min={mat.min} />
                             </div>
-                            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
-                              <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
-                              <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
+                            <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
+                              <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
+                              <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(mat)}>Delete</Button>
                             </div>
                           </>
                         )}
@@ -498,7 +498,7 @@ export default function CelebrationTab() {
                         <Td>{partner
                           ? <span className="text-[11px] font-bold text-brand-600 bg-brand-100 px-2 py-0.5 rounded-full">{mat.isPartnerSource ? 'Partner' : 'Pre-order'}</span>
                           : unset
-                            ? <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
+                            ? <span className="shrink-0 text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Needs setup</span>
                             : <Badge variant={st.cls}>{st.label}</Badge>}</Td>
                         <Td align="right">
                           {partner ? (
@@ -520,12 +520,9 @@ export default function CelebrationTab() {
                 </Table>
               )}
 
-              {!paged.length && (
-                <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {(search || statusFilter !== 'all')
-                    ? 'No matching materials found.'
-                    : `No ${activeView.label.toLowerCase()} recorded yet.`}
-                </div>
+              {!paged.length && (context.loadErrors?.materials
+                ? <ErrorState className="my-3" description={context.loadErrors.materials} onRetry={() => context.fetchAll()} />
+                : <EmptyState className="my-3" title={(search || statusFilter !== 'all') ? 'No matching materials' : `No ${activeView.label.toLowerCase()} yet`} description={(search || statusFilter !== 'all') ? 'Change or clear the filters to see more materials.' : 'Materials added for this category will appear here.'} />
               )}
             </>
           )}
@@ -1250,7 +1247,7 @@ function MaterialModal({ isOpen, onClose, material, existingMaterials = [], cele
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-2.5 gap-y-6">
+                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-2.5 gap-y-6">
                   {!editingDetails ? (
                     <>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">

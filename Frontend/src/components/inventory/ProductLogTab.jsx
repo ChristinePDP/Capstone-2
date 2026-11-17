@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Search, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Table, Tr, Td, Card, Pagination, CardSkeleton, TableSkeleton } from '../../components/ui/index';
+import { Table, Tr, Td, Card, Pagination, CardSkeleton, TableSkeleton, EmptyState, ErrorState } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
@@ -86,8 +86,8 @@ export default function ProductLogTab() {
     <div className="space-y-5">
       <Card>
         <div className="flex items-center justify-between p-4 border-b border-brand-100">
-          <div>
-            <h3 className=" font-bold text-brand-800">Production Log</h3>
+          <div className="min-w-0">
+            <h3 className="font-bold text-brand-800">Production Log</h3>
             <p className="text-xs text-brand-400 mt-0.5">
               All confirmed batch productions. Use this as a reference before logging unsold items in the Waste Log.
             </p>
@@ -122,7 +122,7 @@ export default function ProductLogTab() {
         </div>
 
         {/* ─── RESPONSIVE CONTENT ─── */}
-        <div ref={containerRef} className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="@container px-4 pb-4 mt-4">
           {/* LOADING STATE — habang kinukuha pa ang data mula sa backend.
               Para hindi agad lumabas ang "Wala pang production record"
               kahit hindi pa talaga tapos ang fetch. */}
@@ -138,14 +138,14 @@ export default function ProductLogTab() {
               {isCompact ? (
                 /* CARDS VIEW — used whenever the container itself is narrow,
                    regardless of the browser's own width (e.g. sidebar open) */
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
                   {paged.map(pl => (
-                    <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center shadow-sm">
-                      <div>
-                        <h4 className="font-bold text-brand-900 text-sm">{pl.product}</h4>
+                    <div key={pl.id} className="p-3 bg-white border border-brand-100 rounded-xl flex justify-between items-center gap-3 shadow-sm min-w-0">
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-brand-900 text-sm wrap-break-word">{pl.product}</h4>
                         <p className="text-[11px] text-brand-400 mt-0.5">{formatLocalTime(pl.dt)}</p>
                       </div>
-                      <span className="text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
+                      <span className="shrink-0 whitespace-nowrap text-xs font-bold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-md">
                         +{pl.produced} {pl.yieldUnit}
                       </span>
                     </div>
@@ -173,12 +173,9 @@ export default function ProductLogTab() {
                 </Table>
               )}
 
-              {!filtered.length && (
-                <div className="text-center text-brand-400 py-12 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {search || filterDate !== 'All'
-                    ? 'No production records found.'
-                    : 'No production records yet. Set a target in Production Formula and confirm a batch.'}
-                </div>
+              {!filtered.length && (context.loadErrors?.production
+                ? <ErrorState className="my-3" description={context.loadErrors.production} onRetry={() => context.fetchAll()} />
+                : <EmptyState className="my-3" title={search || filterDate !== 'All' ? 'No matching production records' : 'No production records yet'} description={search || filterDate !== 'All' ? 'Change the search or date filter to see more records.' : 'Confirmed production batches will appear here.'} />
               )}
             </>
           )}

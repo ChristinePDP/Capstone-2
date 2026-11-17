@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Search, X, Package, Plus, ChevronRight, ArrowUp, LayoutGrid, Tag, Cake, Croissant, PartyPopper } from 'lucide-react';
+import { EmptyState, ErrorState } from '../ui';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
 import { isSlipAnswerEmpty, pruneEmptySlipAnswers } from '../shared/orderSlipUploads';
@@ -1056,7 +1057,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit }) {
   );
 }
 
-export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [] }) {
+export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [], loadError, onRetry }) {
   const [modal, setModal] = useState(null);
   const [detailsId, setDetailsId] = useState(null); // product card na naka-open ang See more drawer
   const [bundles, setBundles] = useState([]);
@@ -1280,6 +1281,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     const hideSectionHeaderOnWide = !isAllView;
 
     const hasAnyMatch = categoriesToRender.some(cat => displayItems.some(p => p.category === cat));
+    if (loadError && products.length === 0) {
+      return <ErrorState title="Products unavailable" description={loadError} onRetry={onRetry} />;
+    }
     if (isSearching && !hasAnyMatch) {
       return (
         <div className="flex flex-col items-center justify-center text-center py-20 px-6">
@@ -1296,7 +1300,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
     // "All": lahat ng category ay walang laman -> isang pangkalahatang notice lang
     if (isAllView && !isSearching && bundlesLoaded && !categoriesToRender.some(cat => displayItems.some(p => p.category === cat))) {
-      return <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">No products yet</p>;
+      return <EmptyState title="No products yet" description="Products added to the catalog will appear here." />;
     }
 
     return categoriesToRender.map(cat => {

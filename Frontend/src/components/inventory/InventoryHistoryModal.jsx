@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { History as HistoryIcon } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { ConfirmModal, useToast, Pagination } from '../ui';
+import { ConfirmModal, useToast, Pagination, Skeleton } from '../ui';
 
 const formatDT = (iso) => {
   if (!iso) return '—';
@@ -237,7 +237,9 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
       {/* Log Container */}
       <div className="rounded-lg border border-brand-100 bg-brand-50/30 overflow-hidden">
         {loading && (
-          <div className="py-6 text-center text-xs text-brand-400 font-medium">Naglo-load...</div>
+          <div role="status" aria-label="Loading inventory history" aria-live="polite" className="space-y-3 bg-white p-4">
+            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="flex items-center gap-3 border-b border-brand-50 py-2"><Skeleton w="w-20" h="h-3" /><Skeleton className="flex-1" /><Skeleton w="w-16" /></div>)}
+          </div>
         )}
 
         {!loading && errorMsg && (

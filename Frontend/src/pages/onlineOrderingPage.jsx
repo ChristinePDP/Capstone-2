@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Skeleton } from '../components/ui';
 
 import Home from '../components/onlineOrdering/Home';
 import Menu from '../components/onlineOrdering/Menu';
@@ -64,9 +64,21 @@ async function saveCartToDb(cart) {
 // Ipinapakita habang bina-bawi pa ang naka-save na cart mula sa IndexedDB.
 function CartLoading() {
   return (
-    <div role="status" aria-live="polite" className="flex min-h-[60vh] flex-col items-center justify-center gap-2 bg-[#FCFAF9] text-[#8A7264]">
-      <Loader2 size={28} className="animate-spin" />
-      <span className="text-xs font-medium">Loading your order…</span>
+    <div role="status" aria-label="Restoring your order" aria-live="polite" className="min-h-[60vh] bg-[#FCFAF9] px-4 py-8">
+      <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-5 rounded-2xl border border-[#EAE4E0] bg-white p-5">
+          <Skeleton w="w-40" h="h-6" />
+          <Skeleton h="h-12" className="rounded-xl" />
+          <Skeleton h="h-12" className="rounded-xl" />
+          <Skeleton h="h-24" className="rounded-xl" />
+        </div>
+        <div className="space-y-4 rounded-2xl border border-[#EAE4E0] bg-white p-5">
+          <Skeleton w="w-32" h="h-5" />
+          <Skeleton h="h-16" className="rounded-xl" />
+          <Skeleton h="h-10" className="rounded-xl" />
+          <Skeleton h="h-11" className="rounded-full" />
+        </div>
+      </div>
     </div>
   );
 }

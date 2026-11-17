@@ -516,11 +516,11 @@ function PreOrderProduction({ tabBar }) {
         </div>
       </div>
 
-      <div className="p-4 space-y-3">
+      <div className="@container p-4 space-y-3">
         {isLoading && <CardSkeleton count={3} />}
 
         {!isLoading && paged.length > 0 && (
-          <div className="grid grid-cols-1 min-w-0 min-[420px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 min-w-0 @xs:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-4 @6xl:grid-cols-5 gap-3">
             {paged.map(order => (
               <div
                 key={order.id}
@@ -975,11 +975,11 @@ function BatchProduction({ tabBar }) {
         </div>
       </div>
 
-      <div className="p-4">
+      <div className="@container p-4">
         {isLoading && <CardSkeleton count={3} />}
 
         {!isLoading && paged.length > 0 && (
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 @xs:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-4 gap-3 sm:gap-4">
             {paged.map(r => {
               const product = findProduct(r);
               const maxUnits = calculateMaxUnits(r);

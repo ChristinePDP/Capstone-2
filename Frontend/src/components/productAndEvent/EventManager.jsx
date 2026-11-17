@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown, Trash2, Plus, Pencil, Loader2 } from 'lucide-react';
-import { Button, Table, Tr, Td, Modal, useUnsavedChanges } from '../ui';
+import { ChevronDown, Trash2, Plus, Pencil } from 'lucide-react';
+import { Button, Table, Tr, Td, Modal, ConfirmModal, useUnsavedChanges, Skeleton, ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
 
 // Base URL ng backend. Kinukuha mula sa VITE_API_URL sa .env
 // (hal. VITE_API_URL=http://localhost:3000/api — kasama na ang "/api"
@@ -144,14 +144,14 @@ function CustomDropdown({ value, options, onChange, openUpwards = false }) {
   const positionClasses = openUpwards ? 'bottom-full mb-1' : 'top-full mt-1';
 
   return (
-    <div className="relative w-full" ref={dropdownRef}>
+    <div className="relative w-full min-w-0" ref={dropdownRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full border border-[#DED4CC] rounded-xl px-3.5 py-2.5 text-xs outline-none bg-white flex justify-between items-center text-[#3B1F0A] hover:border-[#5A453C] transition-colors"
+        className="w-full min-w-0 gap-1.5 border border-[#DED4CC] rounded-xl px-3 sm:px-3.5 py-2.5 text-xs outline-none bg-white flex justify-between items-center text-[#3B1F0A] hover:border-[#5A453C] transition-colors"
       >
-        <span>{selectedLabel}</span>
-        <ChevronDown size={14} className={`text-[#8A7264] transition-transform ${isOpen && openUpwards ? 'rotate-180' : ''}`} />
+        <span className="truncate">{selectedLabel}</span>
+        <ChevronDown size={14} className={`shrink-0 text-[#8A7264] transition-transform ${isOpen && openUpwards ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
@@ -176,29 +176,6 @@ function CustomDropdown({ value, options, onChange, openUpwards = false }) {
   );
 }
 
-// Locks background page scroll while a modal is open. Without this, scrolling
-// inside the modal (or over the backdrop) also scrolls the page behind it —
-// the overlay alone doesn't stop that. Restores the exact scroll position on
-// close so the page doesn't jump.
-function useLockBodyScroll(isOpen) {
-  useEffect(() => {
-    if (!isOpen) return;
-    const scrollY = window.scrollY;
-    const { overflow, position, top, width } = document.body.style;
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
-    return () => {
-      document.body.style.overflow = overflow;
-      document.body.style.position = position;
-      document.body.style.top = top;
-      document.body.style.width = width;
-      window.scrollTo(0, scrollY);
-    };
-  }, [isOpen]);
-}
-
 function EventModal({ 
   isOpen = true, 
   onClose, 
@@ -209,8 +186,7 @@ function EventModal({
   events = [],
   onValidationError = () => {}
 }) {
-  useLockBodyScroll(isOpen);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => initialData || {
     event_name: '',
     event_tag: '',
     start_month: 1,
@@ -229,21 +205,6 @@ function EventModal({
     if (!String(f.event_tag || '').trim()) next.event_tag = 'Event tag is required.';
     return next;
   };
-
-  useEffect(() => {
-    if (isOpen) {
-      setForm(initialData || {
-        event_name: '',
-        event_tag: '',
-        start_month: 1,
-        start_day: 1,
-        end_month: 1,
-        end_day: 1,
-        is_active: true
-      });
-      setErrors({});
-    }
-  }, [isOpen, initialData]);
 
   // Mawawala agad ang error ng field na naayos na habang nagta-type.
   useEffect(() => {
@@ -272,7 +233,12 @@ function EventModal({
       onValidationError(conflict);
       return;
     }
-    onSave({ ...form, event_name: form.event_name.trim(), event_tag: form.event_tag.trim() });
+    onSave({
+      ...form,
+      ...(isEditing && initialData?.id ? { id: initialData.id } : {}),
+      event_name: form.event_name.trim(),
+      event_tag: form.event_tag.trim(),
+    });
   };
 
   // Compare only editable event fields in a fixed order and normalized types.
@@ -331,7 +297,7 @@ function EventModal({
       title={isEditing ? 'Edit Event' : 'Add New Event'}
       size="sm"
       footer={
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-2 sm:gap-3">
           <Button variant="secondary" onClick={closeGuard.requestClose}>Cancel</Button>
           <Button variant="primary" onClick={handleSave}>
             {isEditing ? 'Save Changes' : 'Save Event'}
@@ -367,14 +333,14 @@ function EventModal({
           hint="Products tagged with this will automatically appear in the online ordering popup while this event is live."
         />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-          <div className="w-full">
+          <div className="w-full min-w-0">
             <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1.5 block">
               Start Date (Annual) <span className="text-red-500 ml-0.5">*</span>
             </label>
             <div className="flex gap-2">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <CustomDropdown 
                   value={form.start_month}
                   options={monthOptions}
@@ -389,7 +355,7 @@ function EventModal({
                   }}
                 />
               </div>
-              <div className="w-16 shrink-0">
+              <div className="w-18 shrink-0">
                 <CustomDropdown 
                   value={form.start_day}
                   options={startDayOptions}
@@ -400,12 +366,12 @@ function EventModal({
             </div>
           </div>
 
-          <div className="w-full">
+          <div className="w-full min-w-0">
             <label className="text-[11px] font-bold uppercase tracking-wider text-brand-500 mb-1.5 block">
               End Date (Annual) <span className="text-red-500 ml-0.5">*</span>
             </label>
             <div className="flex gap-2">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <CustomDropdown 
                   value={form.end_month}
                   options={monthOptions}
@@ -420,7 +386,7 @@ function EventModal({
                   }}
                 />
               </div>
-              <div className="w-16 shrink-0">
+              <div className="w-18 shrink-0">
                 <CustomDropdown 
                   value={form.end_day}
                   options={endDayOptions}
@@ -456,50 +422,6 @@ function EventModal({
     </Modal>
     {closeGuard.confirmation}
     </>
-  );
-}
-
-// ============================================================
-// CONFIRM TOAST
-// Toast na lumalabas sa ibaba-kanan (hindi buong-screen na overlay
-// gaya ng modal) na may Confirm/Cancel — papalit ito sa native
-// window.confirm() para consistent ang look sa buong app at hindi
-// yung "localhost says" na browser dialog ang lumalabas.
-// ============================================================
-
-function ConfirmToast({ isOpen, message, onConfirm, onCancel, isLoading }) {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed bottom-6 right-6 left-6 sm:left-auto z-[70] sm:w-full sm:max-w-sm">
-      <div className="bg-white rounded-2xl shadow-2xl border border-[#EAE4E0] p-5 flex flex-col gap-4">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-full bg-red-50 text-red-600 flex items-center justify-center shrink-0">
-            <Trash2 size={14} />
-          </div>
-          <p className="text-xs font-semibold text-[#3B1F0A] leading-relaxed pt-1.5">
-            {message}
-          </p>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onCancel}
-            disabled={isLoading}
-            className="bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB] px-4 py-2 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={isLoading}
-            className="bg-red-600 text-white hover:bg-red-700 px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50"
-          >
-            {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -572,15 +494,22 @@ const STATUS_STYLES = {
   inactive:  { pill: 'bg-[#F1EBE6] text-[#8A7264]',  dot: 'bg-[#B7A99F]' },
 };
 
-function EventStatus({ event, align = 'left' }) {
-  const status = getEventStatus(event);
+function StatusPill({ status }) {
   const style = STATUS_STYLES[status.key];
   return (
-    <div className={`flex flex-col gap-1 ${align === 'right' ? 'items-end' : 'items-start'}`}>
-      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-5 whitespace-nowrap ${style.pill}`}>
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
-        {status.label}
-      </span>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold leading-5 whitespace-nowrap ${style.pill}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+      {status.label}
+    </span>
+  );
+}
+
+// Para sa table (desktop): pill + detail, magkatapat.
+function EventStatus({ event }) {
+  const status = getEventStatus(event);
+  return (
+    <div className="flex flex-col gap-1 min-w-0 items-start">
+      <StatusPill status={status} />
       <span className="text-[11px] text-[#8A7264] leading-tight whitespace-nowrap">{status.detail}</span>
     </div>
   );
@@ -607,7 +536,7 @@ export default function EventManager() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
 
-  // State para sa delete confirmation toast (papalit sa window.confirm)
+  // State para sa delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -751,34 +680,37 @@ export default function EventManager() {
           ang page. */}
       <style>{`html { overflow-y: scroll; }`}</style>
 
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+      <div className="flex items-center justify-between mb-5 sm:mb-6 flex-wrap gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#3B1F0A]">Event Manager</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-[#3B1F0A]">Event Manager</h1>
           <p className="text-xs sm:text-sm text-[#8A7264] mt-1">Manage seasonal events and the products tagged to them</p>
         </div>
         <button
           onClick={handleOpenAdd}
-          className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors shadow-md flex items-center gap-1.5 shrink-0"
+          className="bg-[#3B1F0A] text-white hover:bg-[#2A1608] px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-colors shadow-md flex items-center justify-center gap-1.5 w-full sm:w-auto shrink-0"
         >
           <Plus size={16} /> Add New Event
         </button>
       </div>
 
-      {error && (
+      {error && events.length > 0 && (
         <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
           {error}
         </div>
       )}
 
       {isLoading ? (
-        <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm px-7 py-14 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264]">
-          <Loader2 size={18} className="animate-spin" />
-          Loading events...
-        </div>
+        <>
+          <div className="hidden lg:block overflow-hidden rounded-2xl border border-[#EAE4E0] bg-white shadow-sm" role="status" aria-label="Loading events" aria-live="polite">
+            <div className="grid grid-cols-5 gap-4 bg-brand-600 px-4 py-3"><Skeleton className="bg-white/30" w="w-16" h="h-3" /><Skeleton className="bg-white/30" w="w-20" h="h-3" /><Skeleton className="bg-white/30" w="w-20" h="h-3" /><Skeleton className="bg-white/30" w="w-14" h="h-3" /><Skeleton className="bg-white/30 ml-auto" w="w-14" h="h-3" /></div>
+            {Array.from({ length: 5 }).map((_, row) => <div key={row} className="grid grid-cols-5 items-center gap-4 border-t border-brand-100 px-4 py-5"><Skeleton w="w-32" /><Skeleton w="w-24" /><Skeleton w="w-24" /><Skeleton w="w-16" /><Skeleton className="ml-auto" w="w-20" /></div>)}
+          </div>
+          <ProductGridSkeleton count={4} columns="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" className="lg:hidden" />
+        </>
       ) : events.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm px-7 py-14 text-center text-xs text-[#8A7264]">
-          No events yet. Click "Add New Event" to create one.
-        </div>
+        error
+          ? <ErrorState description={error} onRetry={() => fetchEvents(true)} />
+          : <EmptyState title="No events yet" description="Create an event to make it available to your customers." actionLabel="Add New Event" onAction={handleOpenAdd} />
       ) : (
         <>
           {/* TABLE — makikita mula md breakpoint pataas (tablet/desktop).
@@ -786,7 +718,7 @@ export default function EventManager() {
               (kaparehong components na ginagamit ng Orders) para eksaktong
               magkatugma ang header bar, badge, at action buttons — hindi na
               hex-approximation lang. */}
-          <div className="hidden md:block bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm">
+          <div className="hidden lg:block bg-white rounded-2xl border border-[#EAE4E0] overflow-x-auto shadow-sm">
             <Table columns={[
               { label: 'Event' }, { label: 'Event Tag' }, { label: 'Date Range' },
               { label: 'Status' }, { label: 'Action', align: 'right' },
@@ -819,51 +751,57 @@ export default function EventManager() {
           {/* CARDS — makikita lang pagbaba sa mobile (below md breakpoint).
               Kaparehong pill badge at bordered text+icon action buttons ng
               desktop table para consistent ang dalawang view. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-4">
-            {sortedEvents.map((event) => (
-              <div
-                key={event.id}
-                className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-5 flex flex-col gap-3 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-xs sm:text-sm font-bold text-[#3B1F0A] leading-snug break-words">
-                    {event.event_name}
-                  </h3>
-                  <div className="shrink-0"><EventStatus event={event} align="right" /></div>
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider w-16 shrink-0">
-                      Event Tag
-                    </span>
-                    <span className="text-xs text-[#5A453C] break-words">{event.event_tag}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:hidden gap-3 sm:gap-4">
+            {sortedEvents.map((event) => {
+              const status = getEventStatus(event);
+              return (
+                <div
+                  key={event.id}
+                  className="bg-white rounded-2xl border border-[#EAE4E0] shadow-sm p-4 sm:p-5 flex flex-col gap-4 min-w-0"
+                >
+                  {/* Header: pangalan + status detail sa kaliwa, pill sa kanan */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm sm:text-base font-bold text-[#3B1F0A] leading-snug wrap-break-word">
+                        {event.event_name}
+                      </h3>
+                      <p className="mt-0.5 text-[11px] text-[#8A7264] leading-snug">{status.detail}</p>
+                    </div>
+                    <StatusPill status={status} />
                   </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider w-16 shrink-0">
-                      Dates
-                    </span>
-                    <span className="text-xs text-[#5A453C] whitespace-nowrap">
-                      {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
-                    </span>
+
+                  {/* Details: dalawang pantay na column, label sa ibabaw ng value */}
+                  <dl className="grid grid-cols-2 gap-3 rounded-xl bg-[#FCFAF9] border border-[#EAE4E0] p-3">
+                    <div className="min-w-0">
+                      <dt className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider mb-1">Event Tag</dt>
+                      <dd className="text-xs font-semibold text-[#3B1F0A] wrap-break-word">{event.event_tag}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-[10px] font-bold text-[#8A7264] uppercase tracking-wider mb-1">Date Range</dt>
+                      <dd className="text-xs font-semibold text-[#3B1F0A]">
+                        {formatDate(event.start_month, event.start_day)} – {formatDate(event.end_month, event.end_day)}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {/* Actions: dalawang pantay na button, buong lapad */}
+                  <div className="grid grid-cols-2 gap-2 mt-auto">
+                    <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => handleOpenEdit(event)}>
+                      <Pencil size={13} /> Edit
+                    </Button>
+                    <Button size="sm" variant="danger" className="w-full py-2" onClick={() => requestDelete(event)}>
+                      <Trash2 size={13} /> Delete
+                    </Button>
                   </div>
                 </div>
-
-                <div className="flex items-center justify-end gap-2 mt-1 pt-3 border-t border-[#EAE4E0]">
-                  <Button size="sm" variant="secondary" className="text-xs px-3 py-1.5" onClick={() => handleOpenEdit(event)}>
-                    <Pencil size={12} /> Edit
-                  </Button>
-                  <Button size="sm" variant="danger" className="text-xs px-3 py-1.5" onClick={() => requestDelete(event)}>
-                    <Trash2 size={12} /> Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
 
       <EventModal
+        key={`${isModalOpen ? 'open' : 'closed'}:${selectedEvent?.id ?? 'new'}`}
         isOpen={isModalOpen}
         onClose={handleCloseModal}
         isEditing={isEditing}
@@ -874,12 +812,13 @@ export default function EventManager() {
         onValidationError={setSaveError}
       />
 
-      <ConfirmToast
+      <ConfirmModal
         isOpen={!!deleteTarget}
-        message={`Are you sure you want to delete "${deleteTarget?.event_name}"?`}
+        onClose={cancelDelete}
         onConfirm={confirmDelete}
-        onCancel={cancelDelete}
-        isLoading={isDeleting}
+        title="Delete Event"
+        message={`Are you sure you want to delete "${deleteTarget?.event_name ?? ''}"? This cannot be undone.`}
+        confirmLabel="Delete"
       />
     </div>
   );

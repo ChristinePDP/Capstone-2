@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Edit2, Trash2, X, Search, Package, Loader2 } from 'lucide-react';
+import { Edit2, Trash2, Search, Package } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
 import { getBundleDeleteImpact } from './bundleDeleteContent';
+import { ConfirmModal, ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
 
 const PRODUCTS_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/online-ordering/products`;
 // Admin list lang ang /catalog (GET). Ang delete/edit ay nasa /products/:id — hindi /catalog/:id.
@@ -79,22 +80,6 @@ const unwrapData = (result, fallback) => {
 // ─────────────────────────────────────────────────────────────
 // Minimal inline UI primitives
 // ─────────────────────────────────────────────────────────────
-function Button({ variant = 'primary', className = '', children, ...props }) {
-  const variants = {
-    dark: 'bg-[#3B1F0A] text-white hover:bg-[#2A1608] shadow-md',
-    secondary: 'bg-white text-[#5A453C] border border-[#DED4CC] hover:bg-[#F5EFEB]',
-    danger: 'text-red-600 bg-red-50 hover:bg-red-100',
-  };
-  return (
-    <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold text-xs px-5 py-2.5 transition-colors ${variants[variant]} ${className}`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
-
 function SearchBar({ value, onChange, placeholder, className = '' }) {
   return (
     <div className={`relative ${className}`}>
@@ -111,7 +96,7 @@ function SearchBar({ value, onChange, placeholder, className = '' }) {
 
 function CategoryTabs({ options, value, onChange, onPromoBundleClick }) {
   return (
-    <div className="flex items-center gap-5 sm:gap-7 flex-wrap border-b border-[#EAE4E0]">
+    <div className="flex items-center gap-5 sm:gap-7 overflow-x-auto flex-nowrap border-b border-[#EAE4E0] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {options.map(opt => {
         const isPromo = opt === 'Promo Bundle';
         const active = !isPromo && value === opt;
@@ -119,76 +104,17 @@ function CategoryTabs({ options, value, onChange, onPromoBundleClick }) {
           <button
             key={opt}
             onClick={() => (isPromo ? onPromoBundleClick() : onChange(opt))}
-            className={`relative pb-2.5 text-xs sm:text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
+            className={`relative shrink-0 pt-1 pb-3 text-xs sm:text-sm font-semibold tracking-wide whitespace-nowrap transition-colors ${
               active ? 'text-[#3B1F0A]' : 'text-[#8A7264] hover:text-[#3B1F0A]'
             }`}
           >
             {opt}
             {active && (
-              <span className="absolute left-0 right-0 -bottom-px h-[2px] bg-[#3B1F0A] rounded-full" />
+              <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-[#3B1F0A] rounded-full" />
             )}
           </button>
         );
       })}
-    </div>
-  );
-}
-
-// Locks background page scroll while a modal is open. Without this, scrolling
-// inside the modal (or over the backdrop) also scrolls the page behind it —
-// the overlay alone doesn't stop that. Restores the exact scroll position on
-// close so the page doesn't jump.
-function useLockBodyScroll(isOpen) {
-  useEffect(() => {
-    if (!isOpen) return;
-    const scrollY = window.scrollY;
-    const { overflow, position, top, width } = document.body.style;
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
-    return () => {
-      document.body.style.overflow = overflow;
-      document.body.style.position = position;
-      document.body.style.top = top;
-      document.body.style.width = width;
-      window.scrollTo(0, scrollY);
-    };
-  }, [isOpen]);
-}
-
-function Modal({ isOpen, onClose, title, footer, children }) {
-  useLockBodyScroll(isOpen);
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-[#EAE4E0]">
-        <div className="flex items-center justify-between px-7 py-5 border-b border-[#EAE4E0] bg-white shrink-0">
-          <h2 className="text-xl font-bold text-[#3B1F0A]">{title}</h2>
-          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#F5EFEB] transition-colors">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="px-7 py-6 overflow-y-auto">{children}</div>
-        {footer && <div className="px-7 py-4 border-t border-[#EAE4E0] bg-white shrink-0">{footer}</div>}
-      </div>
-    </div>
-  );
-}
-
-function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Confirm' }) {
-  useLockBodyScroll(isOpen);
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1F1108]/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg border border-[#EAE4E0] p-6">
-        <h2 className="text-xl font-bold text-[#3B1F0A] mb-3 leading-snug">{title}</h2>
-        <p className="text-sm text-[#8A7264] mb-5 leading-relaxed">{message}</p>
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="danger" onClick={onConfirm}>{confirmLabel}</Button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -222,7 +148,7 @@ function ProductCard({ product, onEdit, onDelete }) {
   return (
     <div className={`bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0`}>
       {/* Pinaliit nang konti ang height sa mobile para hindi mukhang humahaba */}
-      <div className={`@container relative h-28 sm:h-36 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center ${isInactive ? 'opacity-60 grayscale' : ''}`}>
+      <div className={`@container relative aspect-video @xs:aspect-4/3 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center ${isInactive ? 'opacity-60 grayscale' : ''}`}>
         {imageUrl ? (
           <img src={imageUrl} alt={product.name} className="w-full h-full object-cover" />
         ) : (
@@ -256,9 +182,9 @@ function ProductCard({ product, onEdit, onDelete }) {
 
       {/* Adjust padding for 2-column mobile */}
       <div className={`p-3 sm:p-4 flex flex-col flex-grow ${isInactive ? 'opacity-60 grayscale' : ''}`}>
-        <p className="font-bold text-[#3B1F0A] text-xs sm:text-sm mb-1 truncate">{product.name}</p>
+        <p className="font-bold text-[#3B1F0A] text-xs sm:text-sm mb-1 leading-snug line-clamp-2 min-h-[2.5em] wrap-break-word">{product.name}</p>
 
-        <p className="text-[10px] sm:text-[11px] text-[#8A7264] mb-3 truncate leading-relaxed">
+        <p className="text-[10px] sm:text-[11px] text-[#8A7264] mb-3 line-clamp-1 sm:line-clamp-2 sm:min-h-[2.75em] leading-relaxed">
           {product.category === 'Package' && product.package_items?.length > 0
             ? `Includes: ${product.package_items.map(i => `${i.name}${i.quantity > 1 ? ` x${i.quantity}` : ''}`).join(', ')}`
             : (product.inclusion ? product.inclusion.replace(/\n/g, ' · ') : '\u00A0')}
@@ -279,14 +205,14 @@ function ProductCard({ product, onEdit, onDelete }) {
       <div className="flex border-t border-[#EAE4E0] shrink-0">
         <button
           onClick={() => onEdit(product)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 sm:py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wide text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 text-[11px] font-bold uppercase tracking-wide text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
         >
           <Edit2 size={12} className="sm:w-[13px] sm:h-[13px]" />Edit
         </button>
         <div className="w-px bg-[#EAE4E0]" />
         <button
           onClick={() => onDelete(product)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 sm:py-2.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wide text-red-600 hover:bg-red-50 transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 text-[11px] font-bold uppercase tracking-wide text-red-600 hover:bg-red-50 transition-colors"
         >
           <Trash2 size={12} className="sm:w-[13px] sm:h-[13px]" />Delete
         </button>
@@ -662,7 +588,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
       {toast && (
         <div
-          className={`fixed bottom-6 right-6 z-[9999] px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-sm sm:text-base font-semibold tracking-wide animate-slideUp min-w-[260px] max-w-md pointer-events-auto leading-snug text-white ${
+          className={`fixed bottom-4 left-4 right-4 sm:bottom-6 sm:left-auto sm:right-6 z-9999 px-4 py-3 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-xs sm:text-base font-semibold tracking-wide animate-slideUp sm:min-w-65 sm:max-w-md wrap-break-word pointer-events-auto leading-snug text-white ${
             toast.variant === 'warning' ? 'bg-amber-700' : (toast.variant === 'error' || toast.variant === 'danger') ? 'bg-red-700' : 'bg-green-700'
           }`}
         >
@@ -670,7 +596,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         </div>
       )}
 
-      <div className="flex flex-col gap-4 mb-6">
+      <div className="flex flex-col gap-3 sm:gap-4 mb-5 sm:mb-6">
         <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full sm:w-64" />
         <CategoryTabs
           options={TAB_ITEMS}
@@ -680,20 +606,18 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         />
       </div>
 
-      {error && (
+      {error && (products.length > 0 || bundlesWithAvailability.length > 0) && (
         <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
           {error}
         </div>
       )}
 
       {isLoading ? (
-        <div className="py-20 flex flex-col items-center justify-center gap-2 text-xs text-[#8A7264] bg-white rounded-2xl border border-[#EAE4E0]">
-          <Loader2 size={18} className="animate-spin" />
-          Loading products...
-        </div>
+        <ProductGridSkeleton count={8} columns="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" />
       ) : (
         /* Naayos na Grid Classes: default 2 columns sa mobile, gap ay 3 sa mobile at 5 sa tablet/desktop */
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-5">
+        <div className="@container">
+        <div className="grid grid-cols-1 @xs:grid-cols-2 @lg:grid-cols-3 @3xl:grid-cols-4 @5xl:grid-cols-5 gap-3 sm:gap-4">
           {activeProducts.map(p => (
             <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
@@ -705,11 +629,11 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
           {inactiveProducts.map(p => (
             <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
-          {!filtered.length && !filteredBundles.length && (
-            <div className="col-span-full text-center py-20 text-[#8A7264] text-xs bg-white rounded-2xl border border-[#EAE4E0]">
-              No products found.
-            </div>
+          {!filtered.length && !filteredBundles.length && (error
+            ? <ErrorState className="col-span-full" description={error} onRetry={() => fetchProducts(true)} />
+            : <EmptyState className="col-span-full" title={search ? 'No matching products' : 'No products yet'} description={search ? 'Try a different search term or clear the search.' : 'Products you add will appear here.'} />
           )}
+        </div>
         </div>
       )}
 

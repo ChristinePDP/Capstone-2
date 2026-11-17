@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { LineChart as LucideLineChart } from 'lucide-react';
+import { Skeleton } from '../ui';
 
 // Fixed na 30 days ang forecast
 const TOTAL_POINTS = 30;
@@ -78,7 +79,8 @@ export default function SalesForecast({
   title = 'Sales Forecast', 
   data: propData,
   insufficientData = false,
-  message = ''
+  message = '',
+  isLoading = false,
 }) {
   const hasFetchedButEmpty = Array.isArray(propData) && propData.length === 0;
 
@@ -110,7 +112,14 @@ export default function SalesForecast({
         </div>
       </div>
 
-     {insufficientData ? (
+     {isLoading ? (
+        <div role="status" aria-label="Loading sales forecast" aria-live="polite" className="flex flex-1 min-h-[220px] flex-col justify-between rounded-lg px-2 py-4">
+          <div className="flex h-full min-h-[180px] items-end gap-2 border-b border-l border-[#e7ded4] px-3">
+            {[35, 48, 40, 62, 52, 76, 58, 84, 65, 92, 72, 100].map((height, i) => <Skeleton key={i} className="flex-1 rounded-t-sm" h="h-full" style={{ height: `${height}%` }} />)}
+          </div>
+          <div className="mt-3 flex justify-between">{[0, 1, 2, 3, 4, 5].map(i => <Skeleton key={i} w="w-8" h="h-2.5" />)}</div>
+        </div>
+      ) : insufficientData ? (
         <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#d97706] font-medium border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[220px] bg-[#fffbf4]">
           {message || 'Insufficient historical data for this forecast.'}
         </div>

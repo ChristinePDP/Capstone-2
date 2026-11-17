@@ -175,6 +175,7 @@ export function AppProvider({ children }) {
 
   const [loading, setLoading] = useState(false);
   const [error] = useState(null);
+  const [loadErrors, setLoadErrors] = useState({});
 
   // ── Network Fetch Loaders ──
   const fetchAll = useCallback(async ({ silent = false } = {}) => {
@@ -182,26 +183,29 @@ export function AppProvider({ children }) {
 
     try {
       // Helper function para hindi mag-fail ang Promise.all kapag may error
-      const safeFetch = async (url) => {
+      const requestErrors = {};
+      const safeFetch = async (key, url) => {
         try {
           const response = await apiClient.get(url);
           return response.data;
         } catch (err) {
           console.error(`Error fetching ${url}:`, err);
+          requestErrors[key] = err.response?.data?.message || err.message || 'Unable to connect to the server.';
           return { data: [] }; // Return empty data kung mag-error
         }
       };
 
       const [ing, mat, rec, prodLog, wst, prd, ord, fulfillment] = await Promise.all([
-        safeFetch('/ingredients'),
-        safeFetch('/materials'),
-        safeFetch('/recipes'),
-        safeFetch('/production'),
-        safeFetch('/waste'),
-        safeFetch('/products'),
-        safeFetch(ORDERS_API_URL), // /api/allOrders, hindi /inventory/orders
-        safeFetch(FULFILLMENT_API_URL),
+        safeFetch('ingredients', '/ingredients'),
+        safeFetch('materials', '/materials'),
+        safeFetch('recipes', '/recipes'),
+        safeFetch('production', '/production'),
+        safeFetch('waste', '/waste'),
+        safeFetch('products', '/products'),
+        safeFetch('orders', ORDERS_API_URL), // /api/allOrders, hindi /inventory/orders
+        safeFetch('fulfillment', FULFILLMENT_API_URL),
       ]);
+      setLoadErrors(requestErrors);
 
       logInventoryCrud('read', 'stocks.ingredients', { count: (ing.data || []).length });
       logInventoryCrud('read', 'stocks.materials', { count: (mat.data || []).length });
@@ -572,6 +576,7 @@ export function AppProvider({ children }) {
     setWasteLogs([]);
     setProducts([]);
     setOrders([]);
+    setLoadErrors({});
   }, []);
 
   // ── Orders (All Orders page) ────
@@ -877,7 +882,7 @@ export function AppProvider({ children }) {
   const value = {
     products, orders, ingredients, materials, recipes, wasteLogs, productionLogs,
     pendingMaterialFulfillment,
-    loading, error,
+    loading, error, loadErrors,
     isAuthed, authReady, login, logout, // <-- ADDED / WIRED (fixes the refresh-required bug)
     fetchAll,
     fetchOrders, fetchOrderById, updateOrderStatus, verifyOrderPayment,

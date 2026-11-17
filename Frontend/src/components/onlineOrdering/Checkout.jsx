@@ -2,7 +2,8 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, Loader2, ZoomIn, X, User, Phone } from 'lucide-react';
+import { ClipboardList, CreditCard, Receipt, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Calendar as CalendarIcon, Lock, AlertCircle, Clock, Check, ZoomIn, X, User, Phone } from 'lucide-react';
+import { Skeleton } from '../ui';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartSlipImages from '../shared/CartSlipImages';
@@ -1499,9 +1500,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                             <span>The payment QR is hidden because this stock reservation has expired.</span>
                           </div>
                         ) : paymentConfigLoading ? (
-                          <div role="status" aria-live="polite" className="mx-auto my-3 flex h-64 w-64 flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
-                            <Loader2 size={24} className="animate-spin" />
-                            <span className="text-[11px] font-medium">Loading QR code…</span>
+                          <div role="status" aria-label="Loading payment QR code" aria-live="polite" className="mx-auto my-3 h-64 w-64 rounded-lg bg-[#F1EBE6] p-3">
+                            <Skeleton className="h-full w-full rounded-md bg-white/70" />
                           </div>
                         ) : paymentConfigError ? (
                           <div role="alert" className="mx-auto my-3 flex min-h-[16rem] w-64 flex-col items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 text-center">
@@ -1522,9 +1522,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                             title="Click to expand QR code"
                           >
                             {!qrImageLoaded && (
-                              <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg bg-[#F1EBE6] text-[#8A7264]">
-                                <Loader2 size={24} className="animate-spin" />
-                                <span className="text-[11px] font-medium">Loading QR code…</span>
+                              <div role="status" aria-label="Loading payment QR code" aria-live="polite" className="absolute inset-0 p-3 bg-[#F1EBE6]">
+                                <Skeleton className="h-full w-full rounded-md bg-white/70" />
                               </div>
                             )}
                             <img

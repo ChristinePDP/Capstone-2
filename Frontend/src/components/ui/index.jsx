@@ -4,7 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, createContext, useContext, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom'; // Dinagdag para sa Portal fix[cite: 13]
-import { X, Search } from 'lucide-react';
+import { X, Search, Inbox, WifiOff, RefreshCw } from 'lucide-react';
 
 // ─── Badge ────────────────────────────────────────────────────
 export function Badge({ children, variant = 'default', className = '' }) {
@@ -81,28 +81,62 @@ export function Textarea({ label, hint, required, className = '', ...props }) {
 }
 
 // ─── Modal (UPDATED WITH PORTAL FIX) ──────────────────────────
-export function Modal({ isOpen, onClose, title, subtitle, size = 'md', children, footer }) {
+// ─── Body scroll lock (shared, ref-counted) ───────────────────
+// Locks background page scroll while a modal is open and restores the exact
+// scroll position on close. Ref-counted para hindi mag-away kapag may
+// dalawang modal na sabay na bukas (hal. form + confirm).
+let scrollLockCount = 0;
+let scrollLockSaved = null;
+function useLockBodyScroll(isOpen) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    if (scrollLockCount === 0) {
+      const { overflow, position, top, width } = document.body.style;
+      scrollLockSaved = { overflow, position, top, width, scrollY: window.scrollY };
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollLockSaved.scrollY}px`;
+      document.body.style.width = '100%';
+    }
+    scrollLockCount += 1;
+    return () => {
+      scrollLockCount -= 1;
+      if (scrollLockCount === 0 && scrollLockSaved) {
+        const { overflow, position, top, width, scrollY } = scrollLockSaved;
+        document.body.style.overflow = overflow;
+        document.body.style.position = position;
+        document.body.style.top = top;
+        document.body.style.width = width;
+        window.scrollTo(0, scrollY);
+        scrollLockSaved = null;
+      }
+    };
+  }, [isOpen]);
+}
+
+export function Modal({ isOpen, onClose, title, subtitle, size = 'md', children, footer, closeOnBackdrop = true }) {
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
-  const sizes = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
+  const sizes = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl', '2xl': 'max-w-3xl', xl: 'max-w-4xl' };
 
   // createPortal ensures the modal is rendered at the body level[cite: 13]
   return createPortal(
-    <div 
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-brand-900/50 backdrop-blur-sm" 
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-brand-900/50 backdrop-blur-sm"
+      onClick={(e) => closeOnBackdrop && e.target === e.currentTarget && onClose()}
     >
-      <div className={`bg-white rounded-2xl w-full ${sizes[size] || sizes.md} shadow-2xl flex flex-col max-h-[92vh] animate-modalIn`}>
-        <div className="flex items-start justify-between p-5 border-b border-brand-100 shrink-0">
-          <div>
-            <h2 className=" text-lg font-bold text-brand-800">{title}</h2>
+      <div className={`bg-white rounded-2xl w-full ${sizes[size] || sizes.md} shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[92vh] animate-modalIn`}>
+        <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-brand-100 shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-brand-800 wrap-break-word">{title}</h2>
             {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg border border-brand-200 flex items-center justify-center text-brand-400 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all shrink-0 ml-4">
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg border border-brand-200 flex items-center justify-center text-brand-400 hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all shrink-0">
             <X size={15} />
           </button>
         </div>
-        <div className="p-5 overflow-y-auto flex-1">{children}</div>
-        {footer && <div className="p-4 border-t border-brand-100 shrink-0">{footer}</div>}
+        <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain flex-1 min-h-0">{children}</div>
+        {footer && <div className="p-3 sm:p-4 border-t border-brand-100 shrink-0">{footer}</div>}
       </div>
     </div>,
     document.body // Dito itatapon ang modal para hindi ma-trap[cite: 13]
@@ -224,8 +258,52 @@ export function LevelBar({ stock, min }) {
 
 // Isang pulsing gray block — building block ng lahat ng skeleton
 // layouts sa ibaba. `w`/`h` ay Tailwind width/height classes.
-export function Skeleton({ className = '', w = 'w-full', h = 'h-4' }) {
-  return <div className={`${w} ${h} bg-brand-100 rounded-md animate-pulse ${className}`} />;
+export function Skeleton({ className = '', w = 'w-full', h = 'h-4', style }) {
+  return <div aria-hidden="true" style={style} className={`${w} ${h} bg-brand-100 rounded-md animate-pulse ${className}`} />;
+}
+
+export function ProductGridSkeleton({ count = 6, columns = 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4', className = '' }) {
+  return (
+    <div role="status" aria-label="Loading items" aria-live="polite" className={`grid ${columns} gap-3 sm:gap-4 ${className}`}>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-sm">
+          <Skeleton className="aspect-[4/3] rounded-none" h="h-auto" />
+          <div className="space-y-3 p-3 sm:p-4">
+            <Skeleton w={index % 2 ? 'w-3/4' : 'w-2/3'} h="h-4" />
+            <Skeleton w="w-1/3" h="h-3" />
+            <div className="flex items-center justify-between pt-1">
+              <Skeleton w="w-1/4" h="h-4" />
+              <Skeleton w="w-8" h="h-8" className="rounded-full" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function EmptyState({ title = 'Nothing here yet', description, icon: Icon = Inbox, actionLabel, onAction, className = '' }) {
+  return (
+    <div role="status" className={`flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-brand-200 bg-white px-6 py-10 text-center ${className}`}>
+      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-500"><Icon size={22} aria-hidden="true" /></span>
+      <h3 className="text-sm font-bold text-brand-900">{title}</h3>
+      {description && <p className="mt-1.5 max-w-md text-sm text-brand-500">{description}</p>}
+      {actionLabel && onAction && <button type="button" onClick={onAction} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">{actionLabel}</button>}
+    </div>
+  );
+}
+
+export function ErrorState({ title = 'Unable to load this data', description, actionLabel = 'Try again', onRetry, className = '' }) {
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  const connectionFailure = /network error|failed to fetch|load failed|network request failed|econnrefused/i.test(String(description || ''));
+  return (
+    <div role="alert" className={`flex min-h-48 flex-col items-center justify-center rounded-2xl border border-red-100 bg-red-50/60 px-6 py-10 text-center ${className}`}>
+      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600"><WifiOff size={22} aria-hidden="true" /></span>
+      <h3 className="text-sm font-bold text-brand-900">{offline ? 'No internet connection' : title}</h3>
+      <p className="mt-1.5 max-w-md text-sm text-brand-600">{offline ? 'Reconnect to the internet, then try loading this data again.' : connectionFailure ? 'Check your internet connection. The server may also be temporarily unavailable.' : description || 'Check your connection. The server may be temporarily unavailable.'}</p>
+      {onRetry && <button type="button" onClick={onRetry} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"><RefreshCw size={15} aria-hidden="true" />{actionLabel}</button>}
+    </div>
+  );
 }
 
 // Skeleton para sa desktop table view — humuhugis ng ilang "row" na
@@ -309,7 +387,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={{ show, toast: show }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-4 left-4 right-4 sm:bottom-6 sm:left-auto sm:right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
         {toasts.map(t => {
           const isSuccess = t.type === 'success' || t.type === 200 || t.type === 201;
           const isWarning = t.type === 'warning';
@@ -317,7 +395,7 @@ export function ToastProvider({ children }) {
           return (
             <div
               key={t.id}
-              className={`flex items-center px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-sm sm:text-base font-semibold tracking-wide animate-slideUp min-w-[260px] max-w-md pointer-events-auto leading-snug ${colorClass}`}
+              className={`flex items-center px-4 py-3 sm:px-6 sm:py-4 rounded-2xl shadow-2xl text-xs sm:text-base font-semibold tracking-wide animate-slideUp sm:min-w-[260px] sm:max-w-md wrap-break-word pointer-events-auto leading-snug ${colorClass}`}
             >
               {t.message}
             </div>
@@ -337,6 +415,7 @@ export const useToast = () => {
 // ─── Confirm Modal (UPDATED WITH PORTAL FIX) ──────────────────
 export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger' }) {
   const [isProcessing, setIsProcessing] = useState(false);
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
 
   // IMPORTANT: dati, tumatawag ito ng onConfirm() at onClose() nang
@@ -359,11 +438,11 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-brand-900/60 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 animate-modalIn">
-        <h3 className=" text-lg font-bold text-brand-800 mb-2">{title}</h3>
-        <p className="text-sm text-brand-500 mb-6 leading-relaxed">{message}</p>
-        <div className="flex gap-3 justify-end">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-brand-900/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain shadow-2xl p-4 sm:p-6 animate-modalIn">
+        <h3 className="text-base sm:text-lg font-bold text-brand-800 mb-2 leading-snug wrap-break-word">{title}</h3>
+        <p className="text-xs sm:text-sm text-brand-500 mb-4 sm:mb-6 leading-relaxed wrap-break-word">{message}</p>
+        <div className="flex items-center gap-2 sm:gap-3 justify-end">
           <Button variant="secondary" disabled={isProcessing} onClick={onClose}>Cancel</Button>
           <Button variant={variant} disabled={isProcessing} onClick={handleConfirm}>{isProcessing ? 'Please wait...' : confirmLabel}</Button>
         </div>
@@ -375,6 +454,7 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
 
 export function UnsavedChangesModal({ isOpen, onSave, onDiscard, onKeepEditing, isSaving = false }) {
   const [isProcessing, setIsProcessing] = useState(false);
+  useLockBodyScroll(isOpen);
   if (!isOpen) return null;
   const handleSave = async () => {
     if (isProcessing || isSaving) return;

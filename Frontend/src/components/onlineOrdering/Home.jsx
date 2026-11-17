@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import Footer from '../onlineOrdering/Footer';
 import EventAdsModal from '../onlineOrdering/eventAdsModal';
+import { Skeleton } from '../ui';
 
 const HERO_FILE = 'heroimg.png';
 
@@ -490,8 +491,20 @@ export default function Home() {
 
   if (!storageUrl && !configError) {
     return (
-      <div className="min-h-screen bg-[#FCFAF9] flex items-center justify-center">
-        <p className="text-sm text-[#8A7264]">Loading…</p>
+      <div role="status" aria-label="Loading shop home" aria-live="polite" className="min-h-screen bg-[#FCFAF9] px-5 py-8 sm:px-8 lg:px-16">
+        <div className="mx-auto grid max-w-7xl items-center gap-8 lg:min-h-[65vh] lg:grid-cols-2">
+          <div className="space-y-5">
+            <Skeleton w="w-40" h="h-7" className="rounded-full" />
+            <Skeleton w="w-4/5" h="h-12" />
+            <Skeleton w="w-full" h="h-5" />
+            <Skeleton w="w-5/6" h="h-5" />
+            <Skeleton w="w-36" h="h-11" className="rounded-full" />
+          </div>
+          <Skeleton h="h-72 sm:h-96" className="rounded-3xl" />
+        </div>
+        <div className="mx-auto mt-10 max-w-7xl grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} h="h-24" className="rounded-2xl" />)}
+        </div>
       </div>
     );
   }

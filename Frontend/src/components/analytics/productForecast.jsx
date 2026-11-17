@@ -1,4 +1,5 @@
 import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
+import { Skeleton } from '../ui';
 
 const MAX_ITEMS_PER_LIST = 2;
 
@@ -66,7 +67,7 @@ const ForecastSection = ({ title, icon, items, emptyText, periodDays, pctClass }
   );
 };
 
-export default function ProductForecasting({ data }) {
+export default function ProductForecasting({ data, isLoading = false }) {
   const insufficientData = data?.insufficientData || false;
   const message = data?.message || '';
 
@@ -85,7 +86,11 @@ export default function ProductForecasting({ data }) {
         </div>
       </div>
 
-      {insufficientData ? (
+      {isLoading ? (
+        <div role="status" aria-label="Loading product forecast" aria-live="polite" className="flex flex-1 flex-col gap-5">
+          {[0, 1].map(section => <div key={section} className="space-y-3"><Skeleton w="w-28" h="h-3" /><Skeleton h="h-11" /><Skeleton w="w-4/5" h="h-8" /></div>)}
+        </div>
+      ) : insufficientData ? (
         <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#d97706] font-medium border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[250px] bg-[#fffbf4]">
           {message || 'Insufficient data for this forecast.'}
         </div>

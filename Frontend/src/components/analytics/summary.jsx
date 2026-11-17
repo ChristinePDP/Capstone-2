@@ -1,4 +1,5 @@
-import { Loader2, CalendarRange } from 'lucide-react';
+import { CalendarRange } from 'lucide-react';
+import { Skeleton } from '../ui';
 
 // ============================================================
 // Ang component na ito ay pure presentational na. 
@@ -49,9 +50,11 @@ export default function Summary({ data, isLoading, error }) {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-brand-400">
-          <Loader2 size={16} className="animate-spin" />
-          <span>Loading performance summary...</span>
+        <div role="status" aria-label="Loading performance summary" aria-live="polite" className="space-y-3 py-2">
+          <Skeleton h="h-4" />
+          <Skeleton w="w-11/12" h="h-4" />
+          <Skeleton w="w-4/5" h="h-4" />
+          <Skeleton w="w-2/3" h="h-4" />
         </div>
       ) : error ? (
         <div className="flex-1 min-h-[140px] flex items-center justify-center rounded-lg bg-brand-50/50 px-4 py-8">

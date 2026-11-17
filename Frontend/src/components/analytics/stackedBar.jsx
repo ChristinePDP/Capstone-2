@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { BarChart2 } from 'lucide-react';
+import { Skeleton } from '../ui';
 
-export default function StackedBar({ period = 'Past 7 Days', height = 220, data: propData }) {
+export default function StackedBar({ period = 'Past 7 Days', height = 220, data: propData, isLoading = false }) {
   const chartWrapRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 600);
@@ -171,7 +172,11 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
         </div>
       </div>
 
-      {hasFetchedButEmpty ? (
+      {isLoading ? (
+        <div role="status" aria-label="Loading performance trend" aria-live="polite" style={{ minHeight: height }} className="flex flex-1 items-end gap-3 px-5 pb-7 pt-4">
+          {[42, 70, 52, 86, 62, 76, 48, 92, 60, 78, 54, 68].map((bar, index) => <Skeleton key={index} className="flex-1 rounded-t-sm" h="h-full" style={{ height: `${bar}%` }} />)}
+        </div>
+      ) : hasFetchedButEmpty ? (
         <div role="status" style={{ minHeight: height }} className="flex-1 flex items-center justify-center text-sm text-brand-400 rounded-lg text-center px-6">
           No performance trend data available for this timeframe
         </div>

@@ -1,4 +1,5 @@
 import { Wallet, Receipt, PiggyBank, ShoppingBag, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Skeleton } from '../ui';
 
 const fmtFull = (n) => '₱' + n.toLocaleString('en-PH');
 const fmtCount = (n) => n.toLocaleString('en-PH');
@@ -106,7 +107,7 @@ export default function PerformanceKpis({ kpi, isLoading }) {
           </div>
           <div className="flex items-end justify-between gap-2 mt-3 min-w-0">
             <p className={`${sizeForLength(card.text, KPI_SIZES)} font-bold text-brand-900 leading-none tracking-tight tabular-nums truncate min-w-0`}>
-              {card.text}
+              {isLoading ? <Skeleton w="w-28" h="h-7" /> : card.text}
             </p>
             <TrendBadge delta={card.delta} invert={card.invert} />
           </div>

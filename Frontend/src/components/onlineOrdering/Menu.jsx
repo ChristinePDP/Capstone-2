@@ -1,7 +1,8 @@
 // src/components/onlineOrdering/Menu.jsx
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Loader2, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
+import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
+import { ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
 import CartOrderSlipEditor from '../shared/CartOrderSlipEditor';
@@ -1476,19 +1477,22 @@ function getMenuProducts(forceRefresh = false) {
   if (forceRefresh) menuProductsFetchPromise = null;
   if (!menuProductsFetchPromise) {
     menuProductsFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products`, { cache: 'no-store' })
-      .then(res => res.json())
-      .then(json => (json.success && Array.isArray(json.data))
-        ? json.data.map(p => ({
+      .then(res => { if (!res.ok) throw new Error(`Server error (${res.status})`); return res.json(); })
+      .then(json => {
+        if (json.success === false) throw new Error(json.message || 'The server could not load the menu.');
+        if (!Array.isArray(json.data)) throw new Error('The server returned an unexpected menu response.');
+        return json.data.map(p => ({
             ...p,
             order_slip_fields: p.order_slip_fields || [],
             pricing_mode: p.pricing_mode || 'fixed',
             price_groups: p.price_groups || [],
             price_matrix: p.price_matrix || []
-          }))
-        : [])
+        }));
+      })
       .catch(err => {
         console.error('Failed to fetch products:', err);
-        return [];
+        menuProductsFetchPromise = null;
+        throw err;
       });
   }
   return menuProductsFetchPromise;
@@ -1499,11 +1503,16 @@ function getMenuBundles(forceRefresh = false) {
   if (forceRefresh) menuBundlesFetchPromise = null;
   if (!menuBundlesFetchPromise) {
     menuBundlesFetchPromise = fetch(`${import.meta.env.VITE_API_URL}/online-ordering/products/bundles?visibleOnly=true`, { cache: 'no-store' })
-      .then(res => res.json())
-      .then(json => (json.success && Array.isArray(json.data)) ? json.data : [])
+      .then(res => { if (!res.ok) throw new Error(`Server error (${res.status})`); return res.json(); })
+      .then(json => {
+        if (json.success === false) throw new Error(json.message || 'The server could not load promo bundles.');
+        if (!Array.isArray(json.data)) throw new Error('The server returned an unexpected bundles response.');
+        return json.data;
+      })
       .catch(err => {
         console.error('Failed to load promo bundles:', err);
-        return [];
+        menuBundlesFetchPromise = null;
+        throw err;
       });
   }
   return menuBundlesFetchPromise;
@@ -1521,6 +1530,8 @@ export default function Menu({ cart, setCart }) {
   const [rawProducts, setRawProducts] = useState([]);
   const [rawBundles, setRawBundles] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState(null);
+  const refreshCatalogRef = useRef(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [focusedProductId, setFocusedProductId] = useState(null);
   const [toast, setToast] = useState(null); 
@@ -1717,10 +1728,16 @@ export default function Menu({ cart, setCart }) {
         if (cancelled) return;
         setRawProducts(productsData);
         setRawBundles(bundlesData);
+        setCatalogError(null);
+      }).catch(err => {
+        if (!cancelled) setCatalogError(err?.message || 'Unable to connect to the server.');
+      }).finally(() => {
+        if (cancelled) return;
         setIsLoading(false);
       });
     };
 
+    refreshCatalogRef.current = refreshCatalog;
     refreshCatalog();
     const refreshOnFocus = () => refreshCatalog();
     window.addEventListener('focus', refreshOnFocus);
@@ -1728,6 +1745,7 @@ export default function Menu({ cart, setCart }) {
 
     return () => {
       cancelled = true;
+      refreshCatalogRef.current = null;
       window.removeEventListener('focus', refreshOnFocus);
       window.clearInterval(refreshTimer);
     };
@@ -2092,6 +2110,9 @@ export default function Menu({ cart, setCart }) {
     const hideSectionHeaderOnWide = !isAllView;
 
     const hasAnyMatch = categoriesToRender.some(cat => displayItems.some(p => p.category === cat));
+    if (!isLoading && catalogError && products.length === 0) {
+      return <ErrorState title="Menu unavailable" description={catalogError} onRetry={() => refreshCatalogRef.current?.()} />;
+    }
     if (isSearching && !hasAnyMatch) {
       return (
         <div className="flex flex-col items-center justify-center text-center py-20 px-6">
@@ -2108,7 +2129,7 @@ export default function Menu({ cart, setCart }) {
 
     // "All": lahat ng category ay walang laman -> isang pangkalahatang notice lang
     if (isAllView && !isSearching && !categoriesToRender.some(cat => displayItems.some(p => p.category === cat))) {
-      return <p className="py-8 text-center text-sm font-semibold text-[#8A7264]">No products yet</p>;
+      return <EmptyState title="No products yet" description="There are no products available in the menu right now." />;
     }
 
     return categoriesToRender.map(cat => {
@@ -2383,7 +2404,12 @@ export default function Menu({ cart, setCart }) {
 
           <div ref={productListRef} onScroll={checkScrollPosition} className="flex-1 lg:overflow-y-auto scrollbar-thin pr-0 lg:pr-2 pb-2 lg:pb-10">
             {isLoading ? (
-               <div className="flex justify-center items-center h-40"><Loader2 className="animate-spin text-[#8A7264]" size={32} /></div>
+              <ProductGridSkeleton count={6} columns="grid-cols-2 sm:grid-cols-3" />
+            ) : catalogError && products.length > 0 ? (
+              <div className="space-y-5">
+                <ErrorState title="Some menu items may be missing" description={catalogError} onRetry={() => refreshCatalogRef.current?.()} />
+                {renderProductGrid()}
+              </div>
             ) : (
               renderProductGrid()
             )}

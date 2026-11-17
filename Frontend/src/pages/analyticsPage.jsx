@@ -163,7 +163,7 @@ export default function AnalyticsPage() {
           <div className="h-full w-full">
             <PerformanceKpis kpi={analyticsData?.kpi} isLoading={isPerfLoading} />
           </div>
-          <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} height={180} />
+            <StackedBar period={perfTimeframe} data={analyticsData?.performanceTrend} height={180} isLoading={isPerfLoading} />
         </div>
 
         <div className="pt-4 sm:pt-6 border-t border-[#e7ded4] flex flex-col gap-4 sm:gap-5 w-full">
@@ -183,8 +183,9 @@ export default function AnalyticsPage() {
                   data={analyticsData?.salesForecast} 
                   insufficientData={analyticsData?.salesInsufficient}
                   message={analyticsData?.salesMessage}
+                  isLoading={isForecastLoading}
                 />
-                <ProductForecasting data={analyticsData?.productForecast} />
+                <ProductForecasting data={analyticsData?.productForecast} isLoading={isForecastLoading} />
               </div>
             </div>
           </div>
@@ -192,7 +193,7 @@ export default function AnalyticsPage() {
           <div className="flex flex-col gap-2">
             <h3 className="text-sm sm:text-base font-semibold text-[#3d2410]">Decision Support Insights</h3>
             <div className="w-full">
-              <ActionableRecommendation recommendations={analyticsData?.recommendations} />
+              <ActionableRecommendation recommendations={analyticsData?.recommendations} isLoading={isForecastLoading} />
             </div>
           </div>
 

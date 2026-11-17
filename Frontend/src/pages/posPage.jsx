@@ -7,6 +7,7 @@ import OrderSlip from '../components/pos/orderSlip';
 import { apiClient } from '../services/apiClient'; // <-- BAGONG IMPORT
 import { usePersistedCart } from '../components/shared/usePersistedCart';
 import { slipSignature } from '../components/shared/orderSlipUploads';
+import { ProductGridSkeleton } from '../components/ui';
 
 // FIX: dating naka-loob ito sa useEffect ng component (component state),
 // kaya tuwing mag-uunmount/mag-remount ang PosPage (nangyayari tuwing
@@ -87,6 +88,7 @@ export default function PosPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [slipModalItem, setSlipModalItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Bagong State para sa Mobile Drawer Cart
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -115,11 +117,13 @@ export default function PosPage() {
   const loadProducts = async (force = false, silent = false) => {
     try {
       if (!silent && (force || products.length === 0)) setLoading(true);
+      setLoadError(null);
 
       const normalized = await fetchPosProducts(force);
       setProducts(normalized);
     } catch (error) {
       console.error('Error fetching POS products:', error);
+      setLoadError(error.message || 'Could not connect to the server.');
       showToast('Could not load products. Please check your connection.', 'error');
     } finally {
       setLoading(false);
@@ -306,10 +310,12 @@ export default function PosPage() {
       {/* Binigyan ng pb-24 (padding-bottom) para hindi matakpan ng FAB ang ilalim sa mobile view */}
       <div className="flex-1 flex flex-col min-w-0 h-auto lg:h-full pb-24 lg:pb-0">
          {loading ? (
-           <div className="flex-1 flex items-center justify-center font-semibold text-[#8A7264] py-10">Loading products...</div>
+           <ProductGridSkeleton count={8} className="flex-1 content-start" />
          ) : (
            <PosMenu 
             products={filteredProducts}
+            loadError={loadError}
+            onRetry={() => loadProducts(true)}
             activeCategory={activeCategory}
             setActiveCategory={setActiveCategory}
             searchQuery={searchQuery}

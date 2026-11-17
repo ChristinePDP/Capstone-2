@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges } from '../../components/ui/index';
+import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
 import { findExactNameMatch, getSimilarNameSuggestions } from '../../utils/nameSimilarity';
 import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormattedPeso, getQtyError, getCostError, MAX_QTY } from '../../utils/numberGuards';
@@ -216,7 +216,7 @@ export default function IngredientsTab() {
           </div>
         </div>
 
-        <div ref={containerRef} className="px-4 pb-4 mt-4">
+        <div ref={containerRef} className="@container px-4 pb-4 mt-4">
           {isLoading && (
             <>
               <CardSkeleton count={3} />
@@ -227,26 +227,26 @@ export default function IngredientsTab() {
           {!isLoading && (
             <>
               {isCompact ? (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
                   {paged.map(ing => {
                     const st = ingStatus(ing.stock, ing.min);
                     return (
-                      <div key={ing.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <h4 className="font-bold text-brand-800 text-sm">{ing.name}</h4>
+                      <div key={ing.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm flex flex-col min-w-0">
+                        <div className="flex justify-between items-start gap-2 mb-2">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-brand-800 text-sm wrap-break-word">{ing.name}</h4>
                             <p className="text-xs text-brand-500 mt-0.5">
                               Stock: <span className="font-bold text-brand-700">{ing.stock} {ing.unit}</span>
                             </p>
                           </div>
-                          <Badge variant={st.cls}>{st.label}</Badge>
+                          <Badge variant={st.cls} className="shrink-0">{st.label}</Badge>
                         </div>
                         <div className="my-3">
                           <LevelBar stock={ing.stock} min={ing.min} />
                         </div>
-                        <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-brand-50">
-                          <Button size="sm" variant="secondary" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
-                          <Button size="sm" variant="danger" onClick={() => setDeleteTarget(ing)}>Delete</Button>
+                        <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
+                          <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
+                          <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(ing)}>Delete</Button>
                         </div>
                       </div>
                     );
@@ -280,10 +280,9 @@ export default function IngredientsTab() {
                 </Table>
               )}
 
-              {!paged.length && (
-                <div className="text-center py-10 text-brand-400 font-medium bg-white border border-dashed border-brand-200 rounded-xl">
-                  {(search || statusFilter !== 'all') ? 'No matching ingredient found.' : 'No ingredients recorded yet.'}
-                </div>
+              {!paged.length && (context.loadErrors?.ingredients
+                ? <ErrorState className="my-3" description={context.loadErrors.ingredients} onRetry={() => context.fetchAll()} />
+                : <EmptyState className="my-3" title={(search || statusFilter !== 'all') ? 'No matching ingredients' : 'No ingredients yet'} description={(search || statusFilter !== 'all') ? 'Change or clear the filters to see more ingredients.' : 'Add an ingredient to start tracking inventory.'} actionLabel={!(search || statusFilter !== 'all') ? 'Add ingredient' : undefined} onAction={!(search || statusFilter !== 'all') ? () => { setEditIng(null); setModalOpen(true); } : undefined} />
               )}
             </>
           )}
@@ -844,7 +843,7 @@ function IngredientModal({ isOpen, onClose, ingredient, existingIngredients = []
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-2.5 gap-y-6">
+                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-x-2.5 gap-y-6">
                   {!editingDetails ? (
                     <>
                       <div className="p-2.5 bg-white rounded-lg border border-brand-100 min-w-0">

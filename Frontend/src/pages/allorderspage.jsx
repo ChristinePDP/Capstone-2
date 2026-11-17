@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../components/ui';
@@ -25,10 +25,20 @@ export default function AllOrdersPage() {
 // Kapag ibang page ang pinuntahan at bumalik via link, bagong location.key na — hindi na ito ibabalik.
 const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)?.order ?? null);
   const [detailOpen, setDetailOpen] = useState(() => !!loadSaved(location.key));
+  const [loadError, setLoadError] = useState(null);
+  const [isReloadingOrders, setIsReloadingOrders] = useState(true);
+
+  const reloadOrders = useCallback(async () => {
+    setLoadError(null);
+    setIsReloadingOrders(true);
+    try { await fetchOrders(); }
+    catch (err) { setLoadError(err.response?.data?.message || err.message || 'Unable to connect to the server.'); }
+    finally { setIsReloadingOrders(false); }
+  }, [fetchOrders]);
 
   useEffect(() => {
-    fetchOrders().catch(err => console.error('Orders page refresh failed:', err));
-  }, [fetchOrders]);
+    reloadOrders();
+  }, [reloadOrders]);
 
   useEffect(() => {
     try {
@@ -100,7 +110,9 @@ const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)
     <div className="space-y-5">
       <Orders
         orders={orders}
-        loading={loading}
+        loading={loading || isReloadingOrders}
+        error={loadError}
+        onRetry={reloadOrders}
         onViewOrder={openOrder}
         onStatusChange={handleStatusChange}
         onPaymentVerification={handlePaymentVerification}

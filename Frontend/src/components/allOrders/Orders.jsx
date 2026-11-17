@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Badge, Button, Table, Tr, Td } from '../ui';
+import { Badge, Button, Table, Tr, Td, Skeleton, EmptyState, ErrorState } from '../ui';
 import QrScanner from './QrScanner';
 
 const ORDER_STATUSES = ['All', 'Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
@@ -224,7 +224,7 @@ function Pagination({ page, count, perPage, total, onChange, className = '' }) {
 // The listing itself: toolbar (search/filter/scan), mobile cards,
 // desktop table, and pagination. Tells the parent when a row is
 // picked via onViewOrder, and when a status changes via onStatusChange.
-export default function Orders({ orders, loading, onViewOrder, onStatusChange }) {
+export default function Orders({ orders, loading, error, onRetry, onViewOrder, onStatusChange }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -289,7 +289,15 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
 
       <div className="lg:hidden">
         {showLoading ? (
-          <p className="text-center py-16 text-slate-400 font-medium bg-white rounded-xl border border-slate-200 shadow-sm">Loading orders…</p>
+          <div role="status" aria-label="Loading orders" aria-live="polite" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-[#EAE4E0] bg-white p-4 shadow-sm space-y-4">
+                <div className="flex justify-between gap-4"><div className="flex-1 space-y-2"><Skeleton w="w-20" h="h-3" /><Skeleton w="w-2/3" h="h-4" /><Skeleton w="w-1/3" h="h-3" /></div><Skeleton w="w-20" h="h-6" className="rounded-full" /></div>
+                <Skeleton h="h-16" className="rounded-xl" />
+                <div className="flex justify-between border-t border-[#EAE4E0] pt-3"><div className="space-y-2"><Skeleton w="w-12" h="h-3" /><Skeleton w="w-20" h="h-5" /></div><Skeleton w="w-28" h="h-10" className="rounded-xl" /></div>
+              </div>
+            ))}
+          </div>
         ) : paged.length ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {paged.map(order => {
@@ -356,7 +364,9 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
             })}
           </div>
         ) : (
-          <p className="text-center text-slate-500 font-medium py-16 text-sm bg-white rounded-xl border border-slate-200 shadow-sm">No orders found.</p>
+          error && orders.length === 0
+            ? <ErrorState description={error} onRetry={onRetry} />
+            : <EmptyState title={search || statusFilter !== 'All' ? 'No matching orders' : 'No orders yet'} description={search || statusFilter !== 'All' ? 'Change the search or status filter to see more orders.' : 'New customer orders will appear here.'} />
         )}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mt-4">
           <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
@@ -366,7 +376,11 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
       <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
         <Table columns={COLUMNS}>
           {showLoading ? (
-            <Tr><Td className="text-center py-16 text-slate-400 font-medium" colSpan={8}>Loading orders…</Td></Tr>
+            Array.from({ length: 6 }).map((_, row) => (
+              <Tr key={`orders-skeleton-${row}`}>
+                {Array.from({ length: 8 }).map((__, col) => <Td key={col}><Skeleton w={col === 1 ? 'w-36' : col === 7 ? 'w-20' : 'w-16'} /></Td>)}
+              </Tr>
+            ))
           ) : paged.map(order => {
             const customer   = order.customer || order.customers || {};
             const grandTotal = order.grandTotal || order.grand_total || 0;
@@ -399,7 +413,9 @@ export default function Orders({ orders, loading, onViewOrder, onStatusChange })
             );
           })}
           {!showLoading && !paged.length && (
-            <Tr><Td className="text-center text-slate-500 font-medium py-16 text-sm" colSpan={8}>No orders found.</Td></Tr>
+            <Tr><Td className="py-4" colSpan={8}>{error && orders.length === 0
+              ? <ErrorState description={error} onRetry={onRetry} />
+              : <EmptyState title={search || statusFilter !== 'All' ? 'No matching orders' : 'No orders yet'} description={search || statusFilter !== 'All' ? 'Change the search or status filter to see more orders.' : 'New customer orders will appear here.'} />}</Td></Tr>
           )}
         </Table>
         <div className="px-4 py-3 border-t border-slate-200">

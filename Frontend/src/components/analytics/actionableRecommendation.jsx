@@ -2,6 +2,7 @@ import {
   TrendingUp,
   PackagePlus,
 } from 'lucide-react';
+import { Skeleton } from '../ui';
 
 // ─── Standard, constant section labels — hindi ito galing sa AI at hindi
 // dapat nagbabago. Ang AI lang ang nagbibigay ng laman (title/desc) ng
@@ -44,7 +45,7 @@ function RecommendationItem({ ins, accent }) {
   );
 }
 
-function Note({ section, items }) {
+function Note({ section, items, isLoading = false }) {
   const Icon = section.icon;
   const isEmpty = !items || items.length === 0;
   const count = items?.length || 0;
@@ -73,7 +74,13 @@ function Note({ section, items }) {
           )}
         </div>
 
-        {isEmpty ? (
+        {isLoading ? (
+          <div role="status" aria-label={`Loading ${section.label.toLowerCase()}`} aria-live="polite" className="space-y-3 py-2">
+            <Skeleton h="h-3.5" />
+            <Skeleton w="w-11/12" h="h-3.5" />
+            <Skeleton w="w-4/5" h="h-3.5" />
+          </div>
+        ) : isEmpty ? (
           <div
             role="status"
             className="flex items-center justify-center text-sm text-[#5C3317] border border-dashed border-[#e7ded4] rounded-lg text-center px-6 py-6"
@@ -92,7 +99,7 @@ function Note({ section, items }) {
   );
 }
 
-export default function ActionableRecommendation({ recommendations = {} }) {
+export default function ActionableRecommendation({ recommendations = {}, isLoading = false }) {
   const {
     salesOptimization = [],
     inventoryOptimization = [],
@@ -106,7 +113,7 @@ export default function ActionableRecommendation({ recommendations = {} }) {
       {/* One row on desktop, stacked (2 rows) on mobile[cite: 2] */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
         {SECTIONS.map((section) => (
-          <Note key={section.key} section={section} items={dataByKey[section.key]} />
+          <Note key={section.key} section={section} items={dataByKey[section.key]} isLoading={isLoading} />
         ))}
       </div>
     </div>
