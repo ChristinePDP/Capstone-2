@@ -33,13 +33,16 @@ const TIMEFRAME_DAYS = { "30d": 30 };
 const REQUIRED_HISTORY_DAYS = { "30d": 60 };
 
 // ==========================================
-// FORECAST: HOLT-WINTERS + 90-DAY HISTORY
+// FORECAST: HOLT-WINTERS + FULL HISTORY (MIN 90 DAYS)
 // ==========================================
 // Ang Sales Forecast at Product Forecast ay parehong:
 //   - nangangailangan ng at least 90 araw na history bago mag-forecast
 //     (gate bago tumawag kay Gemini o sumulat sa cache), at
-//   - ipinapadala kay Gemini ang EKSAKTONG huling 90 araw (hanggang kahapon,
-//     Asia/Manila), daily aggregated, at ang araw na walang benta ay 0.
+//   - ipinapadala kay Gemini ang BUONG history (mula sa unang araw na may
+//     benta hanggang kahapon, Asia/Manila), daily aggregated, at ang araw na
+//     walang benta ay 0. Walang 90-day cap sa data.
+// Ang FORECAST_HISTORY_DAYS ay MINIMUM na history na kailangan bago mag-forecast
+// (hindi window size).
 const FORECAST_HISTORY_DAYS = { "30d": 90 };
 
 // Ang forecasting algorithm na INAATAS kay Gemini. Additive ang seasonality
@@ -198,7 +201,7 @@ function winsorizeSeries(values) {
 //      Lunes), para hindi mawala ang totoong weekend/holiday peak.
 //   2. LEVEL: average kada araw sa huling `levelWindowDays`.
 //   3. WEEKDAY INDEX: average ng bawat weekday ÷ overall average, sa buong
-//      history window (90 days para sa 30d forecast).
+//      history (lahat ng available na araw).
 //   4. TREND: huling `trendWindowDays` vs ang `trendWindowDays` bago nito,
 //      na i-clamp (0.7–1.3) at i-damp (50%) para hindi ma-overreact sa
 //      isang magandang/pangit na linggo.
@@ -481,9 +484,10 @@ function computeResidualBand(pairs) {
 // ---------- Method summary na ipinapakita/ina-save kasama ng forecast ----------
 function describeForecastMethod(horizonKey, historyDays, meta) {
   return {
-    type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI over a 90-day daily series aggregated by the system (missing days = 0); statistical baseline kept only as a sanity reference",
+    type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI over the full daily history (first sale date to yesterday; at least 90 days required) aggregated by the system (missing days = 0); statistical baseline kept only as a sanity reference",
     model: HOLT_WINTERS_SPEC,
     historyDays,
+    minHistoryDays: FORECAST_HISTORY_DAYS[horizonKey],
     levelWindowDays: FORECAST_MODEL.levelWindowDays[horizonKey],
     trendWindowDays: FORECAST_MODEL.trendWindowDays[horizonKey],
     trendDamping: FORECAST_MODEL.trendDamping,
@@ -1319,7 +1323,7 @@ const SUPABASE_DEFAULT_ROW_CAP = 1000;
 
 // Supabase/PostgREST pinuputol ang resulta sa 1000 rows. Ang Sales Forecast ay
 // 1 row kada ORDER kaya kasya; ang Product Forecast ay 1 row kada ORDER ITEM
-// (mas marami ng ilang beses) kaya sa 90 araw ay maaari pa ring lumampas sa cap at
+// (mas marami ng ilang beses) kaya sa buong history ay maaari pa ring lumampas sa cap at
 // NAPUPUTOL ang history (kulang ang recent days o ang lumang days) —
 // kaya walang produktong lumalabas na eligible. Solusyon: hatiin ang date
 // range; kapag ang isang hati ay eksaktong umabot sa cap, hatiin pa ulit.
@@ -1343,12 +1347,13 @@ async function fetchRangeUncapped(fetchFn, startISO, endISO) {
   return left.concat(right);
 }
 
-// Daily units kada produkto (Manila dates), mula KAHAPON pabalik. Ang
-// bilang ay nagsisimula sa FIRST SALE ng produkto — hindi nilalagyan ng 0
+// Daily units kada produkto (Manila dates), BUONG history hanggang KAHAPON.
+// Ang bilang ay nagsisimula sa FIRST SALE ng produkto — hindi nilalagyan ng 0
 // ang mga araw bago pa ito lumabas, kaya hindi nasisira ang average ng
-// bagong produkto.
-async function getProductDailySeries(days) {
-  const { dateKeys, startISO, endISO, todayKey } = getManilaHistoryWindow(days);
+// bagong produkto. Walang window cap: kinukuha mula epoch.
+async function getProductDailySeries() {
+  const { dateKeys: [yesterdayKey], endISO, todayKey } = getManilaHistoryWindow(1);
+  const startISO = new Date(0).toISOString();
 
   const items = await fetchRangeUncapped(
     (from, to) => OrderItemsModel.getByOrderDateRange(from, to, {
@@ -1358,7 +1363,7 @@ async function getProductDailySeries(days) {
     startISO,
     endISO
   );
-  console.log(`[ProductForecastService] Fetched ${items.length} order-item rows for ${days}-day window.`);
+  console.log(`[ProductForecastService] Fetched ${items.length} order-item rows for full history.`);
 
   if (items.length > 0 && items.length % SUPABASE_DEFAULT_ROW_CAP === 0) {
     console.warn(`[ProductForecastService] Query returned exactly ${items.length} rows — baka naputol ng row limit ang history. I-check ang pagination ng OrderItemsModel.getByOrderDateRange.`);
@@ -1396,12 +1401,17 @@ async function getProductDailySeries(days) {
 
   const products = Object.values(byProduct)
     .map((p) => {
-      const full = dateKeys.map((date) => ({ date, value: p.qtyByDate[date] || 0 }));
-      const firstSaleIndex = full.findIndex((pt) => pt.value > 0);
+      const firstSaleKey = Object.keys(p.qtyByDate).filter((d) => p.qtyByDate[d] > 0 && d <= yesterdayKey).sort()[0];
+      const series = [];
+      if (firstSaleKey) {
+        for (let d = firstSaleKey; d <= yesterdayKey; d = addDaysToKey(d, 1)) {
+          series.push({ date: d, value: p.qtyByDate[d] || 0 });
+        }
+      }
       return {
         productName: p.productName,
         category: p.category,
-        series: firstSaleIndex === -1 ? [] : full.slice(firstSaleIndex),
+        series,
       };
     })
     .filter((p) => p.series.length > 0);
@@ -1525,8 +1535,7 @@ const unitsOfProduct = (p) => sumOf(p.series.map((x) => x.value));
 // GATE (per product): ang produktong pasok lang sa eligibility rules ang
 // maaaring ipadala kay Gemini.
 function eligibleProductsFor(products, horizonKey) {
-  const historyDays = FORECAST_HISTORY_DAYS[horizonKey];
-  return products.filter((p) => isProductEligible(p.series.slice(-historyDays), horizonKey));
+  return products.filter((p) => isProductEligible(p.series, horizonKey));
 }
 
 // DIAGNOSTIC LOG (walang epekto sa forecast): bakit pumasa/bagsak ang bawat produkto.
@@ -1576,7 +1585,8 @@ function buildProductForecastPrompt(products, { todayKey }) {
       timezone: MANILA_TZ,
       metric: "units sold per calendar day per product (cancelled orders excluded)",
       missingDaysFilledWithZero: true,
-      maxHistoryDays: FORECAST_HISTORY_DAYS["30d"],
+      historyScope: "full history of each product, from its firstSaleDate to historyEndDate",
+      minHistoryDays: FORECAST_HISTORY_DAYS["30d"],
     },
     historyEndDate: addDaysToKey(todayKey, -1),
     forecastStartDate: todayKey,
@@ -1679,11 +1689,8 @@ function parseProductAiResult(raw, { sentById }) {
 function buildProductHorizonPayload({ products, aiById, horizonKey }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const rules = PRODUCT_FORECAST_RULES[horizonKey];
-  const historyDays = FORECAST_HISTORY_DAYS[horizonKey];
 
-  const scoped = products
-    .map((p) => ({ ...p, series: p.series.slice(-historyDays) }))
-    .filter((p) => p.series.length > 0);
+  const scoped = products.filter((p) => p.series.length > 0);
   const eligible = scoped.filter((p) => isProductEligible(p.series, horizonKey));
   logProductEligibility(scoped, eligible.length, horizonKey);
 
@@ -1766,9 +1773,10 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     // sa method.baselineAccuracy ay ng NON-AI na statistical baseline (reference lang).
     accuracy: null,
     method: {
-      type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI per product over a 90-day daily series aggregated by the system (missing days = 0; eligibility rules + outlier cap); statistical baseline kept only as a reference",
+      type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI per product over the full daily history (first sale date to yesterday; at least 90 days required) aggregated by the system (missing days = 0; eligibility rules + outlier cap); statistical baseline kept only as a reference",
       model: HOLT_WINTERS_SPEC,
-      historyDays,
+      historyDays: scoped.reduce((m, p) => Math.max(m, p.series.length), 0),
+      minHistoryDays: FORECAST_HISTORY_DAYS[horizonKey],
       rules,
       comparison: `AI forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
       baselineAccuracy: backtestProductHorizon(scoped, horizonKey, false),
@@ -1786,15 +1794,16 @@ async function runProductForecastRefresh() {
     return payload;
   }
 
-  const fetchDays = FORECAST_HISTORY_DAYS["30d"];
-
   let payload;
   try {
-    const { products, todayKey } = await getProductDailySeries(fetchDays);
+    const { products, todayKey } = await getProductDailySeries();
 
     if (products.length === 0) {
       const noActivityMessage = "No product sales activity found in the historical window.";
       payload = { thirtyDay: productInsufficientPart("30d", noActivityMessage) };
+    } else if (products.reduce((m, p) => Math.max(m, p.series.length), 0) < FORECAST_HISTORY_DAYS["30d"]) {
+      // Backend check: wala pang 90 araw ang history mula sa unang benta hanggang kahapon — walang forecast.
+      payload = { thirtyDay: productInsufficientPart("30d", thirtyCheck.message || `Not enough historical data yet — a 30-day forecast requires at least ${FORECAST_HISTORY_DAYS["30d"]} days of past sales data.`) };
     } else {
       const withIds = products.map((p, i) => ({ ...p, id: `p${i + 1}` }));
 
@@ -1878,7 +1887,7 @@ const ProductForecastService = {
 // ==========================================
 // Si Gemini ang nag-aanalyze ng daily sales history at nagbibigay ng forecast.
 // Ang system ang nag-fi-filter bago ipadala (sufficiency gate, active-days gate,
-// outlier cap, 90-day limit) at nagva-validate ng sagot (shape, per-day cap,
+// outlier cap, buong history na may minimum na 90 araw) at nagva-validate ng sagot (shape, per-day cap,
 // total vs statistical baseline). Ang resulta ay isinusulat sa AI cache.
 // Isang Gemini call lang kada refresh para sa 30-day forecast. Walang retry loop.
 const SF_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1891,16 +1900,18 @@ function buildSalesCacheKey(timeframe) {
 //   - metric: SUM ng amount_paid (aktwal na natanggap na bayad) kada ARAW —
 //     parehong basehan ng KPI at Performance Summary. Cancelled orders hindi kasama.
 //   - Araw = Manila calendar day (Asia/Manila), hindi UTC.
-//   - Kumpletong araw lang: EKSAKTONG huling FORECAST_HISTORY_DAYS (90) araw,
-//     hanggang KAHAPON. Hindi kasama ang ngayon dahil hindi pa tapos ang araw.
+//   - Kumpletong araw lang: BUONG history, mula sa unang araw na may benta
+//     (total amount_paid > 0) hanggang KAHAPON. Hindi kasama ang ngayon dahil
+//     hindi pa tapos ang araw.
 //   - Bawat araw sa pagitan ng simula at kahapon ay may row. Kapag walang
 //     order sa araw na iyon, ang value ay 0 (tunay na zero-sales day), para
 //     tuloy-tuloy ang series at hindi masira ang weekly (period = 7) pattern.
-// Ang sufficiency gate (checkForecastDataSufficiency) ang nagsisiguro na
-// may history na umabot sa 90 araw bago ito tawagin.
+// Ang sufficiency gate (checkForecastDataSufficiency) at ang length check sa
+// runSalesForecastRefresh ang nagsisiguro na may history na umabot sa
+// minimum na 90 araw bago tumawag kay Gemini.
 async function getSalesDailySeries() {
-  const days = FORECAST_HISTORY_DAYS["30d"];
-  const { todayKey, dateKeys, startISO, endISO } = getManilaHistoryWindow(days);
+  const { dateKeys: [yesterdayKey], endISO, todayKey } = getManilaHistoryWindow(1);
+  const startISO = new Date(0).toISOString();
 
   const orders = await fetchRangeUncapped(
     (from, to) => OrdersModel.getByDateRange(from, to, {
@@ -1917,20 +1928,23 @@ async function getSalesDailySeries() {
     console.warn(`[SalesForecastService] Query returned exactly ${orders.length} rows — baka naputol ng row limit ang history. I-check ang pagination ng OrdersModel.getByDateRange.`);
   }
 
-  const inWindow = new Set(dateKeys);
   const totalsByDate = {};
   for (const order of orders) {
     if (!order.created_at) continue;
     const day = toManilaDateKey(order.created_at);
-    if (!inWindow.has(day)) continue;
+    if (day > yesterdayKey) continue;
     totalsByDate[day] = (totalsByDate[day] || 0) + Number(order.amount_paid || 0);
   }
 
-  // Isang row kada araw; walang benta = 0.
-  const series = dateKeys.map((date) => ({
-    date,
-    value: Math.round((totalsByDate[date] || 0) * 100) / 100,
-  }));
+  // Simula sa unang araw na may benta (total amount_paid > 0).
+  const firstDate = Object.keys(totalsByDate).filter((d) => totalsByDate[d] > 0).sort()[0];
+  if (!firstDate) return { series: [], todayKey };
+
+  // Isang row kada araw hanggang kahapon; walang benta = 0.
+  const series = [];
+  for (let d = firstDate; d <= yesterdayKey; d = addDaysToKey(d, 1)) {
+    series.push({ date: d, value: Math.round((totalsByDate[d] || 0) * 100) / 100 });
+  }
 
   const zeroDays = series.filter((p) => p.value === 0).length;
   console.log(
@@ -1941,11 +1955,11 @@ async function getSalesDailySeries() {
   return { series, todayKey };
 }
 
-// Safety check bago ipadala kay Gemini: eksaktong bilang ng araw, walang
-// butas sa petsa, at puro numero ang values.
-function assertContinuousDailySeries(series, expectedDays) {
-  if (!Array.isArray(series) || series.length !== expectedDays) {
-    throw new Error(`Daily series must have exactly ${expectedDays} days, got ${series?.length ?? 0}.`);
+// Safety check bago ipadala kay Gemini: hindi bababa sa minimum na bilang ng
+// araw, walang butas sa petsa, at puro numero ang values.
+function assertContinuousDailySeries(series, minDays) {
+  if (!Array.isArray(series) || series.length < minDays) {
+    throw new Error(`Daily series must have at least ${minDays} days, got ${series?.length ?? 0}.`);
   }
   for (let i = 0; i < series.length; i++) {
     if (!Number.isFinite(series[i].value)) {
@@ -1965,7 +1979,6 @@ function insufficientSalesPayload(message) {
   };
 }
 
-const SF_PROMPT_HISTORY_DAYS = FORECAST_HISTORY_DAYS["30d"];      // hangganan ng history na ipinapadala kay Gemini (token control)
 const SF_DAILY_CAP_MULTIPLIER = 1.5;    // forecast ng isang araw <= 1.5x ng pinakamataas na (capped) araw
 const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // total ng AI vs statistical baseline
 
@@ -2008,7 +2021,7 @@ function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHor
   ].join(" ");
 
   const userPrompt = JSON.stringify({
-    task: `Apply Holt-Winters (additive trend, additive weekly seasonality, period 7) to the daily sales history and forecast daily sales (PHP, actual amount paid) for the next ${horizonDays} days.`,
+    task: `Apply Holt-Winters (additive trend, additive weekly seasonality, period 7) to the full daily sales history from ${startDate} to ${filteredHistory[historyDays - 1].date} and forecast daily sales (PHP, actual amount paid) for the next ${horizonDays} days.`,
     method: {
       algorithm: HOLT_WINTERS_SPEC.algorithm,
       seasonalPeriod: HOLT_WINTERS_SPEC.seasonalPeriod,
@@ -2021,6 +2034,7 @@ function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHor
       metric: "sum of amount_paid per calendar day (cancelled orders excluded)",
       missingDaysFilledWithZero: true,
       days: historyDays,
+      minHistoryDays: FORECAST_HISTORY_DAYS["30d"],
       zeroSalesDays: zeroDays,
     },
     history: {
@@ -2110,7 +2124,7 @@ function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baseli
       ...describeForecastMethod(horizonKey, history.length, {
         ...baselineMeta,
         outliersCapped: outlierCount,
-        promptHistoryDays: Math.min(history.length, SF_PROMPT_HISTORY_DAYS),
+        promptHistoryDays: history.length,
       }),
       statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
     },
@@ -2131,25 +2145,31 @@ async function runSalesForecastRefresh() {
 
   try {
     const { series, todayKey } = await getSalesDailySeries();
-    assertContinuousDailySeries(series, FORECAST_HISTORY_DAYS["30d"]);
+    // BACKEND CHECK: kailangan ng minimum na history (unang benta -> kahapon) bago mag-forecast.
+    const minHistoryDays = FORECAST_HISTORY_DAYS["30d"];
+    const enoughHistory = series.length >= minHistoryDays;
+    if (enoughHistory) assertContinuousDailySeries(series, minHistoryDays);
 
     // GATE: sapat na araw na may benta bago tumawag kay Gemini.
     const activeDays = series.filter((p) => p.value > 0).length;
-    const ready30 = activeDays >= SALES_MIN_ACTIVE_DAYS["30d"];
+    const ready30 = enoughHistory && activeDays >= SALES_MIN_ACTIVE_DAYS["30d"];
     const activityMessage = (hk) =>
       `Not enough sales activity yet — only ${activeDays} day(s) with sales in the available history (a ${TIMEFRAME_DAYS[hk]}-day forecast needs at least ${SALES_MIN_ACTIVE_DAYS[hk]}).`;
 
     if (!ready30) {
-      thirtyPayload = insufficientSalesPayload(activityMessage("30d"));
+      thirtyPayload = insufficientSalesPayload(
+        enoughHistory
+          ? activityMessage("30d")
+          : `Not enough historical data yet — a 30-day forecast requires at least ${minHistoryDays} days of past sales data.`
+      );
     } else {
       const horizonDays = 30;
       const futureDates = buildFutureDateKeys(todayKey, horizonDays);
 
-      // FILTER: outlier-capped na history, limitado sa huling SF_PROMPT_HISTORY_DAYS.
+      // FILTER: outlier-capped na BUONG history (walang cap sa bilang ng araw).
       const { adjusted, outlierCount } = winsorizeByWeekday(series);
       const filteredHistory = series
-        .map((p, i) => ({ date: p.date, value: adjusted[i] }))
-        .slice(-SF_PROMPT_HISTORY_DAYS);
+        .map((p, i) => ({ date: p.date, value: adjusted[i] }));
       const dailyCap = Math.max(...filteredHistory.map((p) => p.value)) * SF_DAILY_CAP_MULTIPLIER;
 
       // Statistical reference (hindi ito ang forecast): ipinapakita kay Gemini
