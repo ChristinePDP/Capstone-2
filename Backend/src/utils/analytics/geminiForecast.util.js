@@ -1,8 +1,8 @@
-const PRIMARY_GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+// utils/analytics/geminiForecast.util.js
+const DEFAULT_PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
 const DEFAULT_FALLBACK_MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-flash-lite-latest",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
 ];
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DEFAULT_TIMEOUT_MS = 55000;
@@ -10,13 +10,14 @@ const RETRY_DELAY_MS = 2000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function buildModelCandidates() {
+function buildModelCandidates(preferredModel) {
+  const primary = preferredModel || DEFAULT_PRIMARY_MODEL;
   const configuredFallbacks = process.env.GEMINI_FALLBACK_MODELS
     ? process.env.GEMINI_FALLBACK_MODELS.split(",").map((m) => m.trim()).filter(Boolean)
     : DEFAULT_FALLBACK_MODELS;
 
   const unique = [];
-  for (const model of [PRIMARY_GEMINI_MODEL, ...configuredFallbacks]) {
+  for (const model of [primary, ...configuredFallbacks]) {
     if (model && !unique.includes(model)) unique.push(model);
   }
   return unique;
@@ -88,22 +89,9 @@ async function requestGeminiModel({ model, body, timeoutMs }) {
   }
 }
 
-/**
- * Calls Gemini with a system prompt + user prompt and forces JSON output.
- * Retries transient 5xx/503/network errors and falls back to alternate models
- * when a model is temporarily unavailable (503) or missing (404), while
- * failing fast on 429 quota limits so upstream cooldown guards work cleanly.
- *
- * @param {Object} params
- * @param {string} params.systemPrompt - Role/instructions + required JSON schema.
- * @param {string} params.userPrompt   - The actual data + task for this request.
- * @param {number} [params.temperature=0.4]
- * @param {Object} [params.responseSchema]
- * @param {number} [params.maxOutputTokens]
- * @param {number} [params.timeoutMs=55000]
- * @returns {Promise<Object>} Parsed JSON object returned by Gemini.
- */
+
 async function callGeminiJSON({
+  model,
   systemPrompt,
   userPrompt,
   temperature = 0.4,
@@ -130,12 +118,12 @@ async function callGeminiJSON({
     generationConfig,
   };
 
-  const models = buildModelCandidates();
+  const models = buildModelCandidates(model);
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
 
   for (let i = 0; i < models.length; i++) {
-    const model = models[i];
+    const activeModel = models[i];
     const maxAttempts = i === 0 ? 2 : 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -146,7 +134,7 @@ async function callGeminiJSON({
 
       try {
         return await requestGeminiModel({
-          model,
+          model: activeModel,
           body,
           timeoutMs: Math.min(25000, remaining),
         });
@@ -161,7 +149,7 @@ async function callGeminiJSON({
 
         const canTryFallback = i < models.length - 1 && (err.retryable || isFallbackEligibleStatus(err.status));
         if (canTryFallback) {
-          console.warn(`[Gemini] ${model} failed (${err.message}); falling back to ${models[i + 1]}.`);
+          console.warn(`[Gemini] ${activeModel} failed (${err.message}); falling back to ${models[i + 1]}.`);
           break;
         }
 

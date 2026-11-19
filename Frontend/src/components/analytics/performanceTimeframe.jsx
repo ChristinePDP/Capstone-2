@@ -147,6 +147,23 @@ const buildMonthCells = (first) => {
   return cells;
 };
 
+// ---------- timeframe shortcuts ----------
+// Ang mga shortcut na ito ay nagbibigay ng date range na kapareho ng format ng
+// Custom Range ("Jan 1, 2026 - Nov 19, 2026"), kaya hindi na kailangang galawin
+// ang parent / API — gumagana na agad gaya ng custom range.
+// Para sa "This ..." na mga shortcut, ang dulo ay hanggang ngayong araw lang
+// (hindi hanggang dulo ng period) para walang walang laman na future na bars.
+
+const rangeToLabel = ({ start, end }) => `${fmtShort(start)} - ${fmtShort(end)}`;
+
+const SHORTCUTS = [
+  {
+    id: 'this-year',
+    label: 'This Year',
+    getRange: (t) => ({ start: new Date(t.getFullYear(), 0, 1), end: t }),
+  },
+];
+
 const NARROW_QUERY = '(max-width: 639px)';
 const subscribeNarrow = (onChange) => {
   const mq = window.matchMedia(NARROW_QUERY);
@@ -609,8 +626,16 @@ export default function PerformanceTimeframe({ value, onChange }) {
   const [showCustom, setShowCustom] = useState(false);
   const containerRef = useRef(null);
 
-  const isCustomSelected = value && !PRESETS.includes(value);
-  const currentLabel = isCustomSelected ? value : (value || PRESETS[0]);
+  // Kung ang kasalukuyang value ay kapareho ng range ng isang shortcut
+  // (hal. "Jan 1, 2026 - Nov 19, 2026" = This Year), ituturing itong shortcut
+  // at hindi custom range — para tama ang label sa trigger at ang checkmark.
+  const todayStart = startOfDay(new Date());
+  const activeShortcut = value
+    ? SHORTCUTS.find((s) => rangeToLabel(s.getRange(todayStart)) === value)
+    : null;
+
+  const isCustomSelected = !!value && !PRESETS.includes(value) && !activeShortcut;
+  const currentLabel = activeShortcut ? activeShortcut.label : isCustomSelected ? value : (value || PRESETS[0]);
   const hasActiveFilter = currentLabel !== PRESETS[0];
 
   useEffect(() => {
@@ -630,6 +655,12 @@ export default function PerformanceTimeframe({ value, onChange }) {
     setShowCustom(false);
   };
 
+  const handleSelectShortcut = (shortcut) => {
+    onChange(rangeToLabel(shortcut.getRange(startOfDay(new Date()))));
+    setOpen(false);
+    setShowCustom(false);
+  };
+
   const openCustom = () => {
     setShowCustom(true);
   };
@@ -639,6 +670,8 @@ export default function PerformanceTimeframe({ value, onChange }) {
     setOpen(false);
     setShowCustom(false);
   };
+
+  const itemCls = 'w-full flex items-center justify-between px-4 py-2 text-[12px] sm:text-[13px] font-bold bg-white text-brand-700 hover:bg-brand-50 hover:text-brand-900 transition-colors whitespace-nowrap';
 
   return (
     <div className="flex items-center gap-4 max-w-full">
@@ -660,9 +693,11 @@ export default function PerformanceTimeframe({ value, onChange }) {
         {open && (
           // Sa mobile naka-anchor sa kaliwa (para hindi lumabas sa screen),
           // sa `sm:` pataas naka-anchor sa kanan ng trigger.
-          <div className="absolute z-10 top-full left-0 sm:left-auto sm:right-0 mt-2 bg-white border border-brand-300 rounded-xl shadow-lg overflow-hidden max-w-[95vw] sm:max-w-none">
+          // `max-h` base sa taas ng screen + `overflow-y-auto` = hindi na hahaba
+          // palabas ng screen ang dropdown; scrollable na lang ito.
+          <div className="absolute z-10 top-full left-0 sm:left-auto sm:right-0 mt-2 bg-white border border-brand-300 rounded-xl shadow-lg max-w-[95vw] sm:max-w-none max-h-[min(28rem,calc(100dvh-10rem))] overflow-y-auto overscroll-contain">
             {!showCustom ? (
-              <div role="menu" className="py-2 w-50">
+              <div role="menu" className="pt-2 w-50">
                 <ul>
                   {PRESETS.map((v) => (
                     <li key={v} role="presentation">
@@ -670,24 +705,41 @@ export default function PerformanceTimeframe({ value, onChange }) {
                         role="menuitem"
                         data-testid={`option-${v.replace(/\s+/g, '-').toLowerCase()}`}
                         onClick={() => handleSelectPreset(v)}
-                        className="w-full flex items-center justify-between px-4 py-2 text-[12px] sm:text-[13px] font-bold bg-white text-brand-700 hover:bg-brand-50 hover:text-brand-900 transition-colors whitespace-nowrap"
+                        className={itemCls}
                       >
                         <span>{v}</span>
                         {value === v && <Check size={14} className="text-brand-600" />}
                       </button>
                     </li>
                   ))}
+                  {SHORTCUTS.map((s) => (
+                    <li key={s.id} role="presentation">
+                      <button
+                        role="menuitem"
+                        data-testid={`option-${s.id}`}
+                        onClick={() => handleSelectShortcut(s)}
+                        className={itemCls}
+                      >
+                        <span>{s.label}</span>
+                        {activeShortcut?.id === s.id && <Check size={14} className="text-brand-600" />}
+                      </button>
+                    </li>
+                  ))}
                 </ul>
-                <div className="h-px bg-brand-100 my-1 mx-3" />
-                <button
-                  role="menuitem"
-                  data-testid="option-custom-range"
-                  onClick={openCustom}
-                  className={`w-full flex items-center justify-between px-4 py-2 text-[12px] sm:text-[13px] font-bold transition-colors whitespace-nowrap ${isCustomSelected ? 'bg-brand-50 text-brand-900' : 'bg-white text-brand-700 hover:bg-brand-50 hover:text-brand-900'}`}
-                >
-                  <span>Custom Range</span>
-                  {isCustomSelected && <Check size={14} className="text-brand-600" />}
-                </button>
+
+                {/* Naka-sticky sa baba kaya laging abot ang Custom Range kahit nag-i-scroll. */}
+                <div className="sticky bottom-0 bg-white pb-2">
+                  <div className="h-px bg-brand-100 mb-1 mx-3" />
+                  <button
+                    role="menuitem"
+                    data-testid="option-custom-range"
+                    onClick={openCustom}
+                    className={`w-full flex items-center justify-between px-4 py-2 text-[12px] sm:text-[13px] font-bold transition-colors whitespace-nowrap ${isCustomSelected ? 'bg-brand-50 text-brand-900' : 'bg-white text-brand-700 hover:bg-brand-50 hover:text-brand-900'}`}
+                  >
+                    <span>Custom Range</span>
+                    {isCustomSelected && <Check size={14} className="text-brand-600" />}
+                  </button>
+                </div>
               </div>
             ) : (
               // `bare` = walang sariling border/shadow, kasi nasa loob na ng popover na may border at shadow.
