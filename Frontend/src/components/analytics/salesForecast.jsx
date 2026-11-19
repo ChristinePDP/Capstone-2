@@ -108,7 +108,7 @@ export default function SalesForecast({
         <LucideLineChart size={20} className="text-[#5C3317]" />
         <div>
           <h3 className="text-base font-bold text-[#3d2410]">{title}</h3>
-          <p className="text-xs text-[#9a8b7a]">Forecasted next 30 days</p>
+          <p className="text-xs text-[#9a8b7a]">AI-generated projection of daily sales for the next 30 days, based on your shop’s historical sales records.</p>
         </div>
       </div>
 

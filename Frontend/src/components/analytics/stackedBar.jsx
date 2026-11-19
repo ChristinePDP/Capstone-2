@@ -37,7 +37,14 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
   // `tickLabel` (start date lang) para sa X axis, kasi ang haba ng
   // "Dec 1 – Dec 12" kaya nagpapatong-patong sa malalawak na date range.
   const processedChartData = useMemo(() => {
-    const data = Array.isArray(propData) ? propData : [];
+    const rawData = Array.isArray(propData) ? propData : [];
+    // Sa date-based na range (kahit 3 years pa), ang mga petsang may laman lang
+    // ang ipapakita. Tinatanggal ang mga araw na walang Sales at walang Expenses
+    // bago mag-bucket, kaya walang walang-laman na bars/labels sa X axis.
+    // Sa hourly (Today / Yesterday), buo pa rin ang oras para maayos ang timeline.
+    const data = isHourly
+      ? rawData
+      : rawData.filter((d) => Number(d.Sales || 0) !== 0 || Number(d.Expenses || 0) !== 0);
     let chartData = data;
     if (!isHourly && data.length > 30) {
       const step = Math.ceil(data.length / 30);
@@ -76,7 +83,7 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
           VisSalesRemainder = Sales > Expenses ? Sales - Expenses : null; 
         }
       } else {
-        VisBaseExpenses = Expenses > 0 ? Expenses : null; 
+        VisBaseExpenses = Expenses > 0 ? Expenses : null;
         VisProfit = Profit > 0 ? Profit : null;
       }
 
@@ -216,45 +223,26 @@ export default function StackedBar({ period = 'Past 7 Days', height = 220, data:
               cursor={{ fill: '#f8fafc' }}
               content={({ active, payload, label }) => {
                 if (!active || !payload?.length) return null;
-                const dataObj = payload[0].payload; 
-                
-                const tooltipHourly = isHourly || /AM|PM/i.test(label);
-                
+                const dataObj = payload[0].payload;
+
+                // Laging 3 ang row (Sales, Expenses, Profit) kahit 0 ang value.
+                // `w-max` + `whitespace-nowrap` = lumalapad ang tooltip ayon sa
+                // pinakamahabang figure (hal. ₱1,234,567), hindi napuputol o nagwa-wrap.
+                const rows = [
+                  { name: 'Sales:', value: dataObj.Sales },
+                  { name: 'Expenses:', value: dataObj.Expenses },
+                  { name: 'Profit:', value: dataObj.Profit },
+                ];
+
                 return (
-                  <div className="bg-white border border-brand-200 rounded-md shadow-lg p-3 text-sm min-w-37.5 z-50">
-                    <p className="font-semibold text-brand-800 mb-2">{label}</p>
-                    
-                    {dataObj.Sales !== 0 && (
-                      <p className="flex items-center justify-between gap-4 mb-2 pb-2 border-b border-slate-100">
-                        {tooltipHourly ? (
-                          <span className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full inline-block bg-[#3b82f6]" />
-                            <span className="text-brand-500">Sales:</span>
-                          </span>
-                        ) : (
-                          <span className="text-brand-500 font-medium">Total Sales:</span>
-                        )}
-                        <span className={`font-bold ${tooltipHourly ? 'text-blue-600' : 'text-brand-800'}`}>
-                          {fmtFull(dataObj.Sales)}
-                        </span>
+                  <div className="bg-white border border-brand-200 rounded-md shadow-lg px-2.5 py-2 text-xs w-max min-w-28 max-w-[85vw] whitespace-nowrap z-50">
+                    <p className="font-semibold text-brand-800 mb-1.5">{label}</p>
+                    {rows.map((row) => (
+                      <p key={row.name} className="flex items-center justify-between gap-4 leading-5">
+                        <span className="text-brand-500">{row.name}</span>
+                        <span className="font-bold text-brand-800 tabular-nums">{fmtFull(row.value)}</span>
                       </p>
-                    )}
-                    
-                    {dataObj.Expenses !== 0 && (
-                      <p className="flex items-center justify-between gap-4 mb-1">
-                        <span className="text-brand-500">Expenses:</span>
-                        <span className="font-bold text-red-500">{fmtFull(dataObj.Expenses)}</span>
-                      </p>
-                    )}
-                    
-                    {!tooltipHourly && dataObj.Profit !== 0 && (
-                      <p className="flex items-center justify-between gap-4 mb-1">
-                        <span className="text-brand-500">Profit:</span>
-                        <span className={`font-bold ${dataObj.Profit < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                          {fmtFull(dataObj.Profit)}
-                        </span>
-                      </p>
-                    )}
+                    ))}
                   </div>
                 );
               }}
