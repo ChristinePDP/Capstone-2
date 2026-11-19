@@ -612,6 +612,65 @@ const ProductionService = {
       stockPlans.push({ id: product.id, name: product.name, current, qty: need.qty });
     }
 
+    // Preflight every fresh-made item's complete formula before creating any
+    // production logs or deducting stock. This prevents a shortage in a later
+    // line item from being discovered only after earlier ingredients moved.
+    const requiredStock = new Map();
+    for (const it of freshItems) {
+      const { data: recipe, error: recipeErr } = await RecipeModel.findById(it.recipe_id);
+      if (recipeErr || !recipe) throw new AppError(`Recipe not found for "${it.product_name}".`, 404);
+      const yieldQty = Number(recipe.yield_quantity) > 0 ? Number(recipe.yield_quantity) : 1;
+      const factor = Number(it.quantity) / yieldQty;
+
+      for (const ri of recipe.recipe_ingredients || []) {
+        const isMaterial = ri.item_type === 'material';
+        const model = isMaterial ? MaterialModel : IngredientModel;
+        const id = isMaterial ? ri.material_id : ri.raw_ingredient_id;
+        const lookup = id ? await model.findById(id) : await model.findByName(ri.item_name);
+        if (lookup.error || !lookup.data) {
+          throw new AppError(`"${ri.item_name}" sa formula ay wala sa inventory.`, 400);
+        }
+        const stockItem = lookup.data;
+        if (isMaterial && stockItem.material_type && stockItem.material_type !== 'product') {
+          throw new AppError(`"${stockItem.name || ri.item_name}" ay hindi product material.`, 400);
+        }
+
+        const neededInStockUnit = convertUnit(
+          Number(ri.quantity) * factor,
+          ri.unit,
+          stockItem.unit
+        );
+        if (!Number.isFinite(neededInStockUnit)) {
+          throw new AppError(
+            `Hindi tugma ang unit ng "${stockItem.name || ri.item_name}" sa formula (${ri.unit}) at inventory (${stockItem.unit}).`,
+            400
+          );
+        }
+
+        const key = `${ri.item_type}:${id || String(ri.item_name).trim().toLowerCase()}`;
+        const existing = requiredStock.get(key);
+        if (existing) {
+          existing.needed += neededInStockUnit;
+        } else {
+          requiredStock.set(key, {
+            name: stockItem.name || ri.item_name,
+            unit: stockItem.unit,
+            available: Number(stockItem.stock_quantity || 0),
+            needed: neededInStockUnit,
+          });
+        }
+      }
+    }
+
+    for (const item of requiredStock.values()) {
+      if (item.available + 0.0000001 < item.needed) {
+        throw new AppError(
+          `Kulang ang stock ng "${item.name}": kailangan ${item.needed.toFixed(4)} ${item.unit}, available ${item.available.toFixed(4)} ${item.unit}.`,
+          409
+        );
+      }
+    }
+
     const logs = [];
     for (const it of freshItems) {
       // PRORATED: ang ingredients ay ayon sa aktwal na ino-order, hindi sa

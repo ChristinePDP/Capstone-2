@@ -6,6 +6,15 @@ import { useToast, Button, Modal, Card, CardSkeleton, ConfirmModal, useUnsavedCh
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, convertToBase } from '../../utils/unitUtils';
 
+// Nilalagyan ng comma ang ipinapakita sa input (hal. 100000 -> 100,000).
+// Ang naka-store na value ay raw digits pa rin, walang comma.
+const withCommas = (raw) => {
+  if (raw === '' || raw == null) return '';
+  const [int, dec] = String(raw).split('.');
+  const shown = int === '' ? '' : Number(int).toLocaleString('en-US');
+  return dec !== undefined ? `${shown}.${dec}` : shown;
+};
+
 // Pre-order cakes are produced PER ORDER (iba-iba ang theme/design/gastos), kaya
 // hindi sila dumadaan sa "Target Goal → Confirm Production" ng Production Formula
 // (na nagdadagdag ng stock sa products table para sa Buy Now). Ang listahan dito
@@ -104,6 +113,9 @@ const findRecipeByProductId = (recipes, productId, productName = '') => {
 const isConfirmedPreOrder = (order = {}) =>
   (order.order_type ?? order.orderType) === 'Pre-Order' && order.status === 'Confirmed';
 
+const isConfirmedBuyNowOrder = (order = {}) =>
+  (order.order_type ?? order.orderType) === 'Buy Now' && order.status === 'Confirmed';
+
 const formatPickup = (value) => {
   if (!value) return 'No pickup date';
   const date = parsePickupDate(value);
@@ -179,6 +191,7 @@ function PreOrderProduction({ tabBar }) {
   const [page, setPage] = useState(1);
   const [produceTarget, setProduceTarget] = useState(null);
   const [buyTarget, setBuyTarget] = useState(null); // order whose items-to-buy list is open
+  const [shoppingOpen, setShoppingOpen] = useState(false);
   const [drawer, setDrawer] = useState(null); // { id } — in-card drawer for the full item list
   const [attentionTarget, setAttentionTarget] = useState(null); // order whose issues modal is open
   const [expenseRows, setExpenseRows] = useState([{ label: '', amount: '' }]);
@@ -279,6 +292,43 @@ function PreOrderProduction({ tabBar }) {
     [preOrders, sources]
   );
 
+  // Combined shopping list for all confirmed pre-orders. Aggregate demand in
+  // each inventory item's own unit, then subtract its on-hand stock once.
+  const preOrderShortfalls = useMemo(() => {
+    const combined = new Map();
+
+    for (const order of evaluated) {
+      for (const it of order.items) {
+        if (it.canUseStock && sources[sourceKey(order.id, it.key)] === 'stock') continue;
+
+        for (const need of it.needs) {
+          const itemType = need.isMaterial ? 'material' : 'raw';
+          const stockItem = findInventoryItem(need.name, itemType, ingredients, materials);
+          const unit = normalizeUnit(stockItem?.unit || need.unit);
+          const name = stockItem?.name || need.name;
+          const convertedNeed = convertToBase(need.needed, normalizeUnit(need.unit), unit);
+          if (!Number.isFinite(convertedNeed)) continue;
+
+          const key = inventoryKey(name, unit, itemType);
+          const row = combined.get(key) || {
+            name,
+            unit,
+            totalNeeded: 0,
+            available: Number(stockItem?.stock ?? stockItem?.stock_quantity ?? 0),
+          };
+          row.totalNeeded += convertedNeed;
+          combined.set(key, row);
+        }
+      }
+    }
+
+    return [...combined.values()]
+      .map(item => ({
+        ...item,
+        shortage: roundQty(Math.max(0, item.totalNeeded - item.available)),
+      }))
+      .filter(item => item.shortage > 0);
+  }, [evaluated, sources, ingredients, materials]);
   const usesStock = (order, it) => !!it.canUseStock && sources[sourceKey(order.id, it.key)] === 'stock';
   const setSource = (order, it, value) =>
     setSources(prev => ({ ...prev, [sourceKey(order.id, it.key)]: value }));
@@ -466,6 +516,21 @@ function PreOrderProduction({ tabBar }) {
           <h3 className="font-bold text-brand-800">Production</h3>
           <p className="text-xs text-brand-400 mt-0.5">Confirmed pre-orders only. Check if you have enough ingredients for each order before you produce.</p>
         </div>
+        {preOrderShortfalls.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShoppingOpen(true)}
+            title="Combined pre-order shopping list"
+            aria-label={`Open shopping list, ${preOrderShortfalls.length} ${preOrderShortfalls.length === 1 ? 'item' : 'items'} to restock`}
+            className="relative inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg border border-brand-200 bg-white text-brand-700 hover:bg-brand-50 transition-colors shrink-0"
+          >
+            <ShoppingCart size={16} />
+            <span className="text-xs font-bold">Shopping List</span>
+            <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[11px] font-bold leading-none ring-2 ring-white">
+              {preOrderShortfalls.length}
+            </span>
+          </button>
+        )}
       </div>
 
       {tabBar}
@@ -648,6 +713,32 @@ function PreOrderProduction({ tabBar }) {
       </Modal>
 
       <Modal
+        isOpen={shoppingOpen}
+        onClose={() => setShoppingOpen(false)}
+        title="Pre-Order Shopping List"
+        subtitle="Combined shortages across confirmed pre-orders. Available stock is counted once."
+        size="lg"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setShoppingOpen(false)}>Close</Button>
+          </div>
+        }
+      >
+        {preOrderShortfalls.length > 0 ? (
+          <ul className="divide-y divide-gray-100 border border-red-100 rounded-xl overflow-hidden max-h-[60vh] overflow-y-auto">
+            {preOrderShortfalls.map((item, idx) => (
+              <li key={inventoryKey(item.name, item.unit)} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
+                <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{formatCount(item.shortage)} {item.unit}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-center text-sm text-brand-400 py-6">Nothing to restock for confirmed pre-orders.</p>
+        )}
+      </Modal>
+
+      <Modal
         isOpen={!!buyTarget}
         onClose={() => setBuyTarget(null)}
         title={`Items to buy — ${buyTarget?.number || ''}`}
@@ -667,7 +758,7 @@ function PreOrderProduction({ tabBar }) {
             {buyTarget.shortages.map((item, idx) => (
               <li key={`${item.name}-${item.unit}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
                 <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
-                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{roundQty(item.short)} {item.unit}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{formatCount(roundQty(item.short))} {item.unit}</span>
               </li>
             ))}
           </ul>
@@ -798,6 +889,7 @@ function BatchProduction({ tabBar }) {
   const [localStocks, setLocalStocks] = useState({});
   const [confirmingIds, setConfirmingIds] = useState({});
   const [confirmTarget, setConfirmTarget] = useState(null);
+  const [productBuyTarget, setProductBuyTarget] = useState(null);
 
   const findProduct = useCallback(
     (recipe) => products.find(p => p.id === (recipe.productId || recipe.product_id))
@@ -836,9 +928,24 @@ function BatchProduction({ tabBar }) {
   // Per recipe: ilang batch ang kailangan (Confirmed orders + Target Goal, o 1 batch
   // kung wala nang kayang gawin), i-sum ang kailangan per ingredient, at ISANG
   // BESES lang ibawas ang stock — para walang double-count.
+  const getConfirmedBuyNowUnits = (recipe) => {
+    let total = 0;
+    for (const order of orders) {
+      if (!isConfirmedBuyNowOrder(order)) continue;
+      for (const item of getOrderItems(order)) {
+        const matchingRecipe = findRecipeByProductId(
+          batchRecipes,
+          item.product_id || item.productId,
+          item.product_name || item.productName
+        );
+        if (matchingRecipe?.id === recipe.id) total += getItemQuantity(item);
+      }
+    }
+    return total;
+  };
   const allShortfalls = useMemo(() => {
     const orderedUnits = {};
-    orders.filter(o => o.status === 'Confirmed').forEach(order => {
+    orders.filter(isConfirmedBuyNowOrder).forEach(order => {
       getOrderItems(order).forEach(item => {
         const recipe = findRecipeByProductId(batchRecipes, item.product_id || item.productId, item.product_name || item.productName);
         if (!recipe) return;
@@ -876,6 +983,52 @@ function BatchProduction({ tabBar }) {
       .filter(Boolean);
   }, [orders, batchRecipes, quotas, ingredients, materials, calculateMaxUnits]);
 
+  // Product-specific shortfalls use the same order and target demand as the
+  // combined list, but compare stock against this recipe alone.
+  const getProductShortfalls = (recipe) => {
+    const yieldQty = Number(recipe.yield) > 0 ? Number(recipe.yield) : 1;
+    let orderedUnits = 0;
+    for (const order of orders) {
+      if (!isConfirmedBuyNowOrder(order)) continue;
+      for (const item of getOrderItems(order)) {
+        const matchingRecipe = findRecipeByProductId(
+          batchRecipes,
+          item.product_id || item.productId,
+          item.product_name || item.productName
+        );
+        if (matchingRecipe?.id === recipe.id) orderedUnits += getItemQuantity(item);
+      }
+    }
+
+    const quota = Number(quotas[recipe.id]);
+    const quotaUnits = quota > 0 && quota <= MAX_QTY ? quota * yieldQty : 0;
+    const demandUnits = orderedUnits + quotaUnits;
+    let batches = Math.ceil(demandUnits / yieldQty);
+    if (batches <= 0 && calculateMaxUnits(recipe) <= 0) batches = 1;
+    if (batches <= 0) return [];
+
+    const needs = new Map();
+    for (const req of recipe.ingredients || []) {
+      const stockItem = findInventoryItem(req.name, req.itemType, ingredients, materials);
+      const reqUnit = normalizeUnit(req.unit || stockItem?.unit || 'pcs');
+      const stockUnit = normalizeUnit(stockItem?.unit || reqUnit);
+      const converted = convertToBase(Number(req.qty) || 0, reqUnit, stockUnit);
+      const perBatch = Number.isFinite(converted) ? converted : Number(req.qty) || 0;
+      const key = inventoryKey(stockItem?.name || req.name, stockUnit, req.itemType);
+      const current = needs.get(key) || {
+        name: stockItem?.name || req.name,
+        unit: stockUnit,
+        totalNeeded: 0,
+        stockItem,
+      };
+      current.totalNeeded += perBatch * batches;
+      needs.set(key, current);
+    }
+
+    return [...needs.values()]
+      .map(item => buildShortfallEntry(item, item.stockItem))
+      .filter(Boolean);
+  };
   const q = search.trim().toLowerCase();
   const filtered = batchRecipes.filter(r => !q || (r.product || '').toLowerCase().includes(q));
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -986,7 +1139,10 @@ function BatchProduction({ tabBar }) {
               const maxUnits = calculateMaxUnits(r);
               const quota = quotas[r.id] || '';
               const yieldPerBatch = Number(r.yield) > 0 ? Number(r.yield) : 1;
-              const maxBatches = Math.floor(maxUnits / yieldPerBatch);
+              const stockCapacityBatches = Math.floor(maxUnits / yieldPerBatch);
+              const reservedDemandBatches = Math.ceil(getConfirmedBuyNowUnits(r) / yieldPerBatch);
+              const maxBatches = Math.max(0, stockCapacityBatches - reservedDemandBatches);
+              const availableUnits = maxBatches * yieldPerBatch;
               const quotaNum = Number(quota);
               const hasInput = quotaNum > 0 && quotaNum <= MAX_QTY;
               const canMake = hasInput && quotaNum <= maxBatches;
@@ -999,6 +1155,7 @@ function BatchProduction({ tabBar }) {
                 ? localStocks[r.id]
                 : (product ? Number(product.stock ?? product.stock_quantity ?? 0) : 0);
               const unit = r.yieldUnit || 'pcs';
+              const productShortfalls = getProductShortfalls(r);
 
               return (
                 <div key={r.id} className="flex flex-col border border-brand-100 rounded-xl bg-white shadow-sm overflow-hidden">
@@ -1012,7 +1169,7 @@ function BatchProduction({ tabBar }) {
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 px-3 py-2.5">
                         <p className="text-brand-400">Can make</p>
                         <p className={`font-bold text-sm mt-0.5 ${maxBatches === 0 ? 'text-red-600' : 'text-emerald-600'}`}>{maxBatches} {maxBatches === 1 ? 'batch' : 'batches'}</p>
-                        <p className="text-[11px] text-brand-400">{maxUnits} {unit}</p>
+                        <p className="text-[11px] text-brand-400">{availableUnits} {unit}</p>
                       </div>
                       <div className="rounded-lg bg-brand-50/60 border border-brand-100 px-3 py-2.5">
                         <p className="text-brand-400">In stock</p>
@@ -1022,34 +1179,53 @@ function BatchProduction({ tabBar }) {
                   </div>
 
                   <div className="px-4 pb-4 space-y-2">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={quota}
-                      onChange={e => setQuotas(prev => ({ ...prev, [r.id]: sanitizeNumericText(e.target.value) }))}
-                      placeholder="No. of batches"
-                      className={`w-full px-3 py-2.5 text-sm text-center font-bold border rounded-lg outline-none ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-red-50 text-red-700 border-red-300') : 'bg-white border-brand-200'}`}
-                    />
-                    {/* Fixed-height message slot para hindi tumalon ang layout kapag may tinype */}
-                    <div className="min-h-[16px] text-[11px] font-medium text-center leading-4">
-                      {quotaError ? (
-                        <span className="text-red-600">{quotaError}</span>
-                      ) : hasInput && !canMake ? (
-                        <span className="text-red-600">Only enough for {maxBatches} {maxBatches === 1 ? 'batch' : 'batches'}.</span>
-                      ) : canMake ? (
-                        <span className="text-emerald-700">= {totalPieces} {unit}</span>
-                      ) : null}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={withCommas(quota)}
+                        onChange={e => {
+                          const next = sanitizeNumericText(e.target.value.replace(/,/g, ''));
+                          // Huwag tanggapin ang character kapag lalampas na sa max
+                          if (next !== '' && Number(next) > MAX_QTY) return;
+                          setQuotas(prev => ({ ...prev, [r.id]: next }));
+                        }}
+                        placeholder="No. of batches"
+                        className={`w-full px-20 py-2.5 text-sm text-center font-bold border rounded-lg outline-none ${quotaError ? 'bg-red-50 text-red-700 border-red-400' : hasInput ? (canMake ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-red-50 text-red-700 border-red-300') : 'bg-white border-brand-200'}`}
+                      />
+                      {hasInput && !quotaError && (
+                        <span
+                          title={!canMake ? `Only enough for ${maxBatches} ${maxBatches === 1 ? 'batch' : 'batches'}.` : undefined}
+                          className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold whitespace-nowrap ${canMake ? 'text-emerald-700' : 'text-red-600'}`}
+                        >
+                          {canMake ? `= ${formatCount(totalPieces)} ${unit}` : `max ${formatCount(maxBatches)}`}
+                        </span>
+                      )}
                     </div>
+                    {/* Validation error lang ang nasa ilalim (bihira lang lumabas) */}
+                    {quotaError && (
+                      <p className="text-[11px] font-medium text-center leading-4 text-red-600">{quotaError}</p>
+                    )}
                     {/* Laging nakikita ang Confirm — disabled lang hanggang valid ang input */}
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={!canMake || !!quotaError || !!confirmingIds[r.id]}
-                      className={`w-full justify-center border-none ${canMake && !quotaError ? 'bg-emerald-600' : 'bg-brand-200 text-brand-400 cursor-not-allowed opacity-70'}`}
-                      onClick={() => setConfirmTarget({ recipe: r, batchCount: quotaNum })}
-                    >
-                      <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Confirming...' : 'Confirm'}
-                    </Button>
+                    {productShortfalls.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setProductBuyTarget({ product: r.product, items: productShortfalls })}
+                        className="w-full inline-flex items-center justify-center gap-2 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 border border-red-100 px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        <AlertTriangle size={12} /> View items to buy ({productShortfalls.length})
+                      </button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!canMake || !!quotaError || !!confirmingIds[r.id]}
+                        className={canMake && !quotaError ? 'w-full justify-center border-none bg-emerald-600' : 'w-full justify-center border-none bg-brand-200 text-brand-400 cursor-not-allowed opacity-70'}
+                        onClick={() => setConfirmTarget({ recipe: r, batchCount: quotaNum })}
+                      >
+                        <CheckCircle2 size={12} className="mr-1" /> {confirmingIds[r.id] ? 'Producing...' : 'Produce'}
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -1076,7 +1252,7 @@ function BatchProduction({ tabBar }) {
         isOpen={shoppingOpen}
         onClose={() => setShoppingOpen(false)}
         title="Shopping List"
-        subtitle="Items to restock to cover your pending orders and production targets."
+        subtitle="Items to restock for confirmed Buy Now orders and production targets."
         size="lg"
         footer={
           <div className="flex justify-end">
@@ -1089,7 +1265,7 @@ function BatchProduction({ tabBar }) {
             {allShortfalls.map((item, idx) => (
               <li key={`${item.name}-${item.unit}`} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
                 <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
-                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{roundQty(item.shortage)} {item.unit}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{formatCount(roundQty(item.shortage))} {item.unit}</span>
               </li>
             ))}
           </ul>
@@ -1098,11 +1274,34 @@ function BatchProduction({ tabBar }) {
         )}
       </Modal>
 
+      <Modal
+        isOpen={!!productBuyTarget}
+        onClose={() => setProductBuyTarget(null)}
+        title={productBuyTarget ? 'Items to buy - ' + productBuyTarget.product : 'Items to buy'}
+        subtitle="Shortages for this product's confirmed Buy Now orders and target batches."
+        size="md"
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setProductBuyTarget(null)}>Close</Button>
+          </div>
+        }
+      >
+        {productBuyTarget && (
+          <ul className="divide-y divide-gray-100 border border-red-100 rounded-xl overflow-hidden max-h-[60vh] overflow-y-auto">
+            {productBuyTarget.items.map((item, idx) => (
+              <li key={inventoryKey(item.name, item.unit)} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-white">
+                <span className="text-sm font-semibold text-gray-800">{idx + 1}. {item.name}</span>
+                <span className="text-xs font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-100">+{formatCount(roundQty(item.shortage))} {item.unit}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
       <ConfirmModal
         isOpen={!!confirmTarget}
         onClose={() => !confirmingIds[confirmTarget?.recipe?.id] && setConfirmTarget(null)}
         onConfirm={handleConfirm}
-        title="Confirm Batch Production"
+        title="Produce Batch"
         message={
           confirmTarget ? (
             <div className="space-y-3 text-left text-sm text-gray-600">
@@ -1124,7 +1323,7 @@ function BatchProduction({ tabBar }) {
             </div>
           ) : ''
         }
-        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Confirming...' : 'Confirm Production'}
+        confirmLabel={confirmingIds[confirmTarget?.recipe?.id] ? 'Producing...' : 'Produce'}
         variant="primary"
       />
     </Card>
