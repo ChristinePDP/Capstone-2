@@ -1,8 +1,8 @@
 // utils/analytics/geminiForecast.util.js
-const DEFAULT_PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-4-hydrogen";
+const DEFAULT_PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const DEFAULT_FALLBACK_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-flash-lite-latest",
 ];
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DEFAULT_TIMEOUT_MS = 55000;

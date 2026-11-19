@@ -6,9 +6,48 @@ import { Skeleton } from '../ui';
 // Fixed na 30 days ang forecast
 const TOTAL_POINTS = 30;
 const TICK_STEP = 5;
+const Y_TICK_INTERVALS = 4; // ilang puwang sa pagitan ng ₱0 at maximum
+const Y_HEADROOM = 1.15; // 15% extra space sa taas ng pinakamataas na value
+const DEFAULT_Y_MAX = 1000; // fallback kapag walang data o puro zero
 
 const formatCurrency = (val) => `₱${Number(val).toLocaleString('en-PH')}`;
-const formatAxis = (val) => (val >= 1000 ? `₱${(val / 1000).toFixed(0)}K` : `₱${val}`);
+const formatAxis = (val) => {
+  if (val >= 1000) {
+    const inK = val / 1000;
+    return `₱${Number.isInteger(inK) ? inK : inK.toFixed(1)}K`;
+  }
+  return `₱${val}`;
+};
+
+// Kinukuha ang "nice" na step (1, 2, 2.5, 5, 10 x power of 10) para malinis ang mga tick
+const getNiceStep = (rawStep) => {
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / magnitude;
+  const niceNormalized = [1, 2, 2.5, 5, 10].find((n) => normalized <= n) ?? 10;
+  return niceNormalized * magnitude;
+};
+
+// Dynamic na maximum at ticks ng Y-axis base sa pinakamataas na forecast
+const getYAxisScale = (values) => {
+  const validValues = values.filter((v) => typeof v === 'number' && !Number.isNaN(v));
+  const dataMax = validValues.length ? Math.max(...validValues) : 0;
+
+  if (dataMax <= 0) {
+    const step = DEFAULT_Y_MAX / Y_TICK_INTERVALS;
+    return {
+      max: DEFAULT_Y_MAX,
+      ticks: Array.from({ length: Y_TICK_INTERVALS + 1 }, (_, i) => i * step),
+    };
+  }
+
+  const step = getNiceStep((dataMax * Y_HEADROOM) / Y_TICK_INTERVALS);
+  const max = step * Y_TICK_INTERVALS;
+
+  return {
+    max,
+    ticks: Array.from({ length: Y_TICK_INTERVALS + 1 }, (_, i) => i * step),
+  };
+};
 
 const CustomXAxisTick = ({ x, y, payload, index, tickStep }) => {
   const isFirst = index === 0;
@@ -102,6 +141,12 @@ export default function SalesForecast({
     });
   }, [propData]);
 
+  // Dynamic na Y-axis: sumusunod sa pinakamataas na forecast para hindi lumiit ang line
+  const yScale = useMemo(
+    () => getYAxisScale(chartData.map((d) => d.forecastSales)),
+    [chartData]
+  );
+
   return (
     <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full min-h-[350px]">
       <div className="flex items-center gap-2 mb-6 shrink-0">
@@ -154,7 +199,9 @@ export default function SalesForecast({
                 axisLine={false} 
                 tickLine={false} 
                 tickFormatter={formatAxis} 
-                domain={[0, dataMax => Math.max(10000, dataMax || 10000)]} 
+                domain={[0, yScale.max]}
+                ticks={yScale.ticks}
+                allowDataOverflow={false}
               />
 
               <Tooltip content={<CustomTooltip />} cursor={false} />
