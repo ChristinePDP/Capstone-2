@@ -162,10 +162,10 @@ export function StatCard({ label, value, delta, deltaDir, icon, accentColor = 'b
 }
 
 // ─── Table Components ─────────────────────────────────────────
-export function Table({ columns, children, className = '' }) {
+export function Table({ columns, children, className = '', fixedLayout = false }) {
   return (
     <div className={`overflow-auto ${className}`}>
-      <table className="w-full border-collapse min-w-full">
+      <table className={`w-full border-collapse min-w-full ${fixedLayout ? 'table-fixed' : ''}`}>
         <thead>
           <tr className="bg-brand-600 border-b border-brand-200">
             {columns.map((col, i) => (

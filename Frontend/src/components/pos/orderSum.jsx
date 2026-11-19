@@ -550,9 +550,10 @@ export default function OrderSummaryModal({
                     <div className="flex flex-col">
                       <input
                         type="text"
+                        maxLength={50}
                         placeholder={isBuyNow ? "Customer Name" : "Customer Name *"}
-                        value={form.name}
-                        onChange={e => setForm({ ...form, name: e.target.value })}
+                        value={form.name.slice(0, 50)}
+                        onChange={e => setForm({ ...form, name: e.target.value.slice(0, 50) })}
                         aria-invalid={!!errors.name}
                         data-invalid={errors.name ? 'true' : undefined}
                         className={fieldCls('name')}

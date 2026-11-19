@@ -361,7 +361,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
       </div>
 
       <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-        <Table columns={COLUMNS}>
+        <Table columns={COLUMNS} fixedLayout>
           {showLoading ? (
             Array.from({ length: 6 }).map((_, row) => (
               <Tr key={`orders-skeleton-${row}`}>
@@ -379,10 +379,10 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
             return (
               <Tr key={order.id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
                 <Td className="text-[12px] font-medium text-slate-500 whitespace-nowrap">#{orderId}</Td>
-                <Td>
-                  <div className="flex flex-col gap-0.5 whitespace-nowrap">
-                    <p className="font-semibold text-slate-900 text-[14px]">{displayName(order, customer)}</p>
-                    <p className="text-[12px] text-slate-500">{displayPhone(customer)}</p>
+                <Td className="min-w-0 max-w-0">
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <p className="truncate font-semibold text-slate-900 text-[14px]" title={displayName(order, customer)}>{displayName(order, customer)}</p>
+                    <p className="truncate text-[12px] text-slate-500" title={displayPhone(customer)}>{displayPhone(customer)}</p>
                   </div>
                 </Td>
                 <Td><TypeCell order={order} orderType={orderType} /></Td>

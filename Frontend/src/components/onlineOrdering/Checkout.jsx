@@ -50,9 +50,11 @@ function getPhoneError(digits, { final = false, hadError = false, required = fal
 // stays until the name is valid. Too-short is only flagged on blur/submit (final) or after an error.
 const NAME_REQUIRED_ERROR = 'Full name is required.';
 const NAME_INVALID_ERROR = 'Enter a valid full name (letters only).';
+const NAME_MAX_LENGTH = 50;
 function getNameError(value, { final = false, hadError = false } = {}) {
   const name = String(value || '').trim();
   if (!name) return final || hadError ? NAME_REQUIRED_ERROR : '';
+  if (name.length > NAME_MAX_LENGTH) return `Name must be ${NAME_MAX_LENGTH} characters or fewer.`;
   const validChars = /^[\p{L}][\p{L}\s.'\u2019-]*$/u.test(name);
   const letterCount = (name.match(/\p{L}/gu) || []).length;
   if (!validChars) return NAME_INVALID_ERROR;
@@ -1158,11 +1160,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.name ? 'text-red-500' : 'text-[#8A7264]'}`}>Full Name <span className="text-red-500">*</span></label>
                               <input 
                                 type="text" 
+                                maxLength={NAME_MAX_LENGTH}
                                 placeholder="e.g. Juan Dela Cruz" 
-                                value={form.name}
+                                value={form.name.slice(0, NAME_MAX_LENGTH)}
                                 className={`w-full border px-3.5 py-3 lg:py-3.5 text-[13px] lg:text-sm rounded-xl focus:outline-none transition-colors ${errors.name ? 'border-red-500 focus:border-red-500' : 'border-[#EAE4E0] focus:border-[#5A453C]'}`} 
                                 onChange={e => {
-                                  setForm({...form, name: e.target.value});
+                                  setForm({...form, name: e.target.value.slice(0, NAME_MAX_LENGTH)});
                                   setErrors(prev => ({...prev, name: getNameError(e.target.value, { hadError: Boolean(prev.name) }) || false}));
                                 }} 
                                 onBlur={() => setErrors(prev => ({...prev, name: getNameError(form.name, { final: true }) || false}))}

@@ -63,10 +63,12 @@ function stockIssueMessage(issue, type) {
 }
 
 const PH_MOBILE_REGEX = /^09\d{9}$/;
+const NAME_MAX_LENGTH = 50;
 
 const getNameError = (value, isRequired = false) => {
   const name = String(value || '').trim();
   if (!name) return isRequired ? 'Customer name is required.' : '';
+  if (name.length > NAME_MAX_LENGTH) return `Customer name must be ${NAME_MAX_LENGTH} characters or fewer.`;
   const validChars = /^[\p{L}][\p{L}\s.'\u2019-]*$/u.test(name);
   const letterCount = (name.match(/\p{L}/gu) || []).length;
   if (!validChars) return 'Enter a valid name (letters only).';
