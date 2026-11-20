@@ -769,13 +769,93 @@ async function buildIngredientToProductsMap() {
   return map;
 }
 
+// Waste logs ay laging 7 araw ang tinitingnan (hindi sumusunod sa 60-day
+// historical window), para tama ang "in the past 7 days" sa recommendation.
+const WASTE_WINDOW_DAYS = 7;
+const WASTE_SUMMARY_MAX_ITEMS = 10;
+const WASTE_SUMMARY_MAX_REASONS = 6;
+
+// Pinagsasama ang LAHAT ng waste log sa window — per item, per reason at per
+// waste_type — para ang AI ay sumulat tungkol sa PATTERN (maraming log, iba't
+// ibang dahilan), hindi sa isang log lang. Columns ng waste_logs: waste_type,
+// item_name, quantity, unit, reason, notes, cost, logged_at.
+function summarizeWasteLogs(wasteLogs) {
+  const logs = Array.isArray(wasteLogs) ? wasteLogs : [];
+  const byItemMap = {};
+  const reasonCounts = {};
+  const typeCounts = {};
+  let totalCost = 0;
+
+  const bump = (bucket, text) => {
+    const key = text.toLowerCase();
+    if (!bucket[key]) bucket[key] = { text, count: 0 };
+    bucket[key].count += 1;
+  };
+  const topOf = (bucket, limit) =>
+    Object.values(bucket).sort((a, b) => b.count - a.count).slice(0, limit);
+
+  for (const log of logs) {
+    const itemName = String(log?.item_name ?? "").trim();
+    if (!itemName) continue;
+    const quantity = Number(log?.quantity ?? 0) || 0;
+    const unit = String(log?.unit ?? "").trim();
+    const cost = Number(log?.cost ?? 0) || 0;
+    const wasteType = String(log?.waste_type ?? "").trim();
+    const reason = String(log?.reason ?? "").trim();
+    const note = String(log?.notes ?? "").trim().slice(0, 120);
+
+    const key = itemName.toLowerCase();
+    if (!byItemMap[key]) {
+      byItemMap[key] = { itemName, unit, totalQuantity: 0, totalCost: 0, logCount: 0, reasons: {}, notes: {} };
+    }
+    const entry = byItemMap[key];
+    entry.totalQuantity += quantity;
+    entry.totalCost += cost;
+    entry.logCount += 1;
+    totalCost += cost;
+
+    if (reason) {
+      bump(entry.reasons, reason);
+      bump(reasonCounts, reason);
+    }
+    if (note) bump(entry.notes, note);
+    if (wasteType) bump(typeCounts, wasteType);
+  }
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  const byItem = Object.values(byItemMap)
+    .sort((a, b) => b.totalCost - a.totalCost || b.logCount - a.logCount) // pinakamalaking nawala (₱) muna
+    .slice(0, WASTE_SUMMARY_MAX_ITEMS)
+    .map((i) => ({
+      itemName: i.itemName,
+      unit: i.unit,
+      totalQuantity: round2(i.totalQuantity),
+      totalCost: round2(i.totalCost),
+      logCount: i.logCount,
+      reasons: topOf(i.reasons, 3).map((r) => ({ reason: r.text, count: r.count })),
+      notes: topOf(i.notes, 2).map((n) => n.text),
+    }));
+
+  return {
+    windowDays: WASTE_WINDOW_DAYS,
+    totalLogs: logs.length,
+    itemsAffected: Object.keys(byItemMap).length,
+    totalCost: round2(totalCost),
+    wasteTypes: topOf(typeCounts, WASTE_SUMMARY_MAX_REASONS).map((t) => ({ type: t.text, count: t.count })),
+    reasons: topOf(reasonCounts, WASTE_SUMMARY_MAX_REASONS).map((r) => ({ reason: r.text, count: r.count })),
+    byItem,
+  };
+}
+
 async function getExpiryAdvisoryContext(days, ingredientToProducts) {
   const { startDate: activityStart, endDate: activityEnd } = getLookbackDateRange(days);
+  const { startDate: wasteStart, endDate: wasteEnd } = getLookbackDateRange(WASTE_WINDOW_DAYS);
 
   const [nearExpiringRaw, inventoryLogs, recentWaste] = await Promise.all([
     InventoryLogsModel.getNearExpiring(days),
     InventoryLogsModel.getByDateRange(activityStart, activityEnd),
-    WasteLogsModel.getRecent(activityStart, activityEnd),
+    WasteLogsModel.getRecent(wasteStart, wasteEnd),
   ]);
 
   const inventoryActivitySummary = (inventoryLogs || []).reduce((acc, log) => {
@@ -805,7 +885,7 @@ async function getExpiryAdvisoryContext(days, ingredientToProducts) {
     };
   });
 
-  return { nearExpiringItems, inventoryActivitySummary, recentWaste };
+  return { nearExpiringItems, inventoryActivitySummary, recentWaste, wasteSummary: summarizeWasteLogs(recentWaste) };
 }
 
 async function getBundleOpportunityContext(days) {
@@ -1020,7 +1100,10 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
     bundleContext,
     expiryContext: {
       nearExpiringItems: expiryContext.nearExpiringItems,
-      recentWaste: expiryContext.recentWaste,
+      // Pinagsama-samang buod ng LAHAT ng waste log sa nakaraang 7 araw.
+      wasteSummary: expiryContext.wasteSummary,
+      // Raw logs (capped) para sa mga specific na detalye/notes.
+      recentWaste: (expiryContext.recentWaste || []).slice(0, 40),
     },
     stockContext,
   };
@@ -1076,9 +1159,21 @@ Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 mo
 
 2. "inventoryOptimization" (Inventory Optimization):
    a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). For ones with a possibleProducts match, recommend producing/pushing that specific product with a reasoned discount and expected return vs. a full write-off. If no possibleProducts match exists for the most urgent item, recommend a direct clearance/discount action instead.
-   b. If expiryContext.nearExpiringItems is EMPTY, use stockContext instead: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual in/out/waste numbers, and suggest a concrete adjustment (reorder sooner, reduce next restock, or repurpose it into a recipe). If stockContext also has nothing meaningful, fall back to expiryContext.recentWaste and recommend a concrete restock-frequency or FIFO fix for the item with the most waste.
+   b. If expiryContext.nearExpiringItems is EMPTY, use stockContext instead: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual in/out/waste numbers, and suggest a concrete adjustment (reorder sooner, reduce next restock, or repurpose it into a recipe). If stockContext also has nothing meaningful, fall back to expiryContext.wasteSummary (see the WASTE LOGS rule below).
 
-c. Use non-empty expiryContext.recentWaste notes when they are relevant to the inventory recommendation. Treat a note only as context for its own logged item; do not apply it to a different item or lot. If notes are empty, do not infer a cause from them.
+c. WASTE LOGS — LOOK AT THE WHOLE PAST ${WASTE_WINDOW_DAYS} DAYS, NOT ONE LOG:
+   expiryContext.wasteSummary combines EVERY waste log from the past ${WASTE_WINDOW_DAYS} days (totalLogs, itemsAffected, totalCost in pesos, wasteTypes, reasons overall, and byItem with logCount/totalQuantity/totalCost/reasons/notes). expiryContext.recentWaste holds the raw logs behind it. There can be many logs with different reasons (spoiled, left unrefrigerated, expired, dropped, and so on).
+   - Whenever a recommendation talks about waste or losses, it MUST say the time window in plain words, such as "in the past ${WASTE_WINDOW_DAYS} days" or "over the last ${WASTE_WINDOW_DAYS} days". Never write "recently" or "lately" alone.
+   - Base it on the PATTERN across the logs, not on a single log. If wasteSummary.totalLogs is more than 1, describe the bigger picture first (for example how many items or logs were affected and the most common reasons, using the real numbers from wasteSummary), and only then name the one or two items that lost the most. Do not build the whole recommendation around just one log or one reason when other logs exist.
+   - If MANY different items were wasted (for example 5 or more), do NOT list them all. Say how many items were affected and the total cost, name only the top 1 or 2 items by totalCost, and group the rest as \"and N other items\" (N = itemsAffected minus the ones you named). Focus the fix on the most common reason across all items.\r\n   - Give ONE practical fix that addresses the most common reason or the item with the most logs. If there are several different reasons, you may name the top two together in one short sentence, each with its own quick fix.
+   - Only use a reason/note for the item it was logged against; do not apply it to a different item. If reasons are empty, do not guess a cause.
+   - If wasteSummary.totalLogs is 0, do not mention waste at all.
+
+WHO IS READING THIS — SPEAK TO THE OWNER ONLY, NEVER TO A "TEAM":
+The ONLY reader is the owner of this small shop. This is the owner's own business, so do not picture employees, departments, or a chain of command. Talk straight to the owner with "you", and write every action as something the owner does or decides personally.
+- NEVER write "your team," "the team," "your staff," "your crew," "your employees," "your workers," "your helpers," "your bakers," "your people," "everyone," or any phrase that hands the job to someone else (e.g. "tell your team to...," "make sure your staff...," "have your bakers...," "remind everyone to..."). Do not assume the shop has any employees at all.
+- Write the action directly instead. Say "Put the tubs straight back in the fridge as soon as you finish frosting" — NOT "Make sure your team puts the tubs back in the fridge." Say "Bake a batch of Sliced Egg Pie today" — NOT "Have your bakers make Sliced Egg Pie."
+- Do not blame or lecture anyone. When a waste log shows a loss, state what was lost and give the simple fix for the owner to apply.
 
 LANGUAGE & TONE — WRITE FOR A REGULAR SHOP OWNER, NOT A BUSINESS SCHOOL GRAD:
 Imagine you're explaining this out loud to a 50-year-old bake shop owner who has never studied business or marketing — someone smart and experienced running their own shop, but who did not grow up with corporate or startup vocabulary. Write the way you'd actually talk to them face to face.
@@ -1127,6 +1222,21 @@ const AR_BANNED_PASSIVE_PHRASES = [
   "adjust accordingly",
 ];
 
+// AUDIENCE GUARD: ang nagbabasa ng recommendations ay ang OWNER lang, hindi
+// isang team. Hindi dapat mag-utos ang AI sa "team/staff/crew" — ang bawat
+// aksyon ay dapat nakasulat para sa owner mismo ("you"). Code check ito,
+// hindi lang prompt wording, kaya kapag pumalya ay mare-retry at hindi ma-cache.
+const AR_BANNED_AUDIENCE_REGEX =
+  /\b(team(?:s|mates?)?|staffs?|crew|employees?|workers?|helpers?|personnel|co-?workers?|colleagues?|everyone|everybody|your people|your bakers?|your assistants?)\b/i;
+
+const AR_WASTE_TALK_REGEX = /\b(lost|wasted|waste logs?|logged|spoil\w*|thrown|discard\w*|unrefrigerated)\b/i;
+const AR_WASTE_WINDOW_REGEX = /\b(past|last)\s+(7|seven)\s+days\b|\bpast\s+week\b/i;
+
+function findBannedAudienceWord(text) {
+  const match = String(text || "").match(AR_BANNED_AUDIENCE_REGEX);
+  return match ? match[0] : null;
+}
+
 function findBannedPassivePhrase(text) {
   const lower = String(text || "").toLowerCase();
   return AR_BANNED_PASSIVE_PHRASES.find((phrase) => lower.includes(phrase)) || null;
@@ -1145,6 +1255,14 @@ function validateActionablePayload(payload, context) {
     const bannedHit = findBannedPassivePhrase(rec.desc);
     if (bannedHit) {
       issues.push(`"${rec.title}" leans on a passive/vague phrase ("${bannedHit}") instead of stating a concrete action.`);
+    }
+    const wasteLogCount = Number(context?.expiryContext?.wasteSummary?.totalLogs || 0);
+    if (wasteLogCount > 0 && AR_WASTE_TALK_REGEX.test(rec.desc) && !AR_WASTE_WINDOW_REGEX.test(rec.desc)) {
+      issues.push(`"${rec.title}" talks about waste/losses but doesn't say the time window. Say "in the past ${WASTE_WINDOW_DAYS} days" and describe the pattern across the waste logs (not just one log).`);
+    }
+    const audienceHit = findBannedAudienceWord(`${rec.title} ${rec.desc}`);
+    if (audienceHit) {
+      issues.push(`"${rec.title}" refers to "${audienceHit}". The reader is the shop owner only — remove any mention of a team/staff/crew/employees and write the action directly to the owner (use "you", e.g. "Put the tubs back in the fridge right after frosting").`);
     }
     if (!/\d/.test(rec.desc)) {
       issues.push(`"${rec.title}" doesn't cite any concrete number (%, ₱, quantity, or date) — too generic to be data-grounded.`);

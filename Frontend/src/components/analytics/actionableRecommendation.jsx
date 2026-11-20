@@ -2,6 +2,8 @@ import {
   TrendingUp,
   PackagePlus,
   Boxes,
+  Hourglass,
+  Warehouse,
 } from 'lucide-react';
 import { Skeleton } from '../ui';
 
@@ -10,7 +12,7 @@ import { Skeleton } from '../ui';
 // bawat recommendation sa loob ng bawat section. Naging 2 categories na
 // lang (dating 3): "salesOptimization" ngayon ay kasama na rin ang bundle
 // promotions logic, at "wasteReduction" ay naging "inventoryOptimization"
-// (expiry advisory + stock-level fallback). Wala nang per-timeframe
+// (Expiry Management + Stock & Waste Control). Wala nang per-timeframe
 // subtitles. Bawat section may sariling "tag" color para makilala agad —
 // pareho parin sila ng brand's warm brown/terracotta family kaya hindi
 // kakaiba sa ibang parte ng dashboard. ───
@@ -20,19 +22,24 @@ const SECTIONS = [
     label: 'Sales Optimization',
     icon: TrendingUp,
     accent: '#C1694A',
+    slots: ['improvement', 'bundle'],
   },
   {
     key: 'inventoryOptimization',
     label: 'Inventory Optimization',
     icon: PackagePlus,
     accent: '#8B6F3E',
+    slots: ['expiry', 'stock'],
   },
 ];
 
-// Fixed labels for the Sales Optimization items. Hindi galing sa AI — ang
-// AI lang ang nagbibigay ng "kind" ("improvement" | "bundle") at ng
-// title/desc. Ang label na nakikita ng user ay laging isa sa dalawang ito.
-const SALES_ITEM_KINDS = {
+// Fixed labels para sa BAWAT item ng dalawang categories. Hindi galing sa AI —
+// ang AI lang ang nagbibigay ng "kind" at ng title/desc. Ang label na
+// nakikita ng user ay laging isa sa apat na ito:
+//   Sales Optimization     -> "improvement" (Sales Improvement), "bundle" (Product Bundling)
+//   Inventory Optimization -> "expiry" (Expiry Management),     "stock"  (Stock & Waste Control)
+// Ang "order" ay posisyon sa loob ng sarili nitong section.
+const ITEM_KINDS = {
   improvement: {
     label: 'Sales Improvement',
     icon: TrendingUp,
@@ -45,24 +52,34 @@ const SALES_ITEM_KINDS = {
     order: 1,
     emptyText: 'Not enough sales history to suggest a bundle yet.',
   },
+  expiry: {
+    label: 'Expiry Management',
+    icon: Hourglass,
+    order: 0,
+    emptyText: 'No items close to expiring right now.',
+  },
+  stock: {
+    label: 'Stock & Waste Control',
+    icon: Warehouse,
+    order: 1,
+    emptyText: 'No stock problems or waste logged in the last 30 days.',
+  },
 };
 
-// Sales Optimization ay laging may DALAWANG fixed na slot: Sales Improvement
-// at Product Bundling (sa ganoong pagkakasunod). Hinahanap ang item ayon sa
-// "kind"; kung walang "kind" ang data, ayon sa posisyon (0 = improvement,
-// 1 = bundle).
-function buildSalesSlots(items) {
+// Bawat section ay laging may DALAWANG fixed na slot (tingnan ang
+// section.slots). Hinahanap ang item ayon sa "kind"; kung walang "kind" ang
+// data, ayon sa posisyon (0 = unang slot, 1 = pangalawang slot).
+function buildSlots(items, slotKinds) {
   const list = Array.isArray(items) ? items : [];
-  const hasKinds = list.some((i) => i?.kind in SALES_ITEM_KINDS);
-  const pick = (kind, index) => (hasKinds ? list.find((i) => i?.kind === kind) : list[index]) || null;
-  return [
-    { kind: 'improvement', item: pick('improvement', 0) },
-    { kind: 'bundle', item: pick('bundle', 1) },
-  ];
+  const hasKinds = list.some((i) => slotKinds.includes(i?.kind));
+  return slotKinds.map((kind, index) => ({
+    kind,
+    item: (hasKinds ? list.find((i) => i?.kind === kind) : list[index]) || null,
+  }));
 }
 
 function RecommendationItem({ ins, accent, kind }) {
-  const kindMeta = SALES_ITEM_KINDS[kind || ins.kind];
+  const kindMeta = ITEM_KINDS[kind || ins.kind];
   const KindIcon = kindMeta?.icon;
 
   return (
@@ -91,7 +108,7 @@ function RecommendationItem({ ins, accent, kind }) {
 }
 
 function EmptySlot({ kind, accent }) {
-  const meta = SALES_ITEM_KINDS[kind];
+  const meta = ITEM_KINDS[kind];
   const KindIcon = meta.icon;
   return (
     <div className="relative flex gap-3 py-4 pl-3.5 first:pt-0 last:pb-0 max-w-[64ch]">
@@ -113,11 +130,11 @@ function EmptySlot({ kind, accent }) {
   );
 }
 
-function Note({ section, items, isLoading = false, fixedSlots = false }) {
+function Note({ section, items, isLoading = false }) {
   const Icon = section.icon;
   const isEmpty = !items || items.length === 0;
   const count = items?.length || 0;
-  const slots = fixedSlots && !isEmpty ? buildSalesSlots(items) : null;
+  const slots = !isEmpty && section.slots ? buildSlots(items, section.slots) : null;
 
   return (
     <div className="relative rounded-xl border border-brand-100 bg-brand-50/40 overflow-hidden transition-shadow duration-200 hover:shadow-md">
@@ -182,13 +199,16 @@ export default function ActionableRecommendation({ recommendations = {}, isLoadi
     inventoryOptimization = [],
   } = recommendations;
 
-  // Sales Improvement laging nauuna sa Product Bundling (stable sort; ang
-  // item na walang "kind" ay nananatili sa orihinal na posisyon).
-  const sortedSales = [...salesOptimization].sort(
-    (a, b) => (SALES_ITEM_KINDS[a?.kind]?.order ?? 0) - (SALES_ITEM_KINDS[b?.kind]?.order ?? 0)
-  );
+  // Laging nauuna ang unang slot ng section (Sales Improvement / Expiry Management)
+  // bago ang pangalawa (Product Bundling / Stock & Waste Control). Stable sort; ang item
+  // na walang "kind" ay nananatili sa orihinal na posisyon.
+  const byKindOrder = (a, b) =>
+    (ITEM_KINDS[a?.kind]?.order ?? 0) - (ITEM_KINDS[b?.kind]?.order ?? 0);
 
-  const dataByKey = { salesOptimization: sortedSales, inventoryOptimization };
+  const dataByKey = {
+    salesOptimization: [...salesOptimization].sort(byKindOrder),
+    inventoryOptimization: [...inventoryOptimization].sort(byKindOrder),
+  };
 
   return (
     // Binago ang bg-white to bg-[#fdfbf9], p-5 to p-4, at tinanggal ang shadow-sm para pumantay sa Forecasting wrapper[cite: 2]
@@ -201,7 +221,6 @@ export default function ActionableRecommendation({ recommendations = {}, isLoadi
             section={section}
             items={dataByKey[section.key]}
             isLoading={isLoading}
-            fixedSlots={section.key === 'salesOptimization'}
           />
         ))}
       </div>
