@@ -639,8 +639,9 @@ const isUsableProductCache = (cached) =>
 // matching historical context. It does not run if either forecast is unavailable.
 const AR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
-const AR_CACHE_KEY = "actionable_recommendations_v6";
+const AR_CACHE_KEY = "actionable_recommendations_v8";
 const AR_MAX_PER_CATEGORY = 2;
+const AR_VALID_KINDS = ["improvement", "bundle"];
 
 // FIX: amount_paid (aktwal na natanggap na bayad), hindi grand_total —
 // parehong basehan na ngayon ng FourKpiService/PerformanceSummaryService,
@@ -803,6 +804,8 @@ async function getExpiryAdvisoryContext(days, ingredientToProducts) {
   return { nearExpiringItems, inventoryActivitySummary, recentWaste };
 }
 
+const BUNDLE_MIN_PRODUCT_AGE_DAYS = 14;
+
 async function getBundleOpportunityContext(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
 
@@ -822,8 +825,26 @@ async function getBundleOpportunityContext(days) {
 
   const bestSellers = sorted.slice(0, 5);
   const bestSellerNames = new Set(bestSellers.map((p) => p.name));
+
+  // QUALITY GATE for slowMovers (historical data only, no forecast):
+  //  1. at least BUNDLE_MIN_PRODUCT_AGE_DAYS old, counted from the FIRST SALE
+  //     date in the full order history (getProductDailySeries), matched by
+  //     trimmed lowercase name;
+  //  2. at least 1 unit sold in the last `days` (60) window.
+  // Products failing the gate are new or dead products, not slow movers.
+  const { products: historyProducts } = await getProductDailySeries();
+  const productAgeByName = {};
+  for (const hp of historyProducts || []) {
+    const key = String(hp.productName || "").trim().toLowerCase();
+    if (!key) continue;
+    // series starts at first sale and ends yesterday, so length = age in days
+    productAgeByName[key] = Math.max(productAgeByName[key] || 0, hp.series.length);
+  }
+
   const slowMovers = sorted
     .filter((p) => !bestSellerNames.has(p.name))
+    .filter((p) => p.qty >= 1)
+    .filter((p) => (productAgeByName[String(p.name || "").trim().toLowerCase()] || 0) >= BUNDLE_MIN_PRODUCT_AGE_DAYS)
     .slice(-5)
     .reverse();
 
@@ -896,6 +917,7 @@ async function getForecastAvailability() {
 
   return {
     anyReady,
+    productForecastGeneratedAt: productThirty?.generatedAt ?? null,
     thirtyDay: anyReady
       ? {
           salesForecastSnippet: sales30.chartData.slice(0, 14),
@@ -980,30 +1002,9 @@ function reconcileGrowthAndRisk(growthAndRisk, forecastAvailability) {
   };
 }
 
-// Same idea, applied to the slow-mover/bundle pairing job (1b in the
-// prompt): a slow mover is a much more urgent bundle candidate when the
-// forecast ALSO expects it to keep declining, vs. one that's merely slow
-// historically with no forecasted continuation. Splits bundleContext's
-// slowMovers into that priority order instead of leaving the "check if
-// this also shows up in the forecast" cross-reference to the prompt.
-function reconcileSlowMovers(bundleContext, forecastAvailability) {
-  const activeForecast = forecastAvailability.thirtyDay;
-
-  const forecastRiskNames = new Set(
-    (activeForecast?.productForecast?.risk || []).map((f) => f.name)
-  );
-
-  const slowMovers = bundleContext.slowMovers || [];
-  const confirmedDecline = slowMovers.filter((s) => forecastRiskNames.has(s.name));
-  const otherSlowMovers = slowMovers.filter((s) => !forecastRiskNames.has(s.name));
-
-  return { confirmedDecline, otherSlowMovers };
-}
-
 async function getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability) {
-  const [recentSalesTrend, growthAndRisk, expiryContext, bundleContext] = await Promise.all([
+  const [recentSalesTrend, expiryContext, bundleContext] = await Promise.all([
     getRecentSalesTrend(historicalWindowDays),
-    getProductGrowthAndRisk(historicalWindowDays),
     getExpiryAdvisoryContext(historicalWindowDays, ingredientToProducts),
     getBundleOpportunityContext(historicalWindowDays),
   ]);
@@ -1017,18 +1018,17 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
 
   return {
     historicalWindowDays,
-    // NOTE: kept for narrative color only (e.g. describing the overall
-    // sales trend in plain language) — the prompt is instructed NOT to
-    // use this as the basis for picking which products to recommend.
-    // reconciledSignals below is the forecast-anchored basis for that.
+    // recentSalesTrend is overall daily sales only (no products) — narrative
+    // color. Historical product lists are deliberately NOT in the context.
     salesGrowthContext: {
       recentSalesTrend,
-      topGrowthProducts: growthAndRisk.topGrowthProducts,
-      topRiskProducts: growthAndRisk.topRiskProducts,
     },
-    reconciledSignals: {
-      ...reconcileGrowthAndRisk(growthAndRisk, forecastAvailability),
-      slowMovers: reconcileSlowMovers(bundleContext, forecastAvailability),
+    // Exactly what the Product Forecast card shows: "Expected to Rise" =
+    // productForecast.growth, "Expected to Drop" = productForecast.risk.
+    // Each item: { name, recentQty, forecast, diff, pct }.
+    forecastSignals: {
+      rise: forecastAvailability.thirtyDay?.productForecast?.growth || [],
+      drop: forecastAvailability.thirtyDay?.productForecast?.risk || [],
     },
     forecast: {
       thirtyDay: forecastAvailability.thirtyDay,
@@ -1055,12 +1055,9 @@ function buildActionablePrompt(context, previousTitles = []) {
 
 This analysis uses ${context.historicalWindowDays} days of historical data (salesGrowthContext, bundleContext, expiryContext / stockContext) plus the ${horizonsAvailable} forecast in "forecast".
 
-FORECAST IS THE AUTHORITATIVE BASIS — READ THIS CAREFULLY:
-"reconciledSignals" has already cross-checked the historical growth/risk data against the actual forecast for you, so you do not have to (and should not try to) re-derive that comparison yourself:
-- "reconciledSignals.growth.confirmed" / "reconciledSignals.risk.confirmed" — products where BOTH the historical trend AND the forecast agree on the direction. These are your highest-confidence, first-choice picks.
-- "reconciledSignals.growth.forecastOnly" / "reconciledSignals.risk.forecastOnly" — products the forecast expects to move, even if the historical window hasn't clearly shown it yet. Use these when there is nothing in "confirmed", and describe them as forward-looking ("expected to..." / "forecast points to..."), not as something already observed.
-- "reconciledSignals.slowMovers.confirmedDecline" — slow movers that the forecast ALSO expects to keep declining. Prefer these over "reconciledSignals.slowMovers.otherSlowMovers" for the bundle/pairing job below.
-"salesGrowthContext.topGrowthProducts" and "salesGrowthContext.topRiskProducts" are included ONLY as background — to help you describe HOW a confirmed or forecastOnly signal got there in plain language. Do NOT pick a product for a recommendation because it appears in salesGrowthContext alone; if a product isn't in "reconciledSignals" in some form, it is not a forecast-backed signal, and should not anchor a recommendation. Only fall back to salesGrowthContext as a last resort if reconciledSignals is empty for a whole category, and clearly describe it as a historical-only observation with no forecast confirmation.
+PRODUCT FORECAST IS THE ONLY BASIS FOR SALES IMPROVEMENT — READ THIS CAREFULLY:
+"forecastSignals" is a copy of the Product Forecast card the owner sees: "forecastSignals.rise" is the "Expected to Rise" list and "forecastSignals.drop" is the "Expected to Drop" list. Each entry has: name, recentQty (units sold in the last 30 days), forecast (units expected in the next 30 days), diff (change in units) and pct (change in percent).
+The Sales Improvement recommendation (job 1.a below) may use ONLY the products in these two lists. There is no historical product list for it — do not look for one elsewhere in the context.
 
 EVERY RECOMMENDATION MUST BE AN ACTION, NOT JUST A HEADS-UP:
 This is a Decision Support tool — the owner is reading this to know exactly what to DO, not just what is happening. Each recommendation's "desc" must clearly state a specific, concrete move the owner can take this week: run a specific promo, bundle two named products together, cut production of a named item by a rough amount, put a specific item on sale at a specific discount, push pre-orders for a specific upcoming date, produce a smaller/larger batch of a named item, or a similarly concrete operational change.
@@ -1079,9 +1076,16 @@ Only write a recommendation when it is anchored to something NOTICEABLE in the f
 ${avoidRepeatBlock}
 Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 most important and most immediately attainable for that category, ranked by how noticeable/urgent the underlying signal is. Never return 0, 1, 3, or 4 for a category unless the underlying context for that entire category is truly empty (in which case return as many as the data honestly supports, but do not fabricate to hit 2).
 
-1. "salesOptimization" (Sales Optimization) — you MUST cover BOTH of these jobs across your 2 recommendations (one recommendation per job — they do not both have to come from job (a); do not submit two variations of job (a) and skip job (b)):
-   a. A sales-growth or sales-risk strategy anchored primarily in the forecast (forecast.*.salesForecastSnippet, and reconciledSignals.growth/risk for product-level detail) — especially one lining up with an upcoming noticeable date (Filipino payday 15th/30th, or a PH seasonal window like summer / habagat-typhoon season / 'Ber' months-Christmas) if the forecast actually shows that pattern. Use salesGrowthContext.recentSalesTrend only to narrate whether the move has already begun — never as a substitute for the forecast itself. If sales are flat or declining (per the forecast), say so plainly and give a real, specific mitigation action instead of dressing it up as growth — e.g. a concrete production cut, a specific clearance/bundle move, or a specific pre-order push, never just "plan carefully" or "stay consistent."
-   b. MANDATORY whenever reconciledSignals.slowMovers has at least one entry (in confirmedDecline OR otherSlowMovers) AND bundleContext.bestSellers has at least one entry — only skip this job entirely if BOTH of those are truly empty. From reconciledSignals.slowMovers, prefer a product from "confirmedDecline" (a slow mover the forecast also expects to keep declining — this is your most urgent pick); only use "otherSlowMovers" if confirmedDecline is empty, and note explicitly that it's a historical-only slow mover with no forecasted continuation. Pair it with a genuinely fast-moving product from bundleContext.bestSellers — prefer one that also appears in reconciledSignals.growth — in a specific bundle/add-on/discount pairing (name both products, and state a concrete discount or add-on term), explaining why the pairing fits a bakery/celebration business.
+1. "salesOptimization" (Sales Optimization) — you MUST cover BOTH of these jobs across your 2 recommendations unless job (b) is skipped as described below (one recommendation per job — they do not both have to come from job (a); do not submit two variations of job (a) and skip job (b)):
+   a. Sales Improvement — built ONLY from forecastSignals.rise ("Expected to Rise") and forecastSignals.drop ("Expected to Drop"). Set "kind" to "improvement".
+      - Write it as ONE paragraph in "desc" (one paragraph only — no line breaks, no bullet list). If forecastSignals.rise has 2 or more products, that one paragraph must give TWO separate concrete actions, one for each of the 2 products with the biggest diff. If it has exactly 1 product, give one action. If rise is empty, do the same with forecastSignals.drop.
+      - It MUST name at least one product from forecastSignals.rise or forecastSignals.drop, and quote that product's numbers exactly as given: recentQty units in the last 30 days -> forecast units in the next 30 days, and the change (diff). Do not round differently, recompute, or invent numbers.
+      - It MUST NOT mention any product that is not in forecastSignals.rise or forecastSignals.drop, even if that product appears elsewhere in the context (for example in bundleContext).
+      - Prefer the product with the biggest change in units. For a "rise" product, the action should be concrete, such as baking or stocking more ahead of a specific date (Filipino payday 15th/30th, or a PH seasonal window) if that date is relevant. For a "drop" product, the action should be concrete, such as cutting production by a specific amount or running a specific promo.
+      - If BOTH forecastSignals.rise and forecastSignals.drop are empty, give a sales-level recommendation from forecast.thirtyDay.salesForecastSnippet WITHOUT naming any product.
+      - salesGrowthContext.recentSalesTrend is overall daily sales only; use it just to say whether overall sales have already started moving, never to pick a product.
+      - If job (b) is skipped, the second recommendation is ALSO "improvement" and follows these same rules: if both lists are non-empty, the first covers rise and the second covers drop; otherwise the second covers the remaining products of the non-empty list, or a different concrete action on the same products — never a product outside the two lists.
+   b. Product bundling, using HISTORICAL data only (bundleContext), NOT the forecast. bundleContext.bestSellers are the fast-moving products and bundleContext.slowMovers are the slow-moving products, ranked by ACTUAL units sold in the last ${context.historicalWindowDays} days; slowMovers has already been filtered to products that are at least 14 days old (from first sale) and sold at least 1 unit in that window. MANDATORY whenever bundleContext.slowMovers AND bundleContext.bestSellers both have at least one entry. If bundleContext.slowMovers is empty, SKIP this job entirely and use BOTH recommendations for job (a). Otherwise, set "kind" to "bundle" and suggest ONE bundle pairing one slow mover (from bundleContext.slowMovers) with one fast mover (from bundleContext.bestSellers): name both products and state a concrete discount or add-on term, and explain why the pairing fits a bakery/celebration business. Every number you mention for this job must be an actual figure from bundleContext together with its window (e.g. "1 unit in the last ${context.historicalWindowDays} days"); do not use forecast figures or invent numbers for the bundle.
 
 2. "inventoryOptimization" (Inventory Optimization):
    a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). For ones with a possibleProducts match, recommend producing/pushing that specific product with a reasoned discount and expected return vs. a full write-off. If no possibleProducts match exists for the most urgent item, recommend a direct clearance/discount action instead.
@@ -1099,7 +1103,7 @@ Imagine you're explaining this out loud to a 50-year-old bake shop owner who has
 
 Respond with ONLY valid JSON strictly following this exact shape:
 {
-  "salesOptimization": [ { "title": "...", "desc": "...", "type": "success" | "warning" | "danger" | "info" | "neutral" }, { "title": "...", "desc": "...", "type": "..." } ],
+  "salesOptimization": [ { "title": "...", "desc": "...", "type": "success" | "warning" | "danger" | "info" | "neutral", "kind": "improvement" | "bundle" }, { "title": "...", "desc": "...", "type": "...", "kind": "improvement" | "bundle" } ],
   "inventoryOptimization": [ { "title": "...", "desc": "...", "type": "..." }, { "title": "...", "desc": "...", "type": "..." } ]
 }`;
 
@@ -1160,10 +1164,7 @@ function validateActionablePayload(payload, context) {
     }
   }
 
-  const slowMovers = [
-    ...(context?.reconciledSignals?.slowMovers?.confirmedDecline || []),
-    ...(context?.reconciledSignals?.slowMovers?.otherSlowMovers || []),
-  ];
+  const slowMovers = context?.bundleContext?.slowMovers || [];
   const bestSellers = context?.bundleContext?.bestSellers || [];
   if (slowMovers.length > 0 && bestSellers.length > 0) {
     const bestSellerNames = bestSellers
@@ -1176,11 +1177,79 @@ function validateActionablePayload(payload, context) {
     }
   }
 
+  // Sales Improvement (kind "improvement") must be built ONLY from the
+  // Product Forecast rise/drop lists.
+  const rise = context?.forecastSignals?.rise || [];
+  const drop = context?.forecastSignals?.drop || [];
+  if (rise.length > 0 || drop.length > 0) {
+    const norm = (v) => String(v || "").trim().toLowerCase();
+    const displayNameByKey = {};
+    const addKnown = (list) => {
+      for (const p of list || []) {
+        const key = norm(p?.name);
+        if (key && !displayNameByKey[key]) displayNameByKey[key] = String(p.name).trim();
+      }
+    };
+    addKnown(rise);
+    addKnown(drop);
+    addKnown(context?.bundleContext?.bestSellers);
+    addKnown(context?.bundleContext?.slowMovers);
+
+    const allowed = new Set([...rise, ...drop].map((p) => norm(p?.name)).filter(Boolean));
+
+    // Longest names first, masking each match, so a short name that sits
+    // inside a longer one (e.g. "Cake" in "Chocolate Cake") is not counted.
+    const findMentions = (text) => {
+      let rest = norm(text);
+      const found = new Set();
+      for (const key of Object.keys(displayNameByKey).sort((a, b) => b.length - a.length)) {
+        if (rest.includes(key)) {
+          found.add(key);
+          rest = rest.split(key).join(" ");
+        }
+      }
+      return found;
+    };
+
+    const improvementRecs = salesRecs.filter((r) => r.kind === "improvement");
+    if (improvementRecs.length === 0) {
+      issues.push('No salesOptimization item has kind "improvement" — the Sales Improvement recommendation (job 1.a) is missing or not labeled.');
+    }
+
+    const mentionCounts = [];
+    for (const rec of improvementRecs) {
+      const mentioned = findMentions(`${rec.title} ${rec.desc}`);
+      const allowedHits = [...mentioned].filter((k) => allowed.has(k));
+      mentionCounts.push({ rec, mentioned, allowedHits });
+
+      if (allowedHits.length === 0) {
+        issues.push(`"${rec.title}" mentions no product from the Product Forecast rise/drop lists — Sales Improvement must name at least one.`);
+      }
+      for (const k of mentioned) {
+        if (!allowed.has(k)) {
+          issues.push(`"${rec.title}" mentions "${displayNameByKey[k]}", which is not in the Product Forecast rise/drop lists.`);
+        }
+      }
+    }
+
+    // One paragraph, one action per product: when the primary list (rise,
+    // else drop) has 2+ products, one improvement item must cover 2 of them.
+    const primary = (rise.length > 0 ? rise : drop).map((p) => norm(p?.name)).filter(Boolean);
+    const needed = Math.min(2, primary.length);
+    if (improvementRecs.length > 0 && needed >= 2) {
+      const primarySet = new Set(primary);
+      const covered = mentionCounts.some(({ mentioned }) => [...mentioned].filter((k) => primarySet.has(k)).length >= needed);
+      if (!covered) {
+        issues.push(`The Sales Improvement paragraph must cover ${needed} products from the ${rise.length > 0 ? "Expected to Rise" : "Expected to Drop"} list (one action each, in one paragraph).`);
+      }
+    }
+  }
+
   return issues;
 }
 
 function normalizeActionablePayload(aiResult) {
-  const normalizeArray = (arr) => {
+  const normalizeArray = (arr, withKind = false) => {
     const list = Array.isArray(arr) ? arr : [];
     return list
       .filter(r => r && r.title && r.desc)
@@ -1189,11 +1258,13 @@ function normalizeActionablePayload(aiResult) {
         title: String(r.title),
         desc: String(r.desc),
         type: AR_VALID_TYPES.includes(r.type) ? r.type : "neutral",
+        // kind is internal (used by validateActionablePayload), not shown in the UI.
+        ...(withKind && AR_VALID_KINDS.includes(r.kind) ? { kind: r.kind } : {}),
       }));
   };
 
   return {
-    salesOptimization: normalizeArray(aiResult?.salesOptimization),
+    salesOptimization: normalizeArray(aiResult?.salesOptimization, true),
     inventoryOptimization: normalizeArray(aiResult?.inventoryOptimization),
   };
 }
@@ -1289,6 +1360,9 @@ const ActionableRecommendationService = {
           // No previous good cache to fall back to (e.g. first-ever run) —
           // serve the best-effort payload anyway rather than an empty one.
         }
+
+        // Record which Product Forecast these recommendations were built from.
+        payload = { ...payload, forecastGeneratedAt: forecastAvailability.productForecastGeneratedAt };
 
         await AiCacheModel.upsert(AR_CACHE_KEY, payload, AR_CACHE_TTL_MS);
         return { recommendations: payload, insufficientData: false };
@@ -2088,7 +2162,125 @@ function parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal }) {
   };
 }
 
-function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount }) {
+// ---------- Month-position (day-of-month) pattern ----------
+// Gives the 30-day Sales Forecast a payday-style shape across the month
+// instead of four identical copies of the weekly pattern. Computed from the
+// RAW daily series (before winsorizeByWeekday), Manila date keys. Returns
+// null when there is not enough history or no meaningful pattern, in which
+// case the forecast is left exactly as Gemini returned it.
+const MONTH_POSITION_BUCKETS = ["1-5", "6-10", "11-15", "16-20", "21-25", "26-31"];
+const MONTH_POSITION_MIN_COMPLETE_MONTHS = 3;
+const MONTH_POSITION_MIN_DAYS_PER_BUCKET = 10;
+const MONTH_POSITION_SHRINK = 0.5;
+const MONTH_POSITION_CLAMP = { min: 0.75, max: 1.35 };
+const MONTH_POSITION_MIN_SPREAD = 0.10;
+
+function monthPositionBucketOfKey(key) {
+  const day = Number(String(key).slice(8, 10));
+  return Math.min(MONTH_POSITION_BUCKETS.length - 1, Math.floor((day - 1) / 5));
+}
+
+// Calendar months fully inside the series (first day >= first date, last day <= last date).
+function countCompleteCalendarMonths(series) {
+  if (!series.length) return 0;
+  const first = series[0].date;
+  const last = series[series.length - 1].date;
+  let year = Number(first.slice(0, 4));
+  let month = Number(first.slice(5, 7)) - 1; // 0-based
+  const monthStart = (y, m) => new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
+  const monthEnd = (y, m) => new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+
+  if (monthStart(year, month) < first) {
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+  }
+  let count = 0;
+  while (monthEnd(year, month) <= last) {
+    count += 1;
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+  }
+  return count;
+}
+
+function computeMonthPositionIndex(series) {
+  if (!Array.isArray(series) || series.length === 0) return null;
+  if (countCompleteCalendarMonths(series) < MONTH_POSITION_MIN_COMPLETE_MONTHS) return null;
+
+  // Weekday index: same logic as runForecastModel, but on the RAW series.
+  const raw = series.map((p) => p.value);
+  const overallRaw = meanOf(raw);
+  if (!(overallRaw > 0)) return null;
+  let weekdayIndex = Array.from({ length: 7 }, (_, w) => {
+    const values = raw.filter((_, i) => weekdayOfKey(series[i].date) === w);
+    return values.length >= FORECAST_MODEL.minWeekdaySamples ? meanOf(values) / overallRaw : 1;
+  });
+  const avgIndex = meanOf(weekdayIndex) || 1;
+  weekdayIndex = weekdayIndex.map((x) => x / avgIndex);
+
+  // Deseasonalize each day, then group by day-of-month bucket. A weekday
+  // with index 0 (e.g. never any sales) cannot be deseasonalized, so those
+  // days are left out.
+  const bucketValues = MONTH_POSITION_BUCKETS.map(() => []);
+  const allValues = [];
+  series.forEach((point, i) => {
+    const wIdx = weekdayIndex[weekdayOfKey(point.date)];
+    if (!(wIdx > 0) || !Number.isFinite(raw[i])) return;
+    const deseasonalized = raw[i] / wIdx;
+    bucketValues[monthPositionBucketOfKey(point.date)].push(deseasonalized);
+    allValues.push(deseasonalized);
+  });
+
+  if (bucketValues.some((v) => v.length < MONTH_POSITION_MIN_DAYS_PER_BUCKET)) return null;
+  const overall = meanOf(allValues);
+  if (!(overall > 0)) return null;
+
+  const indexes = bucketValues.map((values) => {
+    const rawIndex = meanOf(values) / overall;
+    const shrunk = 1 + (rawIndex - 1) * MONTH_POSITION_SHRINK;
+    return Math.min(MONTH_POSITION_CLAMP.max, Math.max(MONTH_POSITION_CLAMP.min, shrunk));
+  });
+
+  if (Math.max(...indexes) - Math.min(...indexes) < MONTH_POSITION_MIN_SPREAD) return null;
+
+  return Object.fromEntries(
+    MONTH_POSITION_BUCKETS.map((name, b) => [name, Math.round(indexes[b] * 1000) / 1000])
+  );
+}
+
+// Reshapes forecast / lower / upper by the month-position index, then
+// rescales all three by ONE factor so the 30-day forecast total stays the
+// same. Whole numbers out; the forecast total is kept exact.
+function applyMonthPositionIndex(ai, futureDates, monthIndex) {
+  if (!monthIndex) return ai;
+  const mult = futureDates.map((d) => monthIndex[MONTH_POSITION_BUCKETS[monthPositionBucketOfKey(d)]] ?? 1);
+
+  const originalTotal = sumOf(ai.forecast);
+  const shapedForecast = ai.forecast.map((v, i) => v * mult[i]);
+  const shapedTotal = sumOf(shapedForecast);
+  if (!(originalTotal > 0) || !(shapedTotal > 0)) return ai;
+  const factor = originalTotal / shapedTotal;
+
+  // Forecast: largest-remainder rounding so the whole-number total equals the original.
+  const scaled = shapedForecast.map((v) => v * factor);
+  const floors = scaled.map(Math.floor);
+  let remainder = Math.round(originalTotal) - sumOf(floors);
+  const order = scaled.map((v, i) => ({ i, frac: v - floors[i] })).sort((a, b) => b.frac - a.frac);
+  const forecast = [...floors];
+  for (let k = 0; k < order.length && remainder > 0; k++, remainder--) forecast[order[k].i] += 1;
+
+  const reshape = (arr) => (arr ? arr.map((v, i) => Math.round(v * mult[i] * factor)) : null);
+  const lower = reshape(ai.lower);
+  const upper = reshape(ai.upper);
+
+  return {
+    forecast,
+    lower: lower ? lower.map((v, i) => Math.min(v, forecast[i])) : null,
+    upper: upper ? upper.map((v, i) => Math.max(v, forecast[i])) : null,
+  };
+}
+
+function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount, monthPositionIndex = null }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
 
   const chartData = futureDates.slice(0, horizon).map((date, i) => ({
@@ -2129,6 +2321,7 @@ function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baseli
         promptHistoryDays: history.length,
       }),
       statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
+      monthPositionIndex,
     },
   };
 }
@@ -2200,8 +2393,13 @@ async function runSalesForecastRefresh() {
         (raw) => parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal })
       );
 
+      // Month-position shaping (payday etc.) on the validated forecast; the
+      // 30-day total is unchanged. null index = no adjustment.
+      const monthPositionIndex = computeMonthPositionIndex(series);
+      const shapedAi = applyMonthPositionIndex(ai, futureDates, monthPositionIndex);
+
       thirtyPayload = buildSalesHorizonPayload({
-        history: series, ai, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount,
+        history: series, ai: shapedAi, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount, monthPositionIndex,
       });
     }
   } catch (err) {
