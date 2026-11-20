@@ -655,7 +655,7 @@ export default function WasteTab() {
                   <div className={`grid grid-cols-2 gap-2 text-xs p-2 rounded-lg border ${isSelected ? 'bg-white/80 border-red-200' : 'bg-brand-50/50 border-brand-100/50'}`}>
                     <div>
                       <span className="text-gray-400 block text-[10px] font-medium">Quantity</span>
-                      <span className="font-bold text-gray-800">{formatCount(log.qty)}</span>
+                      <span className="font-bold text-gray-800">{formatCount(log.qty)} {log.unit}</span>
                     </div>
                     <div>
                       <span className="text-gray-400 block text-[10px] font-medium">Loss</span>
@@ -730,7 +730,7 @@ export default function WasteTab() {
                       </Badge>
                     </Td>
                     <Td className="font-bold text-brand-900">{log.item}</Td>
-                    <Td>{formatCount(log.qty)}</Td>
+                    <Td>{formatCount(log.qty)} {log.unit}</Td>
                     <Td className="font-semibold text-red-600">{formatPeso(log.cost)}</Td>
                     <Td>
                       <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded">
