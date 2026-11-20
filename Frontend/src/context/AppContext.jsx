@@ -92,6 +92,7 @@ const normalizeWasteLogRow = log => ({
   cost: Number(log.cost),
   reason: log.reason,
   notes: log.notes,
+  voidedAt: log.voided_at || null,
 });
 
 // Kinukuha ang error message mula sa axios error object
@@ -349,7 +350,8 @@ export function AppProvider({ children }) {
         unit: w.unit || '',
         cost: Number(w.cost),
         reason: w.reason,
-        notes: w.notes
+        notes: w.notes,
+        voidedAt: w.voided_at || null
       })));
     } catch (err) {
       console.error('fetchAll() encountered an unexpected error:', err);
@@ -554,7 +556,7 @@ export function AppProvider({ children }) {
           updateList(setProductionLogs, recordId, record, normalizeProductionLogRow, eventType);
           break;
         case 'waste_logs':
-          if (eventType === 'DELETE' || record?.voided_at) {
+          if (eventType === 'DELETE') {
             setWasteLogs(previous => previous.filter(item => String(item.id) !== String(recordId)));
           } else {
             updateList(setWasteLogs, recordId, record, normalizeWasteLogRow, eventType);

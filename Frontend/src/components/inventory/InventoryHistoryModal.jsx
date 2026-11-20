@@ -17,6 +17,7 @@ const formatDT = (iso) => {
 
 const PAGE_SIZE = 5;
 const isVoidableStockEntry = (log) => ['Restock', 'Initial Stock'].includes(log.action);
+const isWithinVoidWindow = (log) => log.created_at && (Date.now() - new Date(log.created_at).getTime()) <= 7 * 24 * 60 * 60 * 1000;
 
 // ─── RESTOCK HISTORY PANEL ─────────────────────────────────────
 export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
@@ -110,8 +111,8 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
     [logs, safePage]
   );
 
-  const activeLogs = useMemo(() => logs.filter(l => !l.voided_at && isVoidableStockEntry(l)), [logs]);
-  const activeIdsOnPage = pagedLogs.filter(l => !l.voided_at && isVoidableStockEntry(l)).map(l => l.id);
+  const activeLogs = useMemo(() => logs.filter(l => !l.voided_at && isVoidableStockEntry(l) && isWithinVoidWindow(l)), [logs]);
+  const activeIdsOnPage = pagedLogs.filter(l => !l.voided_at && isVoidableStockEntry(l) && isWithinVoidWindow(l)).map(l => l.id);
   const allSelectedOnPage = activeIdsOnPage.length > 0 && activeIdsOnPage.every(id => selectedIds.includes(id));
 
   const toggleSelect = (id) => {
@@ -270,7 +271,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
                     key={log.id ?? `${log.created_at}-${idx}`}
                     className={`p-3 flex items-start gap-2.5 ${isVoided ? 'opacity-50' : isSelected ? 'bg-red-50/40' : ''}`}
                   >
-                    {selectionMode && !isVoided && isVoidableStockEntry(log) && (
+                    {selectionMode && !isVoided && isVoidableStockEntry(log) && isWithinVoidWindow(log) && (
                       <input
                         type="checkbox"
                         checked={isSelected}
@@ -334,7 +335,7 @@ export function RestockHistoryPanel({ itemName, itemType, itemId, onVoided }) {
                     <tr key={log.id ?? `${log.created_at}-${idx}`} className={`transition-colors ${isVoided ? 'opacity-50 bg-gray-50/50' : isSelected ? 'bg-red-50/40' : 'hover:bg-brand-50/50'}`}>
                       {selectionMode && (
                         <td className="px-3 py-2 text-center">
-                          {!isVoided && isVoidableStockEntry(log) && (
+                          {!isVoided && isVoidableStockEntry(log) && isWithinVoidWindow(log) && (
                             <input
                               type="checkbox"
                               checked={isSelected}

@@ -8,7 +8,6 @@ const WasteModel = {
   findAll: (limit = 50) =>
     supabase.from('waste_logs')
       .select('*')
-      .is('voided_at', null)
       .order('logged_at', { ascending: false })
       .limit(limit),
 

@@ -227,7 +227,7 @@ export default function WasteTab() {
   );
 
   const { show: showToast } = useToast();
-  const [containerRef, isCompact] = useIsCompact();
+  const [containerRef, isCompact] = useIsCompact(1050);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -455,7 +455,7 @@ export default function WasteTab() {
   });
 
   const totalCostFiltered = useMemo(() => {
-    return filteredLogs.reduce((acc, curr) => acc + (curr.cost || 0), 0);
+    return filteredLogs.reduce((acc, curr) => acc + (curr.voidedAt ? 0 : curr.cost || 0), 0);
   }, [filteredLogs]);
 
   const toggleSelect = (id) => {
@@ -466,21 +466,21 @@ export default function WasteTab() {
     });
   };
 
-  const allPagedSelected = pagedLogs.length > 0 && pagedLogs.every(log => selectedIds.has(log.id));
+  const allPagedSelected = pagedLogs.some(log => !log.voidedAt && log.dt && (Date.now() - new Date(log.dt).getTime()) <= 7 * 24 * 60 * 60 * 1000) && pagedLogs.filter(log => !log.voidedAt && log.dt && (Date.now() - new Date(log.dt).getTime()) <= 7 * 24 * 60 * 60 * 1000).every(log => selectedIds.has(log.id));
   const toggleSelectAllOnPage = () => {
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (allPagedSelected) {
         pagedLogs.forEach(log => next.delete(log.id));
       } else {
-        pagedLogs.forEach(log => next.add(log.id));
+        pagedLogs.filter(log => !log.voidedAt && log.dt && (Date.now() - new Date(log.dt).getTime()) <= 7 * 24 * 60 * 60 * 1000).forEach(log => next.add(log.id));
       }
       return next;
     });
   };
 
   const selectedLogs = useMemo(
-    () => wasteLogs.filter(log => selectedIds.has(log.id)),
+    () => wasteLogs.filter(log => !log.voidedAt && selectedIds.has(log.id)),
     [wasteLogs, selectedIds]
   );
 
@@ -622,11 +622,14 @@ export default function WasteTab() {
           /* CARDS WITH RED HIGHLIGHT ON SELECTION */
           <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
             {pagedLogs.map(log => {
-              const isSelected = selectionMode && selectedIds.has(log.id);
+              const isVoided = Boolean(log.voidedAt);
+              const isTooOldToVoid = !log.dt || (Date.now() - new Date(log.dt).getTime()) > 7 * 24 * 60 * 60 * 1000;
+              const canSelectForVoid = !isVoided && !isTooOldToVoid;
+              const isSelected = selectionMode && canSelectForVoid && selectedIds.has(log.id);
               return (
                 <div 
                   key={log.id} 
-                  className={`p-3.5 rounded-xl border transition-all duration-150 space-y-2 min-w-0 ${
+                  className={`p-3.5 rounded-xl border transition-all duration-150 space-y-2 min-w-0 ${isVoided ? 'border-dashed border-red-300 bg-red-50/40 opacity-70' :
                     isSelected 
                       ? 'border-red-500 bg-red-50/80 ring-2 ring-red-400 shadow-xs' 
                       : 'border-brand-100 bg-white shadow-2xs'
@@ -634,7 +637,7 @@ export default function WasteTab() {
                 >
                   <div className="flex items-start justify-between gap-2 min-w-0">
                     <div className="flex items-start gap-2.5 min-w-0">
-                      {selectionMode && (
+                      {selectionMode && canSelectForVoid && (
                         <input
                           type="checkbox"
                           checked={selectedIds.has(log.id)}
@@ -643,7 +646,7 @@ export default function WasteTab() {
                         />
                       )}
                       <div className="min-w-0">
-                        <h4 className="font-bold text-brand-900 text-sm wrap-break-word">{log.item}</h4>
+                        <div className="flex items-center gap-2"><h4 className={`font-bold text-sm wrap-break-word ${isVoided ? 'line-through text-red-500' : 'text-brand-900'}`}>{log.item}</h4>{isVoided && <span className="text-[10px] font-bold text-red-600 border border-dashed border-red-400 rounded px-1.5 py-0.5">VOIDED</span>}</div>
                         <p className="text-[11px] text-gray-400">{formatLocal(log.dt)}</p>
                       </div>
                     </div>
@@ -710,10 +713,13 @@ export default function WasteTab() {
                 </tr>
               )}
               {pagedLogs.map(log => {
-                const isSelected = selectionMode && selectedIds.has(log.id);
+                const isVoided = Boolean(log.voidedAt);
+              const isTooOldToVoid = !log.dt || (Date.now() - new Date(log.dt).getTime()) > 7 * 24 * 60 * 60 * 1000;
+              const canSelectForVoid = !isVoided && !isTooOldToVoid;
+              const isSelected = selectionMode && canSelectForVoid && selectedIds.has(log.id);
                 return (
-                  <Tr key={log.id} className={isSelected ? 'bg-red-100/70 font-medium' : ''}>
-                    {selectionMode && (
+                  <Tr key={log.id} className={isVoided ? 'bg-red-50/40 opacity-70 outline outline-1 outline-dashed outline-red-300' : isSelected ? 'bg-red-100/70 font-medium' : ''}>
+                    {selectionMode && canSelectForVoid && (
                       <Td>
                         <input
                           type="checkbox"
@@ -729,9 +735,9 @@ export default function WasteTab() {
                         {TYPE_LABELS[log.type] || log.type}
                       </Badge>
                     </Td>
-                    <Td className="font-bold text-brand-900">{log.item}</Td>
+                    <Td className={`font-bold ${isVoided ? 'line-through text-red-500' : 'text-brand-900'}`}>{log.item}{isVoided && <span className="ml-2 inline-flex text-[10px] font-bold text-red-600 border border-dashed border-red-400 rounded px-1.5 py-0.5">VOIDED</span>}</Td>
                     <Td>{formatCount(log.qty)} {log.unit}</Td>
-                    <Td className="font-semibold text-red-600">{formatPeso(log.cost)}</Td>
+                    <Td className={`font-semibold ${isVoided ? 'line-through text-gray-400' : 'text-red-600'}`}>{formatPeso(log.cost)}</Td>
                     <Td>
                       <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded">
                         {log.reason}

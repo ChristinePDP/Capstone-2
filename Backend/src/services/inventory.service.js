@@ -349,6 +349,10 @@ const InventoryLogService = {
     const log = await InventoryLogModel.findById(logId);
     if (!log) throw new AppError('Stock log not found', 404);
     if (log.voided_at) throw new AppError('Naka-void na ang stock entry na ito.', 400);
+    const ageMs = Date.now() - new Date(log.created_at).getTime();
+    if (!Number.isFinite(ageMs) || ageMs > 7 * 24 * 60 * 60 * 1000) {
+      throw new AppError('Hindi na puwedeng i-void ang stock entry kapag lampas na sa 7 araw.', 400);
+    }
     if (!['Restock', 'Initial Stock'].includes(log.action) || log.transaction_type !== 'IN') {
       throw new AppError('Hindi ito isang restock entry — hindi ito puwedeng i-void dito.', 400);
     }
@@ -963,6 +967,10 @@ const WasteService = {
     const { data: log, error: findErr } = await WasteModel.findById(id);
     if (findErr || !log) throw new AppError('Waste record not found', 404);
     if (log.voided_at) throw new AppError('Naka-void na ang record na ito.', 400);
+    const ageMs = Date.now() - new Date(log.logged_at).getTime();
+    if (!Number.isFinite(ageMs) || ageMs > 7 * 24 * 60 * 60 * 1000) {
+      throw new AppError('Hindi na puwedeng i-void ang waste log kapag lampas na sa 7 araw.', 400);
+    }
 
     let restoredInventoryLot = null;
     try {
