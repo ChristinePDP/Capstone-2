@@ -97,18 +97,18 @@ export default function ProductForecasting({ data, isLoading = false }) {
       ) : (
         <div className="flex flex-col flex-1 min-h-0 gap-5">
           <ForecastSection
-            title="Fast Moving"
+            title="Expected to Rise"
             icon={<TrendingUp size={14} className="text-emerald-500" />}
             items={growthList}
-            emptyText="No fast moving products detected."
+            emptyText="No products expected to rise."
             periodDays={PERIOD_DAYS}
             pctClass="text-emerald-600"
           />
           <ForecastSection
-            title="At Risk"
+            title="Expected to Drop"
             icon={<TrendingDown size={14} className="text-rose-500" />}
             items={riskList}
-            emptyText="No at-risk products detected."
+            emptyText="No products expected to drop."
             periodDays={PERIOD_DAYS}
             pctClass="text-rose-600"
           />

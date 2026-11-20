@@ -1,6 +1,7 @@
 import {
   TrendingUp,
   PackagePlus,
+  Boxes,
 } from 'lucide-react';
 import { Skeleton } from '../ui';
 
@@ -28,7 +29,42 @@ const SECTIONS = [
   },
 ];
 
-function RecommendationItem({ ins, accent }) {
+// Fixed labels for the Sales Optimization items. Hindi galing sa AI — ang
+// AI lang ang nagbibigay ng "kind" ("improvement" | "bundle") at ng
+// title/desc. Ang label na nakikita ng user ay laging isa sa dalawang ito.
+const SALES_ITEM_KINDS = {
+  improvement: {
+    label: 'Sales Improvement',
+    icon: TrendingUp,
+    order: 0,
+    emptyText: 'No sales improvement tip yet.',
+  },
+  bundle: {
+    label: 'Product Bundling',
+    icon: Boxes,
+    order: 1,
+    emptyText: 'Not enough sales history to suggest a bundle yet.',
+  },
+};
+
+// Sales Optimization ay laging may DALAWANG fixed na slot: Sales Improvement
+// at Product Bundling (sa ganoong pagkakasunod). Hinahanap ang item ayon sa
+// "kind"; kung walang "kind" ang data, ayon sa posisyon (0 = improvement,
+// 1 = bundle).
+function buildSalesSlots(items) {
+  const list = Array.isArray(items) ? items : [];
+  const hasKinds = list.some((i) => i?.kind in SALES_ITEM_KINDS);
+  const pick = (kind, index) => (hasKinds ? list.find((i) => i?.kind === kind) : list[index]) || null;
+  return [
+    { kind: 'improvement', item: pick('improvement', 0) },
+    { kind: 'bundle', item: pick('bundle', 1) },
+  ];
+}
+
+function RecommendationItem({ ins, accent, kind }) {
+  const kindMeta = SALES_ITEM_KINDS[kind || ins.kind];
+  const KindIcon = kindMeta?.icon;
+
   return (
     <div className="relative flex gap-3 py-4 pl-3.5 first:pt-0 last:pb-0 max-w-[64ch]">
       <span
@@ -36,6 +72,15 @@ function RecommendationItem({ ins, accent }) {
         style={{ backgroundColor: accent }}
       />
       <div className="min-w-0">
+        {kindMeta && (
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border mb-2"
+            style={{ color: accent, borderColor: accent + '55', backgroundColor: '#fff' }}
+          >
+            <KindIcon size={12} className="shrink-0" />
+            {kindMeta.label}
+          </span>
+        )}
         <h4 className="text-sm font-bold text-[#3d2410] leading-snug mb-1.5">
           {ins.title}
         </h4>
@@ -45,10 +90,34 @@ function RecommendationItem({ ins, accent }) {
   );
 }
 
-function Note({ section, items, isLoading = false }) {
+function EmptySlot({ kind, accent }) {
+  const meta = SALES_ITEM_KINDS[kind];
+  const KindIcon = meta.icon;
+  return (
+    <div className="relative flex gap-3 py-4 pl-3.5 first:pt-0 last:pb-0 max-w-[64ch]">
+      <span
+        className="absolute left-0 top-1 bottom-1 w-[3px] rounded-full opacity-40"
+        style={{ backgroundColor: accent }}
+      />
+      <div className="min-w-0">
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border mb-2"
+          style={{ color: accent, borderColor: accent + '55', backgroundColor: '#fff' }}
+        >
+          <KindIcon size={12} className="shrink-0" />
+          {meta.label}
+        </span>
+        <p className="text-sm text-[#5C3317]/70 leading-7">{meta.emptyText}</p>
+      </div>
+    </div>
+  );
+}
+
+function Note({ section, items, isLoading = false, fixedSlots = false }) {
   const Icon = section.icon;
   const isEmpty = !items || items.length === 0;
   const count = items?.length || 0;
+  const slots = fixedSlots && !isEmpty ? buildSalesSlots(items) : null;
 
   return (
     <div className="relative rounded-xl border border-brand-100 bg-brand-50/40 overflow-hidden transition-shadow duration-200 hover:shadow-md">
@@ -89,9 +158,17 @@ function Note({ section, items, isLoading = false }) {
           </div>
         ) : (
           <div className="flex flex-col divide-y divide-[#f1ece4]">
-            {items.map((ins, i) => (
-              <RecommendationItem key={i} ins={ins} accent={section.accent} />
-            ))}
+            {slots
+              ? slots.map(({ kind, item }) =>
+                  item ? (
+                    <RecommendationItem key={kind} ins={item} kind={kind} accent={section.accent} />
+                  ) : (
+                    <EmptySlot key={kind} kind={kind} accent={section.accent} />
+                  )
+                )
+              : items.map((ins, i) => (
+                  <RecommendationItem key={i} ins={ins} accent={section.accent} />
+                ))}
           </div>
         )}
       </div>
@@ -105,7 +182,13 @@ export default function ActionableRecommendation({ recommendations = {}, isLoadi
     inventoryOptimization = [],
   } = recommendations;
 
-  const dataByKey = { salesOptimization, inventoryOptimization };
+  // Sales Improvement laging nauuna sa Product Bundling (stable sort; ang
+  // item na walang "kind" ay nananatili sa orihinal na posisyon).
+  const sortedSales = [...salesOptimization].sort(
+    (a, b) => (SALES_ITEM_KINDS[a?.kind]?.order ?? 0) - (SALES_ITEM_KINDS[b?.kind]?.order ?? 0)
+  );
+
+  const dataByKey = { salesOptimization: sortedSales, inventoryOptimization };
 
   return (
     // Binago ang bg-white to bg-[#fdfbf9], p-5 to p-4, at tinanggal ang shadow-sm para pumantay sa Forecasting wrapper[cite: 2]
@@ -113,7 +196,13 @@ export default function ActionableRecommendation({ recommendations = {}, isLoadi
       {/* One row on desktop, stacked (2 rows) on mobile[cite: 2] */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
         {SECTIONS.map((section) => (
-          <Note key={section.key} section={section} items={dataByKey[section.key]} isLoading={isLoading} />
+          <Note
+            key={section.key}
+            section={section}
+            items={dataByKey[section.key]}
+            isLoading={isLoading}
+            fixedSlots={section.key === 'salesOptimization'}
+          />
         ))}
       </div>
     </div>

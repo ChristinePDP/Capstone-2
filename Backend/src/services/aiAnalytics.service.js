@@ -639,8 +639,12 @@ const isUsableProductCache = (cached) =>
 // matching historical context. It does not run if either forecast is unavailable.
 const AR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
-const AR_CACHE_KEY = "actionable_recommendations_v8";
+const AR_CACHE_KEY = "actionable_recommendations_v9";
 const AR_MAX_PER_CATEGORY = 2;
+// Product Bundling: fast/slow movers come from ACTUAL sales of the past 30 days (historical, not the forecast).
+const BUNDLE_WINDOW_DAYS = 30;
+// The Product Forecast card shows only the top 2 of each list; recommendations must match it.
+const FORECAST_SIGNALS_MAX = 2;
 const AR_VALID_KINDS = ["improvement", "bundle"];
 
 // FIX: amount_paid (aktwal na natanggap na bayad), hindi grand_total —
@@ -804,8 +808,6 @@ async function getExpiryAdvisoryContext(days, ingredientToProducts) {
   return { nearExpiringItems, inventoryActivitySummary, recentWaste };
 }
 
-const BUNDLE_MIN_PRODUCT_AGE_DAYS = 14;
-
 async function getBundleOpportunityContext(days) {
   const { startDate, endDate } = getLookbackDateRange(days);
 
@@ -825,26 +827,8 @@ async function getBundleOpportunityContext(days) {
 
   const bestSellers = sorted.slice(0, 5);
   const bestSellerNames = new Set(bestSellers.map((p) => p.name));
-
-  // QUALITY GATE for slowMovers (historical data only, no forecast):
-  //  1. at least BUNDLE_MIN_PRODUCT_AGE_DAYS old, counted from the FIRST SALE
-  //     date in the full order history (getProductDailySeries), matched by
-  //     trimmed lowercase name;
-  //  2. at least 1 unit sold in the last `days` (60) window.
-  // Products failing the gate are new or dead products, not slow movers.
-  const { products: historyProducts } = await getProductDailySeries();
-  const productAgeByName = {};
-  for (const hp of historyProducts || []) {
-    const key = String(hp.productName || "").trim().toLowerCase();
-    if (!key) continue;
-    // series starts at first sale and ends yesterday, so length = age in days
-    productAgeByName[key] = Math.max(productAgeByName[key] || 0, hp.series.length);
-  }
-
   const slowMovers = sorted
     .filter((p) => !bestSellerNames.has(p.name))
-    .filter((p) => p.qty >= 1)
-    .filter((p) => (productAgeByName[String(p.name || "").trim().toLowerCase()] || 0) >= BUNDLE_MIN_PRODUCT_AGE_DAYS)
     .slice(-5)
     .reverse();
 
@@ -1006,7 +990,7 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
   const [recentSalesTrend, expiryContext, bundleContext] = await Promise.all([
     getRecentSalesTrend(historicalWindowDays),
     getExpiryAdvisoryContext(historicalWindowDays, ingredientToProducts),
-    getBundleOpportunityContext(historicalWindowDays),
+    getBundleOpportunityContext(BUNDLE_WINDOW_DAYS),
   ]);
 
   // Stock-level fallback is only computed (and only sent to the prompt)
@@ -1027,8 +1011,8 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
     // productForecast.growth, "Expected to Drop" = productForecast.risk.
     // Each item: { name, recentQty, forecast, diff, pct }.
     forecastSignals: {
-      rise: forecastAvailability.thirtyDay?.productForecast?.growth || [],
-      drop: forecastAvailability.thirtyDay?.productForecast?.risk || [],
+      rise: (forecastAvailability.thirtyDay?.productForecast?.growth || []).slice(0, FORECAST_SIGNALS_MAX),
+      drop: (forecastAvailability.thirtyDay?.productForecast?.risk || []).slice(0, FORECAST_SIGNALS_MAX),
     },
     forecast: {
       thirtyDay: forecastAvailability.thirtyDay,
@@ -1053,7 +1037,7 @@ function buildActionablePrompt(context, previousTitles = []) {
 
   const systemPrompt = `You are a Decision Support System (DSS) advisor for Cakelytics, analyzing "Aileen and Cake Max," a local cake and bake shop in the Philippines. Today's date is ${todayDate}.
 
-This analysis uses ${context.historicalWindowDays} days of historical data (salesGrowthContext, bundleContext, expiryContext / stockContext) plus the ${horizonsAvailable} forecast in "forecast".
+This analysis uses ${context.historicalWindowDays} days of historical data (salesGrowthContext, expiryContext / stockContext), plus bundleContext = actual units sold per product in the past ${BUNDLE_WINDOW_DAYS} days, plus the ${horizonsAvailable} forecast in "forecast".
 
 PRODUCT FORECAST IS THE ONLY BASIS FOR SALES IMPROVEMENT — READ THIS CAREFULLY:
 "forecastSignals" is a copy of the Product Forecast card the owner sees: "forecastSignals.rise" is the "Expected to Rise" list and "forecastSignals.drop" is the "Expected to Drop" list. Each entry has: name, recentQty (units sold in the last 30 days), forecast (units expected in the next 30 days), diff (change in units) and pct (change in percent).
@@ -1076,16 +1060,19 @@ Only write a recommendation when it is anchored to something NOTICEABLE in the f
 ${avoidRepeatBlock}
 Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 most important and most immediately attainable for that category, ranked by how noticeable/urgent the underlying signal is. Never return 0, 1, 3, or 4 for a category unless the underlying context for that entire category is truly empty (in which case return as many as the data honestly supports, but do not fabricate to hit 2).
 
-1. "salesOptimization" (Sales Optimization) — you MUST cover BOTH of these jobs across your 2 recommendations unless job (b) is skipped as described below (one recommendation per job — they do not both have to come from job (a); do not submit two variations of job (a) and skip job (b)):
-   a. Sales Improvement — built ONLY from forecastSignals.rise ("Expected to Rise") and forecastSignals.drop ("Expected to Drop"). Set "kind" to "improvement".
-      - Write it as ONE paragraph in "desc" (one paragraph only — no line breaks, no bullet list). If forecastSignals.rise has 2 or more products, that one paragraph must give TWO separate concrete actions, one for each of the 2 products with the biggest diff. If it has exactly 1 product, give one action. If rise is empty, do the same with forecastSignals.drop.
-      - It MUST name at least one product from forecastSignals.rise or forecastSignals.drop, and quote that product's numbers exactly as given: recentQty units in the last 30 days -> forecast units in the next 30 days, and the change (diff). Do not round differently, recompute, or invent numbers.
+1. "salesOptimization" (Sales Optimization) — a FIXED structure of EXACTLY 2 items, in this order: first the Sales Improvement (job a, "kind": "improvement"), then the Product Bundling (job b, "kind": "bundle"). NEVER return two items of the same kind, and never drop the bundle item when job (b) has data to work with.
+   a. Sales Improvement — "kind": "improvement". Built ONLY from forecastSignals.rise ("Expected to Rise") and forecastSignals.drop ("Expected to Drop"). These lists are exactly the products shown on the Product Forecast card (at most 2 in each).
+      - Write ONE paragraph in "desc" (no line breaks, no bullet list) that covers EVERY product in forecastSignals.rise and forecastSignals.drop, with one short, concrete action per product. Use each product's name exactly as written in the list.
+      - For each product, quote its numbers exactly as given: recentQty units in the last 30 days -> forecast units in the next 30 days, and the change (diff). Do not round differently, recompute, or invent numbers.
       - It MUST NOT mention any product that is not in forecastSignals.rise or forecastSignals.drop, even if that product appears elsewhere in the context (for example in bundleContext).
-      - Prefer the product with the biggest change in units. For a "rise" product, the action should be concrete, such as baking or stocking more ahead of a specific date (Filipino payday 15th/30th, or a PH seasonal window) if that date is relevant. For a "drop" product, the action should be concrete, such as cutting production by a specific amount or running a specific promo.
+      - For a "rise" product the action should be concrete, such as baking or stocking more ahead of a specific date (Filipino payday 15th/30th, or a PH seasonal window) if that date is relevant. For a "drop" product, the action should be concrete, such as cutting production by a specific amount or running a specific promo. Do not use the bundle pairing here — that belongs to job (b).
       - If BOTH forecastSignals.rise and forecastSignals.drop are empty, give a sales-level recommendation from forecast.thirtyDay.salesForecastSnippet WITHOUT naming any product.
       - salesGrowthContext.recentSalesTrend is overall daily sales only; use it just to say whether overall sales have already started moving, never to pick a product.
-      - If job (b) is skipped, the second recommendation is ALSO "improvement" and follows these same rules: if both lists are non-empty, the first covers rise and the second covers drop; otherwise the second covers the remaining products of the non-empty list, or a different concrete action on the same products — never a product outside the two lists.
-   b. Product bundling, using HISTORICAL data only (bundleContext), NOT the forecast. bundleContext.bestSellers are the fast-moving products and bundleContext.slowMovers are the slow-moving products, ranked by ACTUAL units sold in the last ${context.historicalWindowDays} days; slowMovers has already been filtered to products that are at least 14 days old (from first sale) and sold at least 1 unit in that window. MANDATORY whenever bundleContext.slowMovers AND bundleContext.bestSellers both have at least one entry. If bundleContext.slowMovers is empty, SKIP this job entirely and use BOTH recommendations for job (a). Otherwise, set "kind" to "bundle" and suggest ONE bundle pairing one slow mover (from bundleContext.slowMovers) with one fast mover (from bundleContext.bestSellers): name both products and state a concrete discount or add-on term, and explain why the pairing fits a bakery/celebration business. Every number you mention for this job must be an actual figure from bundleContext together with its window (e.g. "1 unit in the last ${context.historicalWindowDays} days"); do not use forecast figures or invent numbers for the bundle.
+   b. Product Bundling — "kind": "bundle". Based on HISTORICAL sales (bundleContext), not the forecast. bundleContext.bestSellers are the fast-moving products and bundleContext.slowMovers are the slow-moving ones, by actual units sold in the last ${BUNDLE_WINDOW_DAYS} days. This is a flexible, practical suggestion, not a strict formula:
+      - Best case: pair a slow mover with a fast mover from bundleContext, name both, and give a simple discount or add-on idea that fits a bakery/celebration business.
+      - If there is no slow mover, pair any two bestSellers as a combo instead (do not call them slow). Any sensible combo from bundleContext is fine.
+      - Keep it simple and doable this week. Use numbers only if they come from bundleContext (with their window, e.g. "in the last ${BUNDLE_WINDOW_DAYS} days"); a discount or add-on term you propose is your own idea, so just keep it reasonable.
+      - If bundleContext.bestSellers has only 1 product and no slow mover, suggest a simple add-on or celebration extra with it (no invented numbers). Only if bundleContext.bestSellers is empty leave the bundle item out and return only the Sales Improvement item.
 
 2. "inventoryOptimization" (Inventory Optimization):
    a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). For ones with a possibleProducts match, recommend producing/pushing that specific product with a reasoned discount and expected return vs. a full write-off. If no possibleProducts match exists for the most urgent item, recommend a direct clearance/discount action instead.
@@ -1166,84 +1153,74 @@ function validateActionablePayload(payload, context) {
 
   const slowMovers = context?.bundleContext?.slowMovers || [];
   const bestSellers = context?.bundleContext?.bestSellers || [];
-  if (slowMovers.length > 0 && bestSellers.length > 0) {
-    const bestSellerNames = bestSellers
-      .map((p) => String(p?.name || p?.product_name || "").toLowerCase())
-      .filter(Boolean);
-    const salesText = salesRecs.map((r) => r.desc).join(" ").toLowerCase();
-    const hasBundleMention = bestSellerNames.some((name) => name && salesText.includes(name));
-    if (!hasBundleMention) {
-      issues.push("Required bundle/pairing recommendation (slow mover + best seller, job 1.b) is missing from salesOptimization — both recommendations look like variations of the same decline-mitigation angle instead.");
-    }
-  }
-
-  // Sales Improvement (kind "improvement") must be built ONLY from the
-  // Product Forecast rise/drop lists.
   const rise = context?.forecastSignals?.rise || [];
   const drop = context?.forecastSignals?.drop || [];
-  if (rise.length > 0 || drop.length > 0) {
-    const norm = (v) => String(v || "").trim().toLowerCase();
-    const displayNameByKey = {};
-    const addKnown = (list) => {
-      for (const p of list || []) {
-        const key = norm(p?.name);
-        if (key && !displayNameByKey[key]) displayNameByKey[key] = String(p.name).trim();
-      }
-    };
-    addKnown(rise);
-    addKnown(drop);
-    addKnown(context?.bundleContext?.bestSellers);
-    addKnown(context?.bundleContext?.slowMovers);
 
-    const allowed = new Set([...rise, ...drop].map((p) => norm(p?.name)).filter(Boolean));
-
-    // Longest names first, masking each match, so a short name that sits
-    // inside a longer one (e.g. "Cake" in "Chocolate Cake") is not counted.
-    const findMentions = (text) => {
-      let rest = norm(text);
-      const found = new Set();
-      for (const key of Object.keys(displayNameByKey).sort((a, b) => b.length - a.length)) {
-        if (rest.includes(key)) {
-          found.add(key);
-          rest = rest.split(key).join(" ");
-        }
-      }
-      return found;
-    };
-
-    const improvementRecs = salesRecs.filter((r) => r.kind === "improvement");
-    if (improvementRecs.length === 0) {
-      issues.push('No salesOptimization item has kind "improvement" — the Sales Improvement recommendation (job 1.a) is missing or not labeled.');
+  const norm = (v) => String(v || "").trim().toLowerCase();
+  const displayNameByKey = {};
+  const addKnown = (list) => {
+    for (const p of list || []) {
+      const key = norm(p?.name || p?.product_name);
+      if (key && !displayNameByKey[key]) displayNameByKey[key] = String(p?.name || p?.product_name).trim();
     }
+  };
+  addKnown(rise);
+  addKnown(drop);
+  addKnown(bestSellers);
+  addKnown(slowMovers);
 
-    const mentionCounts = [];
-    for (const rec of improvementRecs) {
-      const mentioned = findMentions(`${rec.title} ${rec.desc}`);
-      const allowedHits = [...mentioned].filter((k) => allowed.has(k));
-      mentionCounts.push({ rec, mentioned, allowedHits });
-
-      if (allowedHits.length === 0) {
-        issues.push(`"${rec.title}" mentions no product from the Product Forecast rise/drop lists — Sales Improvement must name at least one.`);
-      }
-      for (const k of mentioned) {
-        if (!allowed.has(k)) {
-          issues.push(`"${rec.title}" mentions "${displayNameByKey[k]}", which is not in the Product Forecast rise/drop lists.`);
-        }
+  // Longest names first, masking each match, so a short name that sits
+  // inside a longer one (e.g. "Cake" in "Chocolate Cake") is not counted.
+  const findMentions = (text) => {
+    let rest = norm(text);
+    const found = new Set();
+    for (const key of Object.keys(displayNameByKey).sort((a, b) => b.length - a.length)) {
+      if (rest.includes(key)) {
+        found.add(key);
+        rest = rest.split(key).join(" ");
       }
     }
+    return found;
+  };
+  const keysOf = (list) => new Set((list || []).map((p) => norm(p?.name || p?.product_name)).filter(Boolean));
 
-    // One paragraph, one action per product: when the primary list (rise,
-    // else drop) has 2+ products, one improvement item must cover 2 of them.
-    const primary = (rise.length > 0 ? rise : drop).map((p) => norm(p?.name)).filter(Boolean);
-    const needed = Math.min(2, primary.length);
-    if (improvementRecs.length > 0 && needed >= 2) {
-      const primarySet = new Set(primary);
-      const covered = mentionCounts.some(({ mentioned }) => [...mentioned].filter((k) => primarySet.has(k)).length >= needed);
-      if (!covered) {
-        issues.push(`The Sales Improvement paragraph must cover ${needed} products from the ${rise.length > 0 ? "Expected to Rise" : "Expected to Drop"} list (one action each, in one paragraph).`);
+  // FIXED STRUCTURE: exactly one "improvement" and, whenever bundle data
+  // exists, exactly one "bundle". Matching names alone is not enough.
+  const improvementRecs = salesRecs.filter((r) => r.kind === "improvement");
+  const bundleRecs = salesRecs.filter((r) => r.kind === "bundle");
+  const bundleAvailable = bestSellers.length >= 1;
+
+  if (improvementRecs.length !== 1) {
+    issues.push(`salesOptimization must contain exactly ONE item with kind "improvement" (Sales Improvement, job 1.a) — found ${improvementRecs.length}.`);
+  }
+  if (bundleAvailable && bundleRecs.length !== 1) {
+    issues.push(`salesOptimization must contain exactly ONE item with kind "bundle" (Product Bundling, job 1.b) — found ${bundleRecs.length}. Do not return two Sales Improvement items instead of the bundle.`);
+  }
+  if (!bundleAvailable && bundleRecs.length > 0) {
+    issues.push("There is no sales history for a Product Bundling item yet — leave the bundle item out.");
+  }
+
+  // Sales Improvement: ONLY the Product Forecast rise/drop products, and ALL of them.
+  if (improvementRecs.length === 1 && (rise.length > 0 || drop.length > 0)) {
+    const rec = improvementRecs[0];
+    const allowed = keysOf([...rise, ...drop]);
+    const mentioned = findMentions(`${rec.title} ${rec.desc}`);
+
+    for (const k of mentioned) {
+      if (!allowed.has(k)) {
+        issues.push(`"${rec.title}" mentions "${displayNameByKey[k]}", which is not in the Product Forecast rise/drop lists.`);
+      }
+    }
+    for (const k of allowed) {
+      if (!mentioned.has(k)) {
+        issues.push(`"${rec.title}" does not cover "${displayNameByKey[k]}" from the Product Forecast — give one action for every product in the rise/drop lists, in one paragraph.`);
       }
     }
   }
+
+  // Product Bundling is intentionally NOT name-checked: the structure check
+  // above (exactly one "bundle" item when bundle data exists) is the only
+  // hard rule. Which products are paired is left to the prompt's guidance.
 
   return issues;
 }
