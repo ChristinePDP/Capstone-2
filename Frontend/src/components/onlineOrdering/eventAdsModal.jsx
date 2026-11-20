@@ -338,17 +338,13 @@ export default function EventAdsModal() {
     navigate('/onlineOrdering/menu', { state: { focusProductId: product.id } });
   };
 
-  // Hindi gumagalaw ang page sa likod habang bukas ang modal (at walang
-  // "jump" ng layout dahil kino-compensate ang nawawalang scrollbar).
+  // I-lock lang ang page scroll habang bukas ang modal.
   useEffect(() => {
     if (!isOpen) return;
-    const { overflow, paddingRight } = document.body.style;
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
     return () => {
-      document.body.style.overflow = overflow;
-      document.body.style.paddingRight = paddingRight;
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
 
