@@ -645,7 +645,7 @@ const AR_MAX_PER_CATEGORY = 2;
 const BUNDLE_WINDOW_DAYS = 30;
 // The Product Forecast card shows only the top 2 of each list; recommendations must match it.
 const FORECAST_SIGNALS_MAX = 2;
-const AR_VALID_KINDS = ["improvement", "bundle"];
+const AR_VALID_KINDS = ["improvement", "bundle", "expiry", "stock"];
 
 // FIX: amount_paid (aktwal na natanggap na bayad), hindi grand_total —
 // parehong basehan na ngayon ng FourKpiService/PerformanceSummaryService,
@@ -1125,12 +1125,10 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
     getBundleOpportunityContext(BUNDLE_WINDOW_DAYS),
   ]);
 
-  // Stock-level fallback is only computed (and only sent to the prompt)
-  // when there is nothing near-expiring to react to — keeps the context
-  // lean and keeps the AI from mixing both signals for the same category.
-  const stockContext = expiryContext.nearExpiringItems.length === 0
-    ? getStockLevelContext(expiryContext.inventoryActivitySummary)
-    : null;
+  // Stock levels are always computed now: the "Stock & Waste Control" item is
+  // a separate topic from "Expiry Management", so it needs its own data even
+  // when something is near-expiring.
+  const stockContext = getStockLevelContext(expiryContext.inventoryActivitySummary);
 
   return {
     historicalWindowDays,
@@ -1209,21 +1207,32 @@ Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 mo
       - Keep it simple and doable this week. Use numbers only if they come from bundleContext (with their window, e.g. "in the last ${BUNDLE_WINDOW_DAYS} days"); a discount or add-on term you propose is your own idea, so just keep it reasonable.
       - If bundleContext.bestSellers has only 1 product and no slow mover, suggest a simple add-on or celebration extra with it (no invented numbers). Only if bundleContext.bestSellers is empty leave the bundle item out and return only the Sales Improvement item.
 
-2. "inventoryOptimization" (Inventory Optimization):
-   a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). Each item has possibleProducts (the products that use that ingredient, each with unitsSold in the last salesWindowDays days and a demand label of fast / moderate / slow) and bestProductsToBake (the 1 or 2 best-selling products to use).
-      - USE THE FAST SELLERS, NEVER THE SLOW ONES: recommend baking/pushing the products listed in bestProductsToBake — these are the best-selling products that use the ingredient. If bestProductsToBake has TWO products, recommend BOTH (for example split the batch between them, or bake one of each) and name both. If it has only ONE, recommend just that one. Never add a third. Say why in plain words using each product's unitsSold (for example \"it sold 49 units in the last 30 days, so it will move fast\"), add a reasoned discount or counter push if useful, and compare the expected return vs. a full write-off.
-      - NEVER recommend baking or pushing a product whose demand is \"slow\" just to use up the ingredient. Baking more of something that barely sells only creates more unsold stock and does not solve the expiry problem. A slow product must not be the product you tell the owner to bake for this.
+2. "inventoryOptimization" (Inventory Optimization) — a FIXED structure. Every item covers ONE topic only and carries a "kind":
+   - "expiry" = Expiry Management: ONLY about near-expiring ingredients (job a).
+   - "stock" = Stock & Waste Control: ONLY about stock levels or waste logs (job b). There is at most ONE "expiry" item and at most ONE "stock" item — the dashboard has exactly two fixed slots, one per kind.
+   NEVER mix the two topics inside one item. An "expiry" item must not talk about waste, spoilage, losses or storage habits. A "stock" item must not talk about expiry dates or near-expiring items.
+
+   a. Expiry Management — "kind": "expiry" — the FIRST item. Only when expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). Each item has possibleProducts (the products that use that ingredient, each with unitsSold in the last salesWindowDays days and a demand label of fast / moderate / slow) and bestProductsToBake (the 1 or 2 best-selling products to use).
+      - USE THE FAST SELLERS, NEVER THE SLOW ONES: recommend baking/pushing the products listed in bestProductsToBake — these are the best-selling products that use the ingredient. If bestProductsToBake has TWO products, recommend BOTH (for example split the batch between them, or bake one of each) and name both. If it has only ONE, recommend just that one. Never add a third. Say why in plain words using each product's unitsSold (for example "it sold 49 units in the last 30 days, so it will move fast"), add a reasoned discount or counter push if useful, and compare the expected return vs. a full write-off.
+      - NEVER recommend baking or pushing a product whose demand is "slow" just to use up the ingredient. Baking more of something that barely sells only creates more unsold stock and does not solve the expiry problem.
       - If bestProductsToBake is empty (no possibleProducts, or every possible product is slow), do NOT name a slow product to bake. Recommend a direct action instead: put the near-expiring item on a quick sale or clearance, use it up in the regular bakes already planned, or use a small batch only if the owner already has orders for it.
       - Keep this consistent with the Product Bundling recommendation: never call the same product slow in one place and tell the owner to bake more of it in another.
-   b. If expiryContext.nearExpiringItems is EMPTY, use stockContext instead: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual in/out/waste numbers, and suggest a concrete adjustment (reorder sooner, reduce next restock, or repurpose it into a recipe). If stockContext also has nothing meaningful, fall back to expiryContext.wasteSummary (see the WASTE LOGS rule below).
+      - STAY ON EXPIRY ONLY: talk about the near-expiring item, its expiry date, and what to bake or sell. Do NOT mention waste logs, spoilage, pesos lost, or fridge/storage handling in this item — that belongs to the Stock & Waste Control item.
 
-c. WASTE LOGS — LOOK AT THE WHOLE PAST ${WASTE_WINDOW_DAYS} DAYS, NOT ONE LOG:
-   expiryContext.wasteSummary combines EVERY waste log from the past ${WASTE_WINDOW_DAYS} days (totalLogs, itemsAffected, totalCost in pesos, wasteTypes, reasons overall, and byItem with logCount/totalQuantity/totalCost/reasons/notes). expiryContext.recentWaste holds the raw logs behind it. There can be many logs with different reasons (spoiled, left unrefrigerated, expired, dropped, and so on).
-   - Whenever a recommendation talks about waste or losses, it MUST say the time window in plain words, such as "in the past ${WASTE_WINDOW_DAYS} days" or "over the last ${WASTE_WINDOW_DAYS} days". Never write "recently" or "lately" alone.
-   - Base it on the PATTERN across the logs, not on a single log. If wasteSummary.totalLogs is more than 1, describe the bigger picture first (for example how many items or logs were affected and the most common reasons, using the real numbers from wasteSummary), and only then name the one or two items that lost the most. Do not build the whole recommendation around just one log or one reason when other logs exist.
-   - If MANY different items were wasted (for example 5 or more), do NOT list them all. Say how many items were affected and the total cost, name only the top 1 or 2 items by totalCost, and group the rest as \"and N other items\" (N = itemsAffected minus the ones you named). Focus the fix on the most common reason across all items.\r\n   - Give ONE practical fix that addresses the most common reason or the item with the most logs. If there are several different reasons, you may name the top two together in one short sentence, each with its own quick fix.
-   - Only use a reason/note for the item it was logged against; do not apply it to a different item. If reasons are empty, do not guess a cause.
-   - If wasteSummary.totalLogs is 0, do not mention waste at all.
+   b. Stock & Waste Control — "kind": "stock" — the SECOND item. It is about stock levels or waste ONLY. Do NOT mention expiry dates or near-expiring items here (job a covers them), and do not pick an item just because it is near expiry. Choose the source in this order:
+      1) If expiryContext.wasteSummary.totalLogs is more than 0: write about waste, following the WASTE LOGS rules below.
+      2) Otherwise use stockContext: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual inRestock/outUsed numbers over the last ${context.historicalWindowDays} days, and suggest a concrete adjustment (reorder sooner, reduce the next restock, or use it in a recipe). Ignore the "waste" numbers inside stockContext — waste is only reported from wasteSummary.
+      3) If neither has anything meaningful, leave this item out and return only the Expiry Management item.
+
+   c. If expiryContext.nearExpiringItems is EMPTY: there is NO "expiry" item — leave it out completely. Return ONLY ONE item, "kind": "stock" (Stock & Waste Control), following job b. Never return two "stock" items and never return an item with a missing or different kind.
+
+   d. WASTE LOGS — LOOK AT THE WHOLE PAST ${WASTE_WINDOW_DAYS} DAYS, NOT ONE LOG (applies to the "stock" item):
+      expiryContext.wasteSummary combines EVERY waste log from the past ${WASTE_WINDOW_DAYS} days (totalLogs, itemsAffected, totalCost in pesos, wasteTypes, reasons overall, and byItem with logCount/totalQuantity/totalCost/reasons/notes). expiryContext.recentWaste holds the raw logs behind it. There can be many logs with different reasons (spoiled, left unrefrigerated, expired, dropped, and so on).
+      - Whenever an item talks about waste or losses, it MUST say the time window in plain words, such as "in the past ${WASTE_WINDOW_DAYS} days" or "over the last ${WASTE_WINDOW_DAYS} days". Never write "recently" or "lately" alone.
+      - Base it on the PATTERN across the logs, not on a single log. If wasteSummary.totalLogs is more than 1, describe the bigger picture first (for example how many items or logs were affected and the most common reasons, using the real numbers from wasteSummary), and only then name the one or two items that lost the most. Do not build the whole recommendation around just one log or one reason when other logs exist.
+      - If MANY different items were wasted (for example 5 or more), do NOT list them all. Say how many items were affected and the total cost, name only the top 1 or 2 items by totalCost, and group the rest as "and N other items" (N = itemsAffected minus the ones you named). Focus the fix on the most common reason across all items.
+      - Give ONE practical fix that addresses the most common reason or the item with the most logs. If there are several different reasons, you may name the top two together in one short sentence, each with its own quick fix.
+      - Only use a reason/note for the item it was logged against; do not apply it to a different item. If reasons are empty, do not guess a cause.
 
 WHO IS READING THIS — SPEAK TO THE OWNER ONLY, NEVER TO A "TEAM":
 The ONLY reader is the owner of this small shop. This is the owner's own business, so do not picture employees, departments, or a chain of command. Talk straight to the owner with "you", and write every action as something the owner does or decides personally.
@@ -1242,7 +1251,7 @@ Imagine you're explaining this out loud to a 50-year-old bake shop owner who has
 Respond with ONLY valid JSON strictly following this exact shape:
 {
   "salesOptimization": [ { "title": "...", "desc": "...", "type": "success" | "warning" | "danger" | "info" | "neutral", "kind": "improvement" | "bundle" }, { "title": "...", "desc": "...", "type": "...", "kind": "improvement" | "bundle" } ],
-  "inventoryOptimization": [ { "title": "...", "desc": "...", "type": "..." }, { "title": "...", "desc": "...", "type": "..." } ]
+  "inventoryOptimization": [ { "title": "...", "desc": "...", "type": "...", "kind": "expiry" | "stock" }, { "title": "...", "desc": "...", "type": "...", "kind": "expiry" | "stock" } ]
 }`;
 
   const userPrompt = `Business context (JSON): ${JSON.stringify(context)}`;
@@ -1285,6 +1294,8 @@ const AR_BANNED_PASSIVE_PHRASES = [
 const AR_BANNED_AUDIENCE_REGEX =
   /\b(team(?:s|mates?)?|staffs?|crew|employees?|workers?|helpers?|personnel|co-?workers?|colleagues?|everyone|everybody|your people|your bakers?|your assistants?)\b/i;
 
+const AR_WASTE_TOPIC_REGEX = /\b(waste logs?|logged|spoil\w*|unrefrigerated|loss of|lost|fridge|refrigerat\w*|storage)\b/i;
+const AR_EXPIRY_TOPIC_REGEX = /\b(expir\w*|near-expiry|best before|use-by)\b/i;
 const AR_WASTE_TALK_REGEX = /\b(lost|wasted|waste logs?|logged|spoil\w*|thrown|discard\w*|unrefrigerated)\b/i;
 const AR_WASTE_WINDOW_REGEX = /\b(past|last)\s+(7|seven)\s+days\b|\bpast\s+week\b/i;
 
@@ -1342,12 +1353,46 @@ function validateActionablePayload(payload, context) {
         }
       }
     }
+    // Inventory: isang topic lang bawat item (expiry O stock/waste, hindi pinaghalo).
+    if (invRecs.includes(rec)) {
+      const rtext = `${rec.title} ${rec.desc}`;
+      if (rec.kind === "expiry" && AR_WASTE_TOPIC_REGEX.test(rtext)) {
+        issues.push(`"${rec.title}" is an Expiry Management item but talks about waste/spoilage/losses/storage. Keep it ONLY about the near-expiring item and what to bake or sell; waste belongs in the separate Stock & Waste Control item.`);
+      }
+      if (rec.kind === "stock" && AR_EXPIRY_TOPIC_REGEX.test(rtext)) {
+        issues.push(`"${rec.title}" is a Stock & Waste Control item but talks about expiry/near-expiring items. Keep it ONLY about stock levels or waste logs; expiry belongs in the separate Expiry Management item.`);
+      }
+    }
     const audienceHit = findBannedAudienceWord(`${rec.title} ${rec.desc}`);
     if (audienceHit) {
       issues.push(`"${rec.title}" refers to "${audienceHit}". The reader is the shop owner only — remove any mention of a team/staff/crew/employees and write the action directly to the owner (use "you", e.g. "Put the tubs back in the fridge right after frosting").`);
     }
     if (!/\d/.test(rec.desc)) {
       issues.push(`"${rec.title}" doesn't cite any concrete number (%, ₱, quantity, or date) — too generic to be data-grounded.`);
+    }
+  }
+
+  // INVENTORY STRUCTURE: Expiry Management (kind "expiry") ay para lang sa near-expiring;
+  // Stock & Waste Control (kind "stock") ay para lang sa stock/waste.
+  {
+    const hasNear = (context?.expiryContext?.nearExpiringItems || []).length > 0;
+    const hasWaste = Number(context?.expiryContext?.wasteSummary?.totalLogs || 0) > 0;
+    const hasStock = (context?.stockContext?.understockRisk || []).length + (context?.stockContext?.overstockRisk || []).length > 0;
+    const expiryRecs = invRecs.filter((r) => r.kind === "expiry");
+    const stockWasteRecs = invRecs.filter((r) => r.kind === "stock");
+
+    if (invRecs.some((r) => r.kind !== "expiry" && r.kind !== "stock")) {
+      issues.push('Every inventoryOptimization item needs "kind": "expiry" (Expiry Management) or "kind": "stock" (Stock & Waste Control).');
+    }
+    if (hasNear && expiryRecs.length !== 1) {
+      issues.push(`inventoryOptimization must contain exactly ONE "expiry" item (about the near-expiring ingredients) — found ${expiryRecs.length}.`);
+    }
+    if (!hasNear && expiryRecs.length > 0) {
+      issues.push('There are no near-expiring items, so leave out the "expiry" item and return only the one "stock" item.');
+    }
+    // Dalawang fixed na slot ang dashboard: isa lang bawat kind, hindi hihigit.
+    if ((hasWaste || hasStock) && stockWasteRecs.length !== 1) {
+      issues.push(`inventoryOptimization must contain exactly ONE "stock" item (Stock & Waste Control — stock levels or waste logs only) — found ${stockWasteRecs.length}.`);
     }
   }
 
@@ -1442,7 +1487,7 @@ function normalizeActionablePayload(aiResult) {
 
   return {
     salesOptimization: normalizeArray(aiResult?.salesOptimization, true),
-    inventoryOptimization: normalizeArray(aiResult?.inventoryOptimization),
+    inventoryOptimization: normalizeArray(aiResult?.inventoryOptimization, true),
   };
 }
 

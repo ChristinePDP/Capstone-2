@@ -62,7 +62,7 @@ const ITEM_KINDS = {
     label: 'Stock & Waste Control',
     icon: Warehouse,
     order: 1,
-    emptyText: 'No stock problems or waste logged in the last 30 days.',
+    emptyText: 'No stock problems or waste logged in the past 7 days.',
   },
 };
 
