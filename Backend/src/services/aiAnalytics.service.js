@@ -912,7 +912,9 @@ async function getBundleOpportunityContext(days) {
     .slice(-5)
     .reverse();
 
-  return { bestSellers, slowMovers };
+  // totalsByProduct = buong listahan (hindi ipinapadala sa prompt) para magamit sa
+  // pag-rank ng mga product na pwedeng gumamit ng near-expiring ingredient.
+  return { bestSellers, slowMovers, totalsByProduct: totals };
 }
 
 // FALLBACK for Inventory Optimization when there are no near-expiring
@@ -1066,6 +1068,56 @@ function reconcileGrowthAndRisk(growthAndRisk, forecastAvailability) {
   };
 }
 
+// NEAR-EXPIRY x DEMAND: ang ingredient ay maaaring gamitin ng maraming
+// product (possibleProducts), pero hindi lahat ay mabilis maibenta. Kapag slow
+// mover ang ibe-bake para maubos ang ingredient, madadagdagan lang ang
+// hindi mabebentang stock. Kaya dito nire-rank ang bawat possibleProduct ayon sa
+// aktwal na benta (bundleContext window) at minamarkahan kung fast/moderate/slow.
+// bestProductToBake = pinakamabentang product na HINDI slow (o null kung wala).
+// bestProductsToBake = hanggang 2 product (ang pangalawa ay isinasama lang kung "fast" din).
+function enrichNearExpiringWithDemand(nearExpiringItems, bundleContext) {
+  const totals = bundleContext?.totalsByProduct || {};
+  const unitsByName = {};
+  for (const [name, qty] of Object.entries(totals)) unitsByName[String(name).trim().toLowerCase()] = Number(qty) || 0;
+
+  const fastNames = new Set((bundleContext?.bestSellers || []).map((p) => String(p.name).trim().toLowerCase()));
+  const slowNames = new Set((bundleContext?.slowMovers || []).map((p) => String(p.name).trim().toLowerCase()));
+
+  const demandOf = (name, units) => {
+    const key = String(name).trim().toLowerCase();
+    if (fastNames.has(key)) return "fast";
+    if (slowNames.has(key) || units === 0) return "slow";
+    return "moderate";
+  };
+
+  return (nearExpiringItems || []).map((item) => {
+    const possibleProducts = (item.possibleProducts || [])
+      .map((name) => {
+        const unitsSold = unitsByName[String(name).trim().toLowerCase()] || 0;
+        return { name, unitsSold, demand: demandOf(name, unitsSold) };
+      })
+      .sort((a, b) => b.unitsSold - a.unitsSold);
+
+    const best = possibleProducts.find((p) => p.demand !== "slow") || null;
+    // Hanggang 2 product: ang pinakamabenta, at ang pangalawa LANG kung "fast" din
+    // (dalawang pinakamabilis). Kung isa lang ang fast/moderate, isa lang ang ibibigay.
+    const bestList = [];
+    if (best) {
+      bestList.push(best.name);
+      const second = possibleProducts.find((p) => p.name !== best.name && p.demand === "fast");
+      if (second) bestList.push(second.name);
+    }
+
+    return {
+      ...item,
+      salesWindowDays: BUNDLE_WINDOW_DAYS,
+      possibleProducts,
+      bestProductToBake: best ? best.name : null,
+      bestProductsToBake: bestList,
+    };
+  });
+}
+
 async function getRecommendationContext(historicalWindowDays, ingredientToProducts, forecastAvailability) {
   const [recentSalesTrend, expiryContext, bundleContext] = await Promise.all([
     getRecentSalesTrend(historicalWindowDays),
@@ -1097,9 +1149,9 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
     forecast: {
       thirtyDay: forecastAvailability.thirtyDay,
     },
-    bundleContext,
+    bundleContext: { bestSellers: bundleContext.bestSellers, slowMovers: bundleContext.slowMovers },
     expiryContext: {
-      nearExpiringItems: expiryContext.nearExpiringItems,
+      nearExpiringItems: enrichNearExpiringWithDemand(expiryContext.nearExpiringItems, bundleContext),
       // Pinagsama-samang buod ng LAHAT ng waste log sa nakaraang 7 araw.
       wasteSummary: expiryContext.wasteSummary,
       // Raw logs (capped) para sa mga specific na detalye/notes.
@@ -1158,7 +1210,11 @@ Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 mo
       - If bundleContext.bestSellers has only 1 product and no slow mover, suggest a simple add-on or celebration extra with it (no invented numbers). Only if bundleContext.bestSellers is empty leave the bundle item out and return only the Sales Improvement item.
 
 2. "inventoryOptimization" (Inventory Optimization):
-   a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). For ones with a possibleProducts match, recommend producing/pushing that specific product with a reasoned discount and expected return vs. a full write-off. If no possibleProducts match exists for the most urgent item, recommend a direct clearance/discount action instead.
+   a. If expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). Each item has possibleProducts (the products that use that ingredient, each with unitsSold in the last salesWindowDays days and a demand label of fast / moderate / slow) and bestProductsToBake (the 1 or 2 best-selling products to use).
+      - USE THE FAST SELLERS, NEVER THE SLOW ONES: recommend baking/pushing the products listed in bestProductsToBake — these are the best-selling products that use the ingredient. If bestProductsToBake has TWO products, recommend BOTH (for example split the batch between them, or bake one of each) and name both. If it has only ONE, recommend just that one. Never add a third. Say why in plain words using each product's unitsSold (for example \"it sold 49 units in the last 30 days, so it will move fast\"), add a reasoned discount or counter push if useful, and compare the expected return vs. a full write-off.
+      - NEVER recommend baking or pushing a product whose demand is \"slow\" just to use up the ingredient. Baking more of something that barely sells only creates more unsold stock and does not solve the expiry problem. A slow product must not be the product you tell the owner to bake for this.
+      - If bestProductsToBake is empty (no possibleProducts, or every possible product is slow), do NOT name a slow product to bake. Recommend a direct action instead: put the near-expiring item on a quick sale or clearance, use it up in the regular bakes already planned, or use a small batch only if the owner already has orders for it.
+      - Keep this consistent with the Product Bundling recommendation: never call the same product slow in one place and tell the owner to bake more of it in another.
    b. If expiryContext.nearExpiringItems is EMPTY, use stockContext instead: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual in/out/waste numbers, and suggest a concrete adjustment (reorder sooner, reduce next restock, or repurpose it into a recipe). If stockContext also has nothing meaningful, fall back to expiryContext.wasteSummary (see the WASTE LOGS rule below).
 
 c. WASTE LOGS — LOOK AT THE WHOLE PAST ${WASTE_WINDOW_DAYS} DAYS, NOT ONE LOG:
@@ -1259,6 +1315,32 @@ function validateActionablePayload(payload, context) {
     const wasteLogCount = Number(context?.expiryContext?.wasteSummary?.totalLogs || 0);
     if (wasteLogCount > 0 && AR_WASTE_TALK_REGEX.test(rec.desc) && !AR_WASTE_WINDOW_REGEX.test(rec.desc)) {
       issues.push(`"${rec.title}" talks about waste/losses but doesn't say the time window. Say "in the past ${WASTE_WINDOW_DAYS} days" and describe the pattern across the waste logs (not just one log).`);
+    }
+    // Near-expiry: huwag mag-suggest mag-bake ng SLOW na product para maubos ang ingredient.
+    if (invRecs.includes(rec)) {
+      const text = `${rec.title} ${rec.desc}`.toLowerCase();
+      for (const item of context?.expiryContext?.nearExpiringItems || []) {
+        for (const prod of item.possibleProducts || []) {
+          if (prod.demand === "slow" && text.includes(String(prod.name).trim().toLowerCase())) {
+            const alt = item.bestProductToBake
+              ? `Use "${item.bestProductToBake}" instead — it sells much faster.`
+              : "There is no fast-selling product that uses it, so recommend a quick sale/clearance instead of baking more.";
+            issues.push(`"${rec.title}" tells the owner to use "${prod.name}" for the near-expiring ${item.itemName}, but "${prod.name}" is a slow seller (only ${prod.unitsSold} sold). ${alt}`);
+          }
+        }
+      }
+    }
+    if (invRecs.includes(rec)) {
+      const text2 = `${rec.title} ${rec.desc}`.toLowerCase();
+      for (const item of context?.expiryContext?.nearExpiringItems || []) {
+        const picks = item.bestProductsToBake || [];
+        if (picks.length === 2) {
+          const [first, second] = picks.map((n) => String(n).trim().toLowerCase());
+          if (text2.includes(first) && !text2.includes(second)) {
+            issues.push(`"${rec.title}" only names "${picks[0]}" for the near-expiring ${item.itemName}, but "${picks[1]}" is also a fast seller that uses it. Recommend BOTH products (e.g. split the batch).`);
+          }
+        }
+      }
     }
     const audienceHit = findBannedAudienceWord(`${rec.title} ${rec.desc}`);
     if (audienceHit) {
