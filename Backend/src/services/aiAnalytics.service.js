@@ -1472,9 +1472,10 @@ function validateActionablePayload(payload, context) {
 
 function buildExpiryOnlyPrompt(nearExpiringItems, previousTitles = []) {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: MANILA_TZ });
-  const systemPrompt = `You write one concise production action for a bakery owner based only on the provided ingredients that expire soon. The item list is ordered by nearest expiry first; use only the first item. Use only that item, its expiration date, and its listed product sales. Choose only from bestProductsToBake; never name a slow product. If no suitable product is listed, suggest a quick sale or using the ingredient only in batches already planned. Keep the recommendation strictly about this ingredient, its date, and what to make or sell. Do not introduce any other topic. Include the exact date and the sales counts supplied. Return only JSON: {"title":"...","desc":"...","type":"warning","kind":"expiry"}. Today's date in Manila is ${today}.`;
+  const systemPrompt = `You write one concise production action for a bakery owner based only on the provided ingredients that expire soon. The item list is ordered by nearest expiry first; use only the first item. Use only that item, its expiration date, and its listed product sales. Use every name in bestProductsToBake: when the list has two products, name BOTH exact product names in the description; when it has one, name that one. Copy the product spelling exactly and never name a slow product. If no suitable product is listed, suggest a quick sale or using the ingredient only in batches already planned. Keep the recommendation strictly about this ingredient, its date, and what to make or sell. Do not introduce any other topic. Include the exact date and the sales counts supplied. Return only JSON: {"title":"...","desc":"...","type":"warning","kind":"expiry"}. Today's date in Manila is ${today}.`;
   const userPrompt = JSON.stringify({
-    task: 'Create exactly one expiry recommendation. Do not add any other recommendation category.',
+    task: 'Create exactly one expiry recommendation. Do not add any other recommendation category. Name every required product below exactly as written; if there are two, include both.',
+    requiredProducts: nearExpiringItems[0]?.bestProductsToBake || [],
     previousTitles,
     nearExpiringItems: nearExpiringItems.map((item) => ({
       itemName: item.itemName,
@@ -1523,7 +1524,7 @@ async function generateExpiryOnlyRecommendation(context, previousTitles = []) {
   let issues = [];
   for (let attempt = 1; attempt <= 3; attempt++) {
     const retryNote = attempt > 1
-      ? `\nFix these validation issues without adding another topic:\n${issues.map((issue) => `- ${issue}`).join('\n')}`
+      ? `\nREQUIRED: include every product name exactly as written: ${JSON.stringify(nearExpiringItems[0]?.bestProductsToBake || [])}. If there are two names, include both in the same description. Fix these validation issues without adding another topic:\n${issues.map((issue) => `- ${issue}`).join('\n')}`
       : '';
     const result = await callGeminiJSON({
       systemPrompt,
@@ -1540,7 +1541,7 @@ async function generateExpiryOnlyRecommendation(context, previousTitles = []) {
         kind: 'expiry',
       };
     }
-    console.warn(`[ActionableRecommendationService] Isolated expiry attempt ${attempt}/3 failed validation:`, issues);
+    console.warn(`[ActionableRecommendationService] Isolated expiry attempt ${attempt}/3 failed validation:`, JSON.stringify({ issues, title: recommendation?.title, desc: recommendation?.desc }));
   }
   throw new Error('Isolated expiry recommendation failed validation after 3 attempts.');
 }

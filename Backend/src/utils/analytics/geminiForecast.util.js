@@ -1,9 +1,10 @@
 // utils/analytics/geminiForecast.util.js
 const DEFAULT_PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const DEFAULT_FALLBACK_MODELS = [
-  "gemini-2.5-flash-lite",
+  "gemini-3.1-flash-lite",
   "gemini-flash-lite-latest",
 ];
+const RETIRED_MODEL_IDS = new Set(["gemini-2.5-flash-lite"]);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DEFAULT_TIMEOUT_MS = 55000;
 const RETRY_DELAY_MS = 2000;
@@ -18,6 +19,10 @@ function buildModelCandidates(preferredModel) {
 
   const unique = [];
   for (const model of [primary, ...configuredFallbacks]) {
+    if (RETIRED_MODEL_IDS.has(model)) {
+      console.warn(`[Gemini] Ignoring retired fallback model ${model}.`);
+      continue;
+    }
     if (model && !unique.includes(model)) unique.push(model);
   }
   return unique;
