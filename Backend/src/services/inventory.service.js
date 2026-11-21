@@ -340,6 +340,15 @@ const InventoryLogService = {
   getHistory: async (filters) => {
     return InventoryLogModel.getHistory(filters);
   },
+  getActiveExpiringBatches: async (daysAhead) => InventoryLogModel.getActiveExpiringBatches(daysAhead),
+  getExpiringDashboardBatches: async (daysAhead) => {
+    const [active, recentlyAutoLogged] = await Promise.all([
+      InventoryLogModel.getActiveExpiringBatches(daysAhead),
+      InventoryLogModel.getRecentlyAutoLoggedExpiredBatches(),
+    ]);
+    return [...(active || []), ...(recentlyAutoLogged || [])];
+  },
+  autoLogExpiredBatches: async () => InventoryLogModel.autoLogExpiredBatches(),
 
   // ── VOID RESTOCK (kanselahin nang may audit trail) ──────────────
   // Kanselahin ang isang MALING restock entry — ibinabalik (ibinabawas)
@@ -970,6 +979,14 @@ const WasteService = {
     const ageMs = Date.now() - new Date(log.logged_at).getTime();
     if (!Number.isFinite(ageMs) || ageMs > 7 * 24 * 60 * 60 * 1000) {
       throw new AppError('Hindi na puwedeng i-void ang waste log kapag lampas na sa 7 araw.', 400);
+    }
+
+    if (log.source_inventory_log_id) {
+      try {
+        return await InventoryLogModel.voidAutoExpiredWaste(id);
+      } catch (err) {
+        throw new AppError(`Hindi ma-void: ${err.message}`, 400);
+      }
     }
 
     let restoredInventoryLot = null;

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
@@ -11,6 +11,15 @@ import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
 
 const PER_PAGE = 10;
+const daysUntil = (date) => {
+  const target = new Date(`${date}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((target - today) / 86400000);
+};
+const displayExpiryDate = (date) => new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', {
+  year: 'numeric', month: 'short', day: 'numeric',
+});
 
 // ── Inline-validated fields (EventManager layout) ─────────────────────────
 // Pulang border + pulang label, at ang error message ay nasa mismong field
@@ -73,7 +82,7 @@ function FormSelect({ label, required, error, hint, className = '', children, ..
 
 export default function IngredientsTab() {
   const context = useApp() || {};
-  const { addIngredient, updateIngredient, deleteIngredient, restockIngredient } = context;
+  const { addIngredient, updateIngredient, deleteIngredient, restockIngredient, fetchExpiringInventoryBatches } = context;
   const ingredients = context.ingredients || [];
   const isLoading = !!context.loading;
 
@@ -82,6 +91,9 @@ export default function IngredientsTab() {
   const [page, setPage]             = useState(1);
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [expiringBatches, setExpiringBatches] = useState([]);
+  const [loadingExpiring, setLoadingExpiring] = useState(false);
+  const [expiringError, setExpiringError] = useState('');
   const [modalOpen, setModalOpen]   = useState(false);
   const [editIng, setEditIng]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -89,13 +101,49 @@ export default function IngredientsTab() {
   
   const isDeletingRef = useRef(false);
 
+  useEffect(() => {
+    if (!fetchExpiringInventoryBatches) return undefined;
+    let active = true;
+    const load = async () => {
+      setLoadingExpiring(true);
+      setExpiringError('');
+      try {
+        const rows = await fetchExpiringInventoryBatches(30);
+        if (active) setExpiringBatches(Array.isArray(rows) ? rows : []);
+      } catch (err) {
+        if (active) setExpiringError(err.message || 'Hindi makuha ang pa-expire na stock.');
+      } finally {
+        if (active) setLoadingExpiring(false);
+      }
+    };
+    load();
+    const onDataChanged = (event) => {
+      if (event.detail?.table === 'inventory_logs') load();
+    };
+    window.addEventListener('cake:data-changed', onDataChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('cake:data-changed', onDataChanged);
+    };
+  }, [statusFilter, fetchExpiringInventoryBatches]);
+
   const currentEditIng = ingredients.find(ing => ing.id === editIng?.id) || editIng;
 
   const filtered = ingredients.filter(ing => {
     const matchesSearch = ing.name.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || ingStatus(ing.stock, ing.min).label === statusFilter;
+    const matchesStatus = statusFilter === 'all' || (statusFilter !== 'expiring' && ingStatus(ing.stock, ing.min).label === statusFilter);
     return matchesSearch && matchesStatus;
   });
+  const visibleExpiringBatches = expiringBatches
+    .filter(batch => (batch.item_name || '').toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const daysA = daysUntil(a.expiration_date);
+      const daysB = daysUntil(b.expiration_date);
+      const expiredA = daysA < 0;
+      const expiredB = daysB < 0;
+      if (expiredA !== expiredB) return expiredA ? 1 : -1;
+      return expiredA ? daysB - daysA : daysA - daysB;
+    });
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   // Counts shown in the status dropdown. Uses the same ingStatus() as the
@@ -112,6 +160,7 @@ export default function IngredientsTab() {
     { key: 'In Stock',     label: 'In Stock',     count: statusCounts['In Stock'] || 0 },
     { key: 'Low Stock',    label: 'Low Stock',    short: 'Low',    count: statusCounts['Low Stock'] || 0 },
     { key: 'Out of Stock', label: 'Out of Stock', short: 'Out', count: statusCounts['Out of Stock'] || 0 },
+    { key: 'expiring', label: 'Expiring / Expired', short: 'Expiry', count: expiringBatches.length },
   ];
 
   const handleSave = async (payload) => {
@@ -226,7 +275,65 @@ export default function IngredientsTab() {
 
           {!isLoading && (
             <>
-              {isCompact ? (
+              {statusFilter === 'expiring' ? (
+                loadingExpiring ? (
+                  <TableSkeleton columns={4} rows={3} />
+                ) : expiringError ? (
+                  <ErrorState className="my-3" description={expiringError} />
+                ) : !visibleExpiringBatches.length ? (
+                  <EmptyState className="my-3" title={search ? 'No matching stock' : 'No expiring or expired stock'} description={search ? 'Try changing or clearing your search.' : 'No ingredient stock is expiring within the next 30 days or expired within the past 7 days.'} />
+                ) : isCompact ? (
+                  <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
+                    {visibleExpiringBatches.map(batch => {
+                      const days = daysUntil(batch.expiration_date);
+                      const ingredient = ingredients.find(item => String(item.id) === String(batch.raw_ingredient_id));
+                      return (
+                        <div key={batch.id} className="p-4 bg-white border border-amber-200 rounded-xl shadow-sm">
+                          <h4 className="font-bold text-brand-800 text-sm">{ingredient?.name || batch.item_name}</h4>
+                          <p className="text-xs text-brand-600 mt-1">Stock left: <strong>{formatCount(batch.remaining_quantity)} {batch.remaining_unit || batch.unit}</strong></p>
+                          {batch.status === 'auto_logged' && <p className="text-xs text-red-600 mt-1">{formatCount(batch.wasted_quantity)} {batch.remaining_unit || batch.unit} moved to waste.</p>}
+                          <p className="text-xs text-brand-600 mt-1">Expiry date: <strong>{displayExpiryDate(batch.expiration_date)}</strong></p>
+                          {batch.status === 'auto_logged' ? (
+                            <p className="text-xs font-bold text-red-600 mt-1">Auto-logged to waste · expired {Math.abs(days)} {Math.abs(days) === 1 ? 'day' : 'days'} ago</p>
+                          ) : (
+                            <p className={`text-xs font-bold mt-1 ${days < 0 ? 'text-red-600' : 'text-amber-700'}`}>
+                              {days < 0 ? 'Expired' : days === 0 ? 'Expires today' : `${days} days left`}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Table columns={[
+                    { label: 'Ingredient' },
+                    { label: 'Stock Left' },
+                    { label: 'Expiry Date' },
+                    { label: 'Expiry Status' },
+                  ]}>
+                    {visibleExpiringBatches.map(batch => {
+                      const days = daysUntil(batch.expiration_date);
+                      const ingredient = ingredients.find(item => String(item.id) === String(batch.raw_ingredient_id));
+                      return (
+                        <Tr key={batch.id}>
+                          <Td><strong>{ingredient?.name || batch.item_name}</strong></Td>
+                          <Td>
+                            <strong>{formatCount(batch.remaining_quantity)}</strong> {batch.remaining_unit || batch.unit}
+                            {batch.status === 'auto_logged' && <p className="text-[10px] text-red-600 mt-0.5">{formatCount(batch.wasted_quantity)} {batch.remaining_unit || batch.unit} moved to waste</p>}
+                          </Td>
+                          <Td>{displayExpiryDate(batch.expiration_date)}</Td>
+                          <Td>
+                            <Badge variant={days < 0 ? 'danger' : 'warning'}>
+                              {batch.status === 'auto_logged' ? 'Auto-logged to waste' : days < 0 ? 'Expired' : days === 0 ? 'Expires today' : `${days} days left`}
+                            </Badge>
+                            {batch.status === 'auto_logged' && <p className="text-[10px] text-red-600 mt-1">Expired {Math.abs(days)} {Math.abs(days) === 1 ? 'day' : 'days'} ago</p>}
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                  </Table>
+                )
+              ) : isCompact ? (
                 <div className="grid grid-cols-1 @lg:grid-cols-2 gap-3">
                   {paged.map(ing => {
                     const st = ingStatus(ing.stock, ing.min);
@@ -280,7 +387,7 @@ export default function IngredientsTab() {
                 </Table>
               )}
 
-              {!paged.length && (context.loadErrors?.ingredients
+              {statusFilter !== 'expiring' && !paged.length && (context.loadErrors?.ingredients
                 ? <ErrorState className="my-3" description={context.loadErrors.ingredients} onRetry={() => context.fetchAll()} />
                 : <EmptyState className="my-3" title={(search || statusFilter !== 'all') ? 'No matching ingredients' : 'No ingredients yet'} description={(search || statusFilter !== 'all') ? 'Change or clear the filters to see more ingredients.' : 'Add an ingredient to start tracking inventory.'} actionLabel={!(search || statusFilter !== 'all') ? 'Add ingredient' : undefined} onAction={!(search || statusFilter !== 'all') ? () => { setEditIng(null); setModalOpen(true); } : undefined} />
               )}
@@ -288,7 +395,7 @@ export default function IngredientsTab() {
           )}
         </div>
 
-        {filtered.length > PER_PAGE && (
+        {statusFilter !== 'expiring' && filtered.length > PER_PAGE && (
            <div className="p-3 border-t border-brand-100">
              <Pagination page={page} count={filtered.length} perPage={PER_PAGE} total="ingredients" onChange={setPage} />
            </div>

@@ -1,6 +1,7 @@
 import { ok, created } from '../utils/response.js';
 import { IngredientCreateSchema, UpdateStockItemSchema, RestockSchema, CreateRecipeSchema, UpdateRecipeSchema, ConfirmBatchSchema, WasteLogSchema, MaterialCreateSchema } from '../schemas/index.js';
 import { MaterialService, ProductService, ProductionService, RecipeService, WasteService, IngredientService, InventoryLogService } from '../services/inventory.service.js';
+import { emitRealtimeChange } from '../services/realtime.service.js';
 
 const IngredientController = {
   getAll: async (_req, res, next) => {
@@ -10,13 +11,17 @@ const IngredientController = {
   create: async (req, res, next) => {
     try {
       const body = IngredientCreateSchema.parse(req.body);
-      created(res, await IngredientService.create(body), 'Ingredient added');
+      const result = await IngredientService.create(body);
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'INSERT', recordId: result?.id });
+      created(res, result, 'Ingredient added');
     } catch (err) { next(err); }
   },
   update: async (req, res, next) => {
     try {
       const body = UpdateStockItemSchema.parse(req.body);
-      ok(res, await IngredientService.update(req.params.id, body), 'Ingredient updated');
+      const result = await IngredientService.update(req.params.id, body);
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Ingredient updated');
     } catch (err) { next(err); }
   },
 restock: async (req, res, next) => {
@@ -26,6 +31,8 @@ restock: async (req, res, next) => {
       console.log('BODY GALING FRONTEND:', req.body);
       
       const result = await IngredientService.restock(req.params.id, req.body);
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE', recordId: req.params.id });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
       ok(res, result, 'Restocked');
     } catch (err) { 
       console.error('--- ERROR SA CONTROLLER ---', err.message);
@@ -35,6 +42,7 @@ restock: async (req, res, next) => {
   delete: async (req, res, next) => {
     try {
       await IngredientService.delete(req.params.id);
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'DELETE', recordId: req.params.id });
       ok(res, null, 'Ingredient deleted');
     } catch (err) { next(err); }
   },
@@ -50,24 +58,32 @@ const MaterialController = {
     try {
       // This schema requires material_type ('celebration' | 'product')
       const body = MaterialCreateSchema.parse(req.body);
-      created(res, await MaterialService.create(body), 'Material added');
+      const result = await MaterialService.create(body);
+      emitRealtimeChange({ table: 'celebration_materials', event: 'INSERT', recordId: result?.id });
+      created(res, result, 'Material added');
     } catch (err) { next(err); }
   },
   update: async (req, res, next) => {
     try {
       const body = UpdateStockItemSchema.parse(req.body);
-      ok(res, await MaterialService.update(req.params.id, body), 'Material updated');
+      const result = await MaterialService.update(req.params.id, body);
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Material updated');
     } catch (err) { next(err); }
   },
   restock: async (req, res, next) => {
     try {
       // const { qty } = RestockSchema.parse(req.body);
-      ok(res, await MaterialService.restock(req.params.id, req.body), 'Restocked');
+      const result = await MaterialService.restock(req.params.id, req.body);
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE', recordId: req.params.id });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+      ok(res, result, 'Restocked');
     } catch (err) { next(err); }
   },
   delete: async (req, res, next) => {
     try {
       await MaterialService.delete(req.params.id);
+      emitRealtimeChange({ table: 'celebration_materials', event: 'DELETE', recordId: req.params.id });
       ok(res, null, 'Material deleted');
     } catch (err) { next(err); }
   },
@@ -102,10 +118,20 @@ const ProductionController = {
       // ang ginagamit; ang `type: 'pre-order'` ang nagtatakda kung alin.
       if (req.body?.type === 'pre-order') {
         const { type: _type, ...payload } = req.body;
-        return created(res, await ProductionService.producePreOrder(payload), 'Pre-order production logged');
+        const result = await ProductionService.producePreOrder(payload);
+        emitRealtimeChange({ table: 'production_logs', event: 'INSERT', recordId: result?.id });
+        emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+        emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
+        emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+        return created(res, result, 'Pre-order production logged');
       }
       const body = ConfirmBatchSchema.parse(req.body);
-      created(res, await ProductionService.confirmBatch(body), 'Production batch logged');
+      const result = await ProductionService.confirmBatch(body);
+      emitRealtimeChange({ table: 'production_logs', event: 'INSERT', recordId: result?.id });
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+      created(res, result, 'Production batch logged');
     } catch (err) { next(err); }
   },
 
@@ -133,18 +159,23 @@ const RecipeController = {
   create: async (req, res, next) => {
     try {
       const body = CreateRecipeSchema.parse(req.body);
-      created(res, await RecipeService.create(body), 'Recipe created');
+      const result = await RecipeService.create(body);
+      emitRealtimeChange({ table: 'recipes', event: 'INSERT', recordId: result?.id });
+      created(res, result, 'Recipe created');
     } catch (err) { next(err); }
   },
   update: async (req, res, next) => {
     try {
       const body = UpdateRecipeSchema.parse(req.body);
-      ok(res, await RecipeService.update(req.params.id, body), 'Recipe updated');
+      const result = await RecipeService.update(req.params.id, body);
+      emitRealtimeChange({ table: 'recipes', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Recipe updated');
     } catch (err) { next(err); }
   },
   delete: async (req, res, next) => {
     try {
       await RecipeService.delete(req.params.id);
+      emitRealtimeChange({ table: 'recipes', event: 'DELETE', recordId: req.params.id });
       ok(res, null, 'Recipe deleted');
     } catch (err) { next(err); }
   },
@@ -154,6 +185,12 @@ const RecipeController = {
 // Para sa "View History" — walang butas na pagsubaybay ng bawat
 // restock / production deduction / waste sa isang item.
 const InventoryLogController = {
+  getExpiringBatches: async (req, res, next) => {
+    try {
+      const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+      ok(res, await InventoryLogService.getExpiringDashboardBatches(days));
+    } catch (err) { next(err); }
+  },
   getHistory: async (req, res, next) => {
     try {
       const { item_name, item_type, item_id, startDate, endDate, limit } = req.query;
@@ -181,6 +218,9 @@ const InventoryLogController = {
     try {
       const force = req.query.force === 'true';
       const result = await InventoryLogService.voidRestock(req.params.id, force);
+      emitRealtimeChange({ table: 'inventory_logs', event: 'UPDATE', recordId: req.params.id });
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
       ok(res, result, 'Restock entry voided');
     } catch (err) { next(err); }
   },
@@ -196,7 +236,12 @@ const WasteController = {
   log: async (req, res, next) => {
     try {
       const body = WasteLogSchema.parse(req.body);
-      created(res, await WasteService.log(body), 'Waste logged');
+      const result = await WasteService.log(body);
+      emitRealtimeChange({ table: 'waste_logs', event: 'INSERT', recordId: result?.id });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
+      created(res, result, 'Waste logged');
     } catch (err) { next(err); }
   },
   // Kanselahin (void) ang isang waste record — ibinabalik ang stock na
@@ -205,6 +250,10 @@ const WasteController = {
   void: async (req, res, next) => {
     try {
       const result = await WasteService.void(req.params.id);
+      emitRealtimeChange({ table: 'waste_logs', event: 'UPDATE', recordId: req.params.id });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
       ok(res, result, 'Waste record voided');
     } catch (err) { next(err); }
   },

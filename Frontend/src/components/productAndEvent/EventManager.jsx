@@ -559,6 +559,37 @@ export default function EventManager() {
     fetchEvents(true);
   }, []);
 
+  // Keep events fresh across separate admin sessions even if a database
+  // Realtime notification is missed while this page remains open.
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const refreshEvents = async () => {
+      if (!active || inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      try {
+        const latest = await fetchEventsFromApi(true);
+        if (active) setEvents(latest || []);
+      } catch (err) {
+        console.warn('Background event refresh failed:', err);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshEvents();
+    };
+    const timer = window.setInterval(refreshEvents, 5000);
+    window.addEventListener('focus', refreshEvents);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshEvents);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+
   useEffect(() => {
     const handleDataChanged = async (event) => {
       const change = event.detail || {};

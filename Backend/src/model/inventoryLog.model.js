@@ -101,6 +101,93 @@ const InventoryLogModel = {
     if (error) throw error;
     return data;
   },
+
+  getActiveExpiringBatches: async (daysAhead = 30) => {
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const expiryStart = new Date(`${todayStr}T00:00:00Z`);
+    expiryStart.setUTCDate(expiryStart.getUTCDate() - 7);
+    const startStr = expiryStart.toISOString().slice(0, 10);
+    const future = new Date(`${todayStr}T00:00:00Z`);
+    future.setUTCDate(future.getUTCDate() + daysAhead);
+    const futureStr = future.toISOString().slice(0, 10);
+
+    const { data, error } = await supabase
+      .from('inventory_logs')
+      .select('id, raw_ingredient_id, item_name, quantity, unit, remaining_quantity, remaining_unit, expiration_date')
+      .eq('item_type', 'raw')
+      .eq('transaction_type', 'IN')
+      .is('voided_at', null)
+      .gt('remaining_quantity', 0)
+      .not('expiration_date', 'is', null)
+      .gte('expiration_date', startStr)
+      .lte('expiration_date', futureStr)
+      .order('expiration_date', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  },
+
+  getRecentlyAutoLoggedExpiredBatches: async () => {
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const expiryStart = new Date(`${todayStr}T00:00:00Z`);
+    expiryStart.setUTCDate(expiryStart.getUTCDate() - 7);
+    const startStr = expiryStart.toISOString().slice(0, 10);
+    const loggedSince = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: wasteRows, error: wasteError } = await supabase
+      .from('waste_logs')
+      .select('id, source_inventory_log_id, quantity, unit, cost, logged_at')
+      .not('source_inventory_log_id', 'is', null)
+      .eq('reason', 'Expired')
+      .is('voided_at', null)
+      .gte('logged_at', loggedSince);
+    if (wasteError) throw wasteError;
+    if (!wasteRows?.length) return [];
+
+    const sourceIds = wasteRows.map(row => row.source_inventory_log_id);
+    const { data: batches, error: batchError } = await supabase
+      .from('inventory_logs')
+      .select('id, raw_ingredient_id, item_name, quantity, unit, expiration_date')
+      .in('id', sourceIds)
+      .gte('expiration_date', startStr)
+      .lt('expiration_date', todayStr);
+    if (batchError) throw batchError;
+
+    const wasteBySourceId = new Map(wasteRows.map(row => [String(row.source_inventory_log_id), row]));
+    return (batches || []).map(batch => {
+      const waste = wasteBySourceId.get(String(batch.id));
+      return {
+        ...batch,
+        id: batch.id,
+        remaining_quantity: 0,
+        remaining_unit: waste?.unit || batch.unit,
+        status: 'auto_logged',
+        wasted_quantity: Number(waste?.quantity || 0),
+        waste_cost: Number(waste?.cost || 0),
+        waste_log_id: waste?.id,
+        waste_logged_at: waste?.logged_at,
+      };
+    });
+  },
+
+  autoLogExpiredBatches: async () => {
+    const asOf = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const { data, error } = await supabase.rpc('auto_log_expired_inventory_batches', { p_as_of: asOf });
+    if (error) throw error;
+    return data || { logged: 0, skipped: 0 };
+  },
+
+  voidAutoExpiredWaste: async (wasteLogId) => {
+    const { data, error } = await supabase.rpc('void_auto_expired_waste', { p_waste_log_id: wasteLogId });
+    if (error) throw error;
+    return data;
+  },
 };
 
 export { InventoryLogModel };

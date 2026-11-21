@@ -37,7 +37,10 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     let refreshTimer;
-    const analyticsSourceTables = new Set(['orders', 'order_items', 'inventory_logs']);
+    const analyticsSourceTables = new Set([
+      'orders', 'order_items', 'inventory_logs', 'raw_ingredients',
+      'celebration_materials', 'products', 'production_logs', 'waste_logs',
+    ]);
     let shouldForceRefresh = false;
     const handleDataChanged = event => {
       const table = event.detail?.table;

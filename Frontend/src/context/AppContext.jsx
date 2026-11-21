@@ -397,6 +397,11 @@ export function AppProvider({ children }) {
 
     const source = new EventSource(REALTIME_API_URL, { withCredentials: true });
     let wasDisconnected = false;
+    let dashboardRefreshTimer = null;
+    const dashboardDataTables = new Set([
+      'raw_ingredients', 'celebration_materials', 'products', 'recipes',
+      'recipe_ingredients', 'production_logs', 'waste_logs', 'orders', 'order_items',
+    ]);
     const targetedRefreshTimers = new Map();
     const scheduleTargetedRefresh = (key, callback) => {
       if (targetedRefreshTimers.has(key)) return;
@@ -542,6 +547,15 @@ export function AppProvider({ children }) {
 
       window.dispatchEvent(new CustomEvent('cake:data-changed', { detail: change }));
       const { table, event: eventType, record, recordId, relatedId } = change;
+      // Keep the shared dashboard state canonical after every server-side
+      // write. A short debounce combines the multiple table events produced
+      // by one inventory operation into a single refresh.
+      if (dashboardDataTables.has(table)) {
+        window.clearTimeout(dashboardRefreshTimer);
+        dashboardRefreshTimer = window.setTimeout(() => {
+          fetchAll({ silent: true }).catch(err => console.error('Realtime dashboard refresh failed:', err));
+        }, 350);
+      }
       switch (table) {
         case 'raw_ingredients':
           updateList(setIngredients, recordId, record, normalizeIngredientRow, eventType);
@@ -596,6 +610,7 @@ export function AppProvider({ children }) {
     return () => {
       source.close();
       window.removeEventListener('cake:data-changed', handleLocalDataChanged);
+      window.clearTimeout(dashboardRefreshTimer);
       targetedRefreshTimers.forEach(timer => clearTimeout(timer));
       targetedRefreshTimers.clear();
     };
@@ -895,6 +910,15 @@ export function AppProvider({ children }) {
     }
   }, []);
 
+  const fetchExpiringInventoryBatches = useCallback(async (days = 30) => {
+    try {
+      const res = await apiClient.get('/logs/expiring', { params: { days } });
+      return res.data?.data || [];
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to fetch expiring inventory'), { cause: err });
+    }
+  }, []);
+
   // ── Waste ────
   const logWaste = async (data) => {
     try {
@@ -943,6 +967,7 @@ export function AppProvider({ children }) {
     confirmBatch, producePreOrder,
     logWaste, voidWasteLog, voidRestockLog,
     fetchInventoryHistory,
+    fetchExpiringInventoryBatches,
     formatPHP
   };
 

@@ -2,6 +2,7 @@
 import crypto from 'crypto';
 import { OrdersModel } from '../model/orders.model.js';
 import { CheckoutReservationModel } from '../model/checkoutReservation.model.js';
+import { emitRealtimeChange } from './realtime.service.js';
 import { OrderItemsModel } from '../model/orderItems.model.js';
 import { ProductModel } from '../model/product.model.js';
 import { MaterialModel } from '../model/material.model.js';
@@ -335,6 +336,7 @@ const OrdersService = {
     }
     // --------------------------------------------------------
 
+    emitRealtimeChange({ table: 'orders', event: 'UPDATE', recordId: finalOrder?.id || id });
     return finalOrder;
   },
 
@@ -352,7 +354,9 @@ const OrdersService = {
     // same transaction, so racing accept/reject actions cannot split state.
     const changed = await CheckoutReservationModel.verifyPayment(id, accepted, adminId);
     if (!changed) return null;
-    return OrdersModel.findById(id);
+    const updated = await OrdersModel.findById(id);
+    emitRealtimeChange({ table: 'orders', event: 'UPDATE', recordId: id });
+    return updated;
   },
 };
 

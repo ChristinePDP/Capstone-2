@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, forwardRef } from 'react';
-import { Upload, Trash2, Plus, X, Loader2, Package } from 'lucide-react';
+import { Upload, Trash2, Plus, X, Loader2, Package, ZoomIn } from 'lucide-react';
 import { Modal, useUnsavedChanges } from '../ui';
 import { formatPeso } from '../../utils/numberGuards';
 
@@ -108,7 +108,7 @@ function Textarea({ label, className = '', ...props }) {
 }
 
 const ProductDetailsForm = forwardRef(function ProductDetailsForm(
-  { form, onChange, previewUrl, fileInputRef, onFileSelect, onRemoveImage, availableTags = [], errors = {}, className = '' },
+  { form, onChange, previewUrl, fileInputRef, onFileSelect, onRemoveImage, onCropImage, availableTags = [], errors = {}, className = '' },
   ref
 ) {
   const hasImage = !!(previewUrl || form.image);
@@ -158,6 +158,11 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
             <Button variant="secondary" size="md" aria-label="Choose image file" className="w-full py-2.5 rounded-xl shadow-sm" onClick={() => fileInputRef.current?.click()}>
               <Upload size={14} /> Choose File
             </Button>
+            {previewUrl && (
+              <button type="button" onClick={onCropImage} className="mt-2 inline-flex items-center justify-center gap-1.5 w-full text-[11px] font-semibold text-[#5A453C] hover:text-[#3B1F0A]">
+                <ZoomIn size={13} /> Adjust crop / zoom
+              </button>
+            )}
           </div>
 
           {/* Category + Order Type: full width sa ilalim */}
@@ -218,6 +223,145 @@ const ProductDetailsForm = forwardRef(function ProductDetailsForm(
   );
 });
 
+function ImageCropDialog({ imageUrl, fileName, onCancel, onApply }) {
+  const cropAreaRef = useRef(null);
+  const sourceImageRef = useRef(null);
+  const dragRef = useRef(null);
+  const [sourceSize, setSourceSize] = useState(null);
+  const [areaSize, setAreaSize] = useState(320);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [error, setError] = useState('');
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    const image = new Image();
+    image.onload = () => {
+      sourceImageRef.current = image;
+      setSourceSize({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => setError('This image could not be opened for cropping.');
+    image.src = imageUrl;
+    return () => { image.onload = null; image.onerror = null; };
+  }, [imageUrl]);
+
+  useEffect(() => {
+    const element = cropAreaRef.current;
+    if (!element) return undefined;
+    const observer = new ResizeObserver(([entry]) => setAreaSize(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const fitScale = sourceSize
+    ? Math.max(areaSize / sourceSize.width, areaSize / sourceSize.height)
+    : 1;
+  const imageWidth = sourceSize ? sourceSize.width * fitScale * zoom : areaSize;
+  const imageHeight = sourceSize ? sourceSize.height * fitScale * zoom : areaSize;
+
+  const clampOffset = (x, y, nextZoom = zoom) => {
+    if (!sourceSize) return { x, y };
+    const width = sourceSize.width * fitScale * nextZoom;
+    const height = sourceSize.height * fitScale * nextZoom;
+    return {
+      x: Math.max(-(width - areaSize) / 2, Math.min((width - areaSize) / 2, x)),
+      y: Math.max(-(height - areaSize) / 2, Math.min((height - areaSize) / 2, y)),
+    };
+  };
+
+  const handlePointerDown = (event) => {
+    if (!sourceSize) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { x: event.clientX, y: event.clientY, offsetX: offset.x, offsetY: offset.y };
+  };
+  const handlePointerMove = (event) => {
+    if (!dragRef.current) return;
+    setOffset(clampOffset(
+      dragRef.current.offsetX + event.clientX - dragRef.current.x,
+      dragRef.current.offsetY + event.clientY - dragRef.current.y,
+    ));
+  };
+  const stopDragging = () => { dragRef.current = null; };
+
+  const handleApply = () => {
+    const source = sourceImageRef.current;
+    if (!source || !cropAreaRef.current) return;
+    setApplying(true);
+    setError('');
+    try {
+      const scale = fitScale * zoom;
+      const sourceX = (imageWidth / 2 - areaSize / 2 - offset.x) / scale;
+      const sourceY = (imageHeight / 2 - areaSize / 2 - offset.y) / scale;
+      const sourceCropSize = areaSize / scale;
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Could not prepare the cropped image.');
+      ctx.drawImage(source, sourceX, sourceY, sourceCropSize, sourceCropSize, 0, 0, 1024, 1024);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          setError('Could not create the cropped image. Please try again.');
+          setApplying(false);
+          return;
+        }
+        const baseName = (fileName || 'product-image').replace(/\.[^.]+$/, '');
+        onApply(new File([blob], `${baseName}-cropped.jpg`, { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.92);
+    } catch (err) {
+      setError(err.message || 'Could not crop this image.');
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[10000] bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="crop-image-title" onClick={onCancel}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="crop-image-title" className="text-base font-bold text-[#3B1F0A]">Crop product image</h2>
+            <p className="text-xs text-[#8A7264] mt-1">Drag to reposition. This square crop fills product tiles in the menu and POS.</p>
+          </div>
+          <button type="button" onClick={onCancel} aria-label="Close crop editor" className="p-1.5 rounded-lg text-[#8A7264] hover:bg-[#F5EFEB]"><X size={18} /></button>
+        </div>
+
+        <div
+          ref={cropAreaRef}
+          className="relative mx-auto mt-4 w-[min(82vw,360px)] aspect-square overflow-hidden rounded-xl bg-[#F5EFEB] cursor-grab active:cursor-grabbing touch-none"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={stopDragging}
+          onPointerCancel={stopDragging}
+        >
+          {sourceSize && (
+            <img
+              src={imageUrl}
+              alt="Crop preview"
+              draggable="false"
+              className="absolute max-w-none select-none pointer-events-none"
+              style={{ width: imageWidth, height: imageHeight, left: `calc(50% + ${offset.x}px)`, top: `calc(50% + ${offset.y}px)`, transform: 'translate(-50%, -50%)' }}
+            />
+          )}
+          <div className="absolute inset-0 border-2 border-white/90 shadow-[inset_0_0_0_1px_rgba(59,31,10,0.25)] pointer-events-none" />
+          {!sourceSize && !error && <div className="absolute inset-0 grid place-items-center text-xs text-[#8A7264]">Loading image…</div>}
+        </div>
+
+        <label className="block mt-4 text-xs font-semibold text-[#5A453C]" htmlFor="product-image-zoom">Zoom</label>
+        <input id="product-image-zoom" type="range" min="1" max="3" step="0.01" value={zoom} onChange={event => {
+          const nextZoom = Number(event.target.value);
+          setZoom(nextZoom);
+          setOffset(current => clampOffset(current.x, current.y, nextZoom));
+        }} className="w-full accent-[#5A453C] mt-2" />
+        {error && <p role="alert" className="text-xs text-red-600 mt-2">{error}</p>}
+        <div className="flex justify-end gap-2 mt-4">
+          <Button onClick={onCancel}>Cancel</Button>
+          <Button variant="dark" disabled={!sourceSize || applying} onClick={handleApply}>{applying ? 'Applying…' : 'Use cropped image'}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProductModal({ isOpen = true, onClose, product, onSaveSuccess, onDelete, showToast = () => {} }) {
   const initialFormState = product ? {
     name: product.name || '',
@@ -243,6 +387,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [cropOpen, setCropOpen] = useState(false);
   
   const [exceptionDate, setExceptionDate] = useState('');
   const [exceptionSlots, setExceptionSlots] = useState(0);
@@ -281,6 +426,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
       setExceptions(product?.dateExceptions || []);
       setPreviewUrl('');
       setSelectedFile(null);
+      setCropOpen(false);
       setErrors({});
     }
   }, [product, isOpen]);
@@ -329,6 +475,14 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
     const objectUrl = URL.createObjectURL(file);
     setPreviewUrl(objectUrl);
     handleChange('image', ''); 
+    setCropOpen(true);
+    e.target.value = '';
+  };
+
+  const handleCroppedImage = (file) => {
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setCropOpen(false);
   };
 
   const handleRemoveImage = () => {
@@ -547,6 +701,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             fileInputRef={fileInputRef}
             onFileSelect={handleFileSelect}
             onRemoveImage={handleRemoveImage}
+            onCropImage={() => setCropOpen(true)}
             availableTags={availableTags}
             errors={errors}
           />
@@ -711,6 +866,14 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
 
       </div>
     </Modal>
+      {cropOpen && previewUrl && (
+        <ImageCropDialog
+          imageUrl={previewUrl}
+          fileName={selectedFile?.name || 'product-image'}
+          onCancel={() => setCropOpen(false)}
+          onApply={handleCroppedImage}
+        />
+      )}
     {closeGuard.confirmation}
     </>
   );

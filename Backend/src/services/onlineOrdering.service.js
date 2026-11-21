@@ -1106,12 +1106,17 @@ export const completeOrderAndDeductStock = async (orderId) => {
     }
   }
 
+  emitRealtimeChange({ table: 'orders', event: 'UPDATE', recordId: orderId });
+  emitRealtimeChange({ table: 'products', event: 'UPDATE' });
+  emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
   return updatedOrder;
 };
 
 export const createProduct = async (payload) => {
   try {
-    return await ProductModel.create(payload);
+    const product = await ProductModel.create(payload);
+    emitRealtimeChange({ table: 'products', event: 'INSERT', recordId: product?.id });
+    return product;
   } catch (error) {
     throw new Error(`Database insert error: ${error.message}`);
   }
@@ -1119,7 +1124,9 @@ export const createProduct = async (payload) => {
 
 export const updateProduct = async (id, payload) => {
   try {
-    return await ProductModel.update(id, payload);
+    const product = await ProductModel.update(id, payload);
+    emitRealtimeChange({ table: 'products', event: 'UPDATE', recordId: id });
+    return product;
   } catch (error) {
     throw new Error(`Database update error: ${error.message}`);
   }

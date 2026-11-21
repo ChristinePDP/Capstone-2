@@ -1,4 +1,5 @@
 import { getPaymentSettings, savePaymentQr, deletePaymentQr } from '../services/settings.service.js';
+import { emitRealtimeChange } from '../services/realtime.service.js';
 
 const MAX_QR_SIZE = 5 * 1024 * 1024;
 
@@ -16,6 +17,7 @@ export async function uploadPaymentQr(req, res, next) {
       return res.status(400).json({ success: false, message: 'QR code must be an image no larger than 5MB.' });
     }
     const data = await savePaymentQr(req.file, req.user?.id);
+    emitRealtimeChange({ table: 'payment_settings', event: 'UPDATE', recordId: data?.id || 'payment-settings' });
     res.json({ success: true, data });
   } catch (error) {
     if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
@@ -25,6 +27,8 @@ export async function uploadPaymentQr(req, res, next) {
 
 export async function removePaymentQr(_req, res, next) {
   try {
-    res.json({ success: true, data: await deletePaymentQr() });
+    const data = await deletePaymentQr();
+    emitRealtimeChange({ table: 'payment_settings', event: 'UPDATE', recordId: 'payment-settings' });
+    res.json({ success: true, data });
   } catch (error) { next(error); }
 }

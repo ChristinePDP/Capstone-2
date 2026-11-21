@@ -48,6 +48,7 @@ router.post('/waste', WasteController.log);
 router.patch('/waste/:id/void', WasteController.void);
 
 // ── INVENTORY HISTORY (restock / production / waste trail) ──
+router.get('/logs/expiring', InventoryLogController.getExpiringBatches);
 router.get('/logs', InventoryLogController.getHistory); 
 router.patch('/logs/:id/void', InventoryLogController.voidRestock);
 

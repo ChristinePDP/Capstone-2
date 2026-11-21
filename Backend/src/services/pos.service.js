@@ -486,5 +486,8 @@ export const confirmPosOrderPickup = async (orderId, token) => {
     console.error('[POS SERVICE] Error fetching items to deduct stock on pickup confirmation:', itemsError);
   }
 
+  emitRealtimeChange({ table: 'orders', event: 'UPDATE', recordId: orderId });
+  emitRealtimeChange({ table: 'products', event: 'UPDATE' });
+  emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE' });
   return updatedOrder;
 };

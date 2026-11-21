@@ -6,6 +6,7 @@ import {
 } from '../services/aiAnalytics.service.js';
 import { generateHomepageAds } from '../services/productAndEvent.service.js';
 import { emitRealtimeChange } from '../services/realtime.service.js';
+import { InventoryLogService } from '../services/inventory.service.js';
 
 // Isang hakbang na pumalya ay hindi dapat pumigil sa susunod.
 const runStep = async (label, fn) => {
@@ -73,11 +74,21 @@ export const runInsightsJob = async () => {
 const INSIGHTS_DELAY_MS = 5 * 60 * 1000;
 
 // ISANG entry point (cron at POST /run-daily): sunud-sunod, may dependency.
-//   1) Forecasts (Product -> Sales)           — hinihintay hanggang MATAPOS
-//   2) 5 minutong pahinga (iwas TPM / quota)
-//   3) Insights (Recommendations -> Performance Summary -> Homepage Ads)
-// Hindi magsisimula ang step 3 hangga't hindi tapos ang step 1, kahit gaano katagal ito.
+//   1) Expired inventory -> waste (exact-batch transaction)
+//   2) Forecasts (Product -> Sales)           — hinihintay hanggang MATAPOS
+//   3) 5 minutong pahinga (iwas TPM / quota)
+//   4) Insights (Recommendations -> Performance Summary -> Homepage Ads)
+// Bawat hakbang ay hinihintay matapos bago magsimula ang susunod.
 export const runDailyAnalyticsJob = async ({ insightsDelayMs = INSIGHTS_DELAY_MS } = {}) => {
+  await runStep('Expired inventory waste', async () => {
+    const result = await InventoryLogService.autoLogExpiredBatches();
+    if (result.logged > 0) {
+      emitRealtimeChange({ table: 'waste_logs', event: 'INSERT' });
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE' });
+      emitRealtimeChange({ table: 'inventory_logs', event: 'INSERT' });
+    }
+    console.log(`[DailyJob] Auto-logged ${result.logged || 0} expired batch(es) to waste; skipped ${result.skipped || 0} incompatible batch(es).`);
+  });
   await runForecastJob();
   console.log(`[DailyJob] Forecasts done — waiting ${Math.round(insightsDelayMs / 1000)}s before insights.`);
   await sleep(insightsDelayMs);

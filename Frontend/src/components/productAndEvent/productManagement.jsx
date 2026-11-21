@@ -293,6 +293,44 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     fetchBundles(true);
   }, []);
 
+  // Realtime is the fast path. Periodically revalidate while this page is
+  // visible as a fallback so another admin's save still reaches this screen
+  // if a Supabase/SSE event is missed or the connection briefly drops.
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    const refreshCatalog = async () => {
+      if (!active || inFlight || document.visibilityState === 'hidden') return;
+      inFlight = true;
+      try {
+        const [nextProducts, nextBundles] = await Promise.all([
+          fetchProductsFromApi(true),
+          fetchBundlesListFromApi(true),
+        ]);
+        if (active) {
+          setProducts(nextProducts || []);
+          setBundles(nextBundles || []);
+        }
+      } catch (err) {
+        console.warn('Background product refresh failed:', err);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshCatalog();
+    };
+    const timer = window.setInterval(refreshCatalog, 5000);
+    window.addEventListener('focus', refreshCatalog);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshCatalog);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+
   useEffect(() => {
     const handleDataChanged = async (event) => {
       const change = event.detail || {};

@@ -106,9 +106,9 @@ export default function PerformanceKpis({ kpi, isLoading }) {
             </div>
           </div>
           <div className="flex items-end justify-between gap-2 mt-3 min-w-0">
-            <p className={`${sizeForLength(card.text, KPI_SIZES)} font-bold text-brand-900 leading-none tracking-tight tabular-nums truncate min-w-0`}>
+            <div className={`${sizeForLength(card.text, KPI_SIZES)} font-bold text-brand-900 leading-none tracking-tight tabular-nums truncate min-w-0`}>
               {isLoading ? <Skeleton w="w-28" h="h-7" /> : card.text}
-            </p>
+            </div>
             <TrendBadge delta={card.delta} invert={card.invert} />
           </div>
         </div>

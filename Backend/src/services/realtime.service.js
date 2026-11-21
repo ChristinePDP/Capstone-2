@@ -67,8 +67,8 @@ function broadcast(change) {
 // Direct application events complement the Supabase database subscription.
 // Useful for writes made by this backend even if the Realtime channel is
 // reconnecting; payload contains identifiers only, never customer details.
-export function emitRealtimeChange({ table, event, recordId, relatedId = null }) {
-  if (!table || !event || !recordId) return;
+export function emitRealtimeChange({ table, event, recordId = null, relatedId = null }) {
+  if (!table || !event) return;
   broadcast({ table, event, recordId, relatedId, at: new Date().toISOString() });
 }
 

@@ -23,6 +23,7 @@ import {
 
 import { AiCacheModel } from '../model/AiCache.model.js';
 import { invalidateLiveEventAdsMemo } from '../services/productAndEvent.service.js';
+import { emitRealtimeChange } from '../services/realtime.service.js';
 
 // Cache event lists by filter for 60 seconds.
 const EVENTS_CACHE_TTL_MS = 60 * 1000;
@@ -81,6 +82,7 @@ export const addProduct = async (req, res) => {
     }
 
     const savedProduct = await createDatabaseProduct(productData);
+    emitRealtimeChange({ table: 'products', event: 'INSERT', recordId: savedProduct.id });
     
     console.log('Product Successfully Saved:', savedProduct);
 
@@ -103,6 +105,7 @@ export const editProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const updatedProduct = await updateDatabaseProduct(id, req.body);
+    emitRealtimeChange({ table: 'products', event: 'UPDATE', recordId: id });
     res.status(200).json({ 
       success: true, 
       message: 'Product updated successfully', 
@@ -122,6 +125,7 @@ export const removeProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const deletedProduct = await deleteDatabaseProduct(id);
+    emitRealtimeChange({ table: 'products', event: 'DELETE', recordId: id });
     res.status(200).json({ 
       success: true, 
       message: 'Product deleted successfully', 
@@ -265,6 +269,7 @@ export const addBundle = async (req, res) => {
     }
 
     const savedBundle = await createBundle(bundleData);
+    emitRealtimeChange({ table: 'promo_bundles', event: 'INSERT', recordId: savedBundle.id });
 
     res.status(201).json({
       success: true,
@@ -310,6 +315,8 @@ export const editBundle = async (req, res) => {
       });
     }
 
+    emitRealtimeChange({ table: 'promo_bundles', event: 'UPDATE', recordId: id });
+
     res.status(200).json({
       success: true,
       message: 'Bundle updated successfully',
@@ -342,6 +349,8 @@ export const removeBundle = async (req, res) => {
         data: null
       });
     }
+
+    emitRealtimeChange({ table: 'promo_bundles', event: 'DELETE', recordId: id });
 
     res.status(200).json({
       success: true,
@@ -423,6 +432,7 @@ export const addEvent = async (req, res) => {
 
     const savedEvent = await createEvent(eventData);
     invalidateEventsCache();
+    emitRealtimeChange({ table: 'occasions', event: 'INSERT', recordId: savedEvent.id });
     console.log('Event Successfully Saved:', savedEvent);
 
     res.status(201).json({
@@ -447,6 +457,7 @@ export const editEvent = async (req, res) => {
 
     const updatedEvent = await updateEvent(id, eventData);
     invalidateEventsCache();
+    emitRealtimeChange({ table: 'occasions', event: 'UPDATE', recordId: id });
 
     res.status(200).json({
       success: true,
@@ -468,6 +479,7 @@ export const removeEvent = async (req, res) => {
     const { id } = req.params;
     const deletedEvent = await deleteEvent(id);
     invalidateEventsCache();
+    emitRealtimeChange({ table: 'occasions', event: 'DELETE', recordId: id });
 
     res.status(200).json({
       success: true,
