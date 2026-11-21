@@ -973,66 +973,6 @@ export const deleteEvent = async (id) => {
 };
 
 // ============================================================
-// HOMEPAGE AI ADVERTISEMENT GENERATOR
-// ============================================================
-
-const BEST_SELLERS_THEME = {
-  title: 'Best Selling Treats.',
-  subtitle: 'Our most-loved cakes and pastries, picked by our customers.',
-  badge: 'Customer Favorites',
-  bgGradient: 'bg-[#FCFAF9]',
-  textColor: 'text-[#8A7264]',
-  badgeBg: 'bg-[#3B1F0A]'
-};
-
-export const generateHomepageAds = async () => {
-  try {
-    const { data: productsData, error: prodError } = await supabase
-      .from('products')
-      .select(`
-        id, 
-        name, 
-        category, 
-        price, 
-        image_url,
-        pricing_mode,
-        price_matrix,
-        event_tags,
-        order_items ( quantity )
-      `)
-      .eq('is_active', true);
-
-    if (prodError) throw prodError;
-
-    const productsWithSales = productsData.map(p => {
-      const totalSold = p.order_items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-      const { order_items, ...cleanProduct } = p;
-      return { ...cleanProduct, total_sold: totalSold };
-    });
-
-    const topProducts = productsWithSales
-      .sort((a, b) => b.total_sold - a.total_sold)
-      .slice(0, 5);
-
-    const homepageAds = {
-      theme: BEST_SELLERS_THEME,
-      products: topProducts
-    };
-
-    const CACHE_KEY = 'homepage_ad_recommendations';
-    const TTL_MS = 24 * 60 * 60 * 1000; 
-
-    await AiCacheModel.upsert(CACHE_KEY, homepageAds, TTL_MS);
-    console.log(`[SERVICE] Homepage Ads (Best Sellers) successfully generated and cached.`);
-
-    return homepageAds;
-  } catch (error) {
-    console.error(`[SERVICE] Error generating homepage ads:`, error);
-    throw error;
-  }
-};
-
-// ============================================================
 // EVENT ADS MODAL
 // ============================================================
 

@@ -4,7 +4,6 @@ import {
   SalesForecastService,
   PerformanceSummaryService,
 } from '../services/aiAnalytics.service.js';
-import { generateHomepageAds } from '../services/productAndEvent.service.js';
 import { emitRealtimeChange } from '../services/realtime.service.js';
 import { InventoryLogService } from '../services/inventory.service.js';
 
@@ -63,9 +62,6 @@ export const runInsightsJob = async () => {
   await sleep(65 * 1000);
   await runStep('Performance summary', () => PerformanceSummaryService.getPerformanceSummary(true));
 
-  console.log('Generating Homepage Ads (Best Sellers)...');
-  await runStep('Homepage ads', () => generateHomepageAds());
-
   emitRealtimeChange({ table: 'analytics', event: 'REFRESH', recordId: 'insights-analytics' });
   console.log('--- Insights Job Finished ---');
 };
@@ -77,7 +73,7 @@ const INSIGHTS_DELAY_MS = 5 * 60 * 1000;
 //   1) Expired inventory -> waste (exact-batch transaction)
 //   2) Forecasts (Product -> Sales)           — hinihintay hanggang MATAPOS
 //   3) 5 minutong pahinga (iwas TPM / quota)
-//   4) Insights (Recommendations -> Performance Summary -> Homepage Ads)
+//   4) Insights (Recommendations -> Performance Summary)
 // Bawat hakbang ay hinihintay matapos bago magsimula ang susunod.
 export const runDailyAnalyticsJob = async ({ insightsDelayMs = INSIGHTS_DELAY_MS } = {}) => {
   await runStep('Expired inventory waste', async () => {

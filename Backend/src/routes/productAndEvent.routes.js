@@ -13,9 +13,7 @@ import {
   addEvent,
   editEvent,
   removeEvent,
-  getHomepageAds,
   getEventAds,
-  regenerateHomepageAds,
   regenerateEventAds,
   getBundles,
   getBundle,
@@ -74,7 +72,6 @@ router.get('/events', getEvents);
 // ============================================================
 // ADS GENERATORS
 // ============================================================
-router.get('/homepage-ads', getHomepageAds);
 router.get('/event-ads', getEventAds);
 
 // Public reads above are consumed by customer-facing pages. Admin mutations
@@ -97,9 +94,7 @@ router.delete('/bundles/:id', removeBundle);
 router.post('/events', addEvent);
 router.put('/events/:id', editEvent);
 router.delete('/events/:id', removeEvent);
-router.get('/homepage-ads', getHomepageAds);
 router.get('/event-ads', getEventAds);
-router.post('/homepage-ads/regenerate', regenerateHomepageAds);
 router.post('/event-ads/regenerate', regenerateEventAds);
 
 export default router;
