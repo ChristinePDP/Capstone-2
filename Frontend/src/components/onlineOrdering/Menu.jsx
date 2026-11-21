@@ -1193,10 +1193,11 @@ function ProductModal({ product, onClose, onAddToCart }) {
 function ImagePreviewModal({ product, onClose }) {
   if (!product) return null;
 
-  const isBundleGrid = product.type === 'bundle' && !product.custom_image_url && product.products && product.products.length > 0;
+  const imageProducts = product.type === 'package' ? product.package_components : product.products;
+  const isBundleGrid = (product.type === 'bundle' || product.type === 'package') && !product.custom_image_url && imageProducts && imageProducts.length > 0;
 
   const renderGrid = () => {
-    const products = product.products;
+    const products = imageProducts;
     const MAX_IMAGE_SLOTS = 3;
     const showCountTile = products.length > MAX_IMAGE_SLOTS;
     const imageSlots = showCountTile ? products.slice(0, MAX_IMAGE_SLOTS - 1) : products;
@@ -2185,8 +2186,8 @@ export default function Menu({ cart, setCart }) {
                 >
                   <div data-fly-source className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
                     
-                    {p.type === 'bundle' ? (
-                       <BundleMenuImage products={p.products} customImageUrl={p.custom_image_url} />
+                    {p.type === 'bundle' || p.type === 'package' ? (
+                       <BundleMenuImage products={p.type === 'package' ? p.package_components : p.products} customImageUrl={p.custom_image_url} />
                     ) : (
                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-all duration-300 group-hover:scale-105 group-hover:blur-[3px] group-hover:brightness-[0.55]" />
                     )}
