@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge, Button, Table, Tr, Td, Skeleton, EmptyState, ErrorState } from '../ui';
 import QrScanner from './QrScanner';
@@ -6,6 +6,7 @@ import { formatCount } from '../../utils/numberGuards';
 
 const ORDER_STATUSES = ['All', 'Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
 const PER_PAGE = 8;
+const WIDE_PER_PAGE = 12;
 
 function fmt(n) {
   return '₱' + Number(n).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -218,6 +219,18 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [widePerPage, setWidePerPage] = useState(WIDE_PER_PAGE);
+
+  useEffect(() => {
+    const updateWidePerPage = () => {
+      const isWideViewport = window.matchMedia('(min-width: 1280px) and (min-height: 800px)').matches;
+      setWidePerPage(isWideViewport ? WIDE_PER_PAGE : PER_PAGE);
+      setPage(1);
+    };
+    updateWidePerPage();
+    window.addEventListener('resize', updateWidePerPage);
+    return () => window.removeEventListener('resize', updateWidePerPage);
+  }, []);
 
   const filtered = orders.filter(o => {
     const statusOk = statusFilter === 'All' || o.status === statusFilter;
@@ -237,9 +250,10 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
     return statusOk && searchOk;
   });
 
-  const maxPage = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const pageSize = widePerPage;
+  const maxPage = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visiblePage = Math.min(page, maxPage);
-  const paged = filtered.slice((visiblePage - 1) * PER_PAGE, visiblePage * PER_PAGE);
+  const paged = filtered.slice((visiblePage - 1) * pageSize, visiblePage * pageSize);
   // Background refreshes keep the current list on screen; the loading state only
   // replaces it on the very first load (no flicker, no scroll jump).
   const showLoading = loading && orders.length === 0;
@@ -356,7 +370,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
             : <EmptyState title={search || statusFilter !== 'All' ? 'No matching orders' : 'No orders yet'} description={search || statusFilter !== 'All' ? 'Change the search or status filter to see more orders.' : 'New customer orders will appear here.'} />
         )}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mt-4">
-          <Pagination page={visiblePage} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+          <Pagination page={visiblePage} count={filtered.length} perPage={pageSize} total="Orders" onChange={setPage} />
         </div>
       </div>
 
@@ -406,7 +420,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
           )}
         </Table>
         <div className="px-4 py-3 border-t border-slate-200">
-          <Pagination page={visiblePage} count={filtered.length} perPage={PER_PAGE} total="Orders" onChange={setPage} />
+          <Pagination page={visiblePage} count={filtered.length} perPage={pageSize} total="Orders" onChange={setPage} />
         </div>
       </div>
     </div>
