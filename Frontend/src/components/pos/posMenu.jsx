@@ -1361,8 +1361,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
               return (
                 <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
                   <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
-                    {isBundle ? (
-                      <BundleMenuImage products={p.products} customImageUrl={p.custom_image_url} />
+                    {isBundle || p.type === 'package' ? (
+                      <BundleMenuImage products={isBundle ? p.products : p.package_components} customImageUrl={p.custom_image_url} />
                     ) : (
                       <img src={p.image_url} alt={p.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                     )}
