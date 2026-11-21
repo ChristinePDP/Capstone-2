@@ -1191,7 +1191,7 @@ Don't default to the same shallow move every time (e.g. "feature it near the cou
 CRITICAL QUALITY GATE — DO NOT PAD WITH GENERIC ADVICE:
 Only write a recommendation when it is anchored to something NOTICEABLE in the forecast or historical data — a real surge, a real decline, a real sustained trend, a real near-expiry item, or a real stock imbalance. A flat, unremarkable pattern is NOT a recommendation opportunity on its own. Every recommendation must cite the specific number, product, or item that justifies it (e.g. an actual forecasted pct/diff, an actual near-expiry date, an actual slow-mover vs best-seller pairing). Never invent or exaggerate a "noticeable" trend that the numbers don't actually support — if the strongest available signal is modest, describe it honestly as modest.
 ${avoidRepeatBlock}
-Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 most important and most immediately attainable for that category, ranked by how noticeable/urgent the underlying signal is. Never return 0, 1, 3, or 4 for a category unless the underlying context for that entire category is truly empty (in which case return as many as the data honestly supports, but do not fabricate to hit 2).
+Follow the per-category counts below; never pad with unsupported recommendations. For inventoryOptimization, include one expiry item only when near-expiring ingredients exist, and one stock item only when waste logs or meaningful stock risks exist.
 
 1. "salesOptimization" (Sales Optimization) — a FIXED structure of EXACTLY 2 items, in this order: first the Sales Improvement (job a, "kind": "improvement"), then the Product Bundling (job b, "kind": "bundle"). NEVER return two items of the same kind, and never drop the bundle item when job (b) has data to work with.
    a. Sales Improvement — "kind": "improvement". Built ONLY from forecastSignals.rise ("Expected to Rise") and forecastSignals.drop ("Expected to Drop"). These lists are exactly the products shown on the Product Forecast card (at most 2 in each).
@@ -1210,7 +1210,7 @@ Produce exactly TWO categories, each with EXACTLY 2 recommendations — the 2 mo
 2. "inventoryOptimization" (Inventory Optimization) — a FIXED structure. Every item covers ONE topic only and carries a "kind":
    - "expiry" = Expiry Management: ONLY about near-expiring ingredients (job a).
    - "stock" = Stock & Waste Control: ONLY about stock levels or waste logs (job b). There is at most ONE "expiry" item and at most ONE "stock" item — the dashboard has exactly two fixed slots, one per kind.
-   NEVER mix the two topics inside one item. An "expiry" item must not talk about waste, spoilage, losses or storage habits. A "stock" item must not talk about expiry dates or near-expiring items.
+   NEVER mix the two topics inside one item. An "expiry" item must not talk about waste, spoilage, losses or storage habits. A "stock" item must not give advice about current near-expiry dates. When discussing waste logs, it may state that an item was logged as expired; treat that only as a past waste reason, not current expiry advice.
 
    a. Expiry Management — "kind": "expiry" — the FIRST item. Only when expiryContext.nearExpiringItems is non-empty: pick the most urgent near-expiring item(s). Each item has possibleProducts (the products that use that ingredient, each with unitsSold in the last salesWindowDays days and a demand label of fast / moderate / slow) and bestProductsToBake (the 1 or 2 best-selling products to use).
       - USE THE FAST SELLERS, NEVER THE SLOW ONES: recommend baking/pushing the products listed in bestProductsToBake — these are the best-selling products that use the ingredient. If bestProductsToBake has TWO products, recommend BOTH (for example split the batch between them, or bake one of each) and name both. If it has only ONE, recommend just that one. Never add a third. Say why in plain words using each product's unitsSold (for example "it sold 49 units in the last 30 days, so it will move fast"), add a reasoned discount or counter push if useful, and compare the expected return vs. a full write-off.
@@ -1295,7 +1295,7 @@ const AR_BANNED_AUDIENCE_REGEX =
   /\b(team(?:s|mates?)?|staffs?|crew|employees?|workers?|helpers?|personnel|co-?workers?|colleagues?|everyone|everybody|your people|your bakers?|your assistants?)\b/i;
 
 const AR_WASTE_TOPIC_REGEX = /\b(waste logs?|logged|spoil\w*|unrefrigerated|loss of|lost|fridge|refrigerat\w*|storage)\b/i;
-const AR_EXPIRY_TOPIC_REGEX = /\b(expir\w*|near-expiry|best before|use-by)\b/i;
+const AR_EXPIRY_TOPIC_REGEX = /\b(near[- ]?expir\w*|expir(?:y|ation)\s+(?:date|is|on|by|within)|expir(?:es|ing)\b|best[- ]before|use[- ]by)\b/i;
 const AR_WASTE_TALK_REGEX = /\b(lost|wasted|waste logs?|logged|spoil\w*|thrown|discard\w*|unrefrigerated)\b/i;
 const AR_WASTE_WINDOW_REGEX = /\b(past|last)\s+(7|seven)\s+days\b|\bpast\s+week\b/i;
 
@@ -1324,7 +1324,7 @@ function validateActionablePayload(payload, context) {
       issues.push(`"${rec.title}" leans on a passive/vague phrase ("${bannedHit}") instead of stating a concrete action.`);
     }
     const wasteLogCount = Number(context?.expiryContext?.wasteSummary?.totalLogs || 0);
-    if (wasteLogCount > 0 && AR_WASTE_TALK_REGEX.test(rec.desc) && !AR_WASTE_WINDOW_REGEX.test(rec.desc)) {
+    if (invRecs.includes(rec) && rec.kind === "stock" && wasteLogCount > 0 && AR_WASTE_TALK_REGEX.test(rec.desc) && !AR_WASTE_WINDOW_REGEX.test(rec.desc)) {
       issues.push(`"${rec.title}" talks about waste/losses but doesn't say the time window. Say "in the past ${WASTE_WINDOW_DAYS} days" and describe the pattern across the waste logs (not just one log).`);
     }
     // Near-expiry: huwag mag-suggest mag-bake ng SLOW na product para maubos ang ingredient.
