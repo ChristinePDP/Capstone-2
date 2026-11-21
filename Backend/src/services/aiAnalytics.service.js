@@ -1596,6 +1596,7 @@ const ActionableRecommendationService = {
       // recommendation.
       const forecastAvailability = await getForecastAvailability();
       if (!forecastAvailability.anyReady) {
+        console.warn(`[ActionableRecommendationService] Skipping generation: sales forecast ready=${forecastAvailability.sales30Ready}, product forecast ready=${forecastAvailability.product30Ready}.`);
         return {
           recommendations: emptyActionablePayload(),
           insufficientData: true,
@@ -1663,6 +1664,7 @@ const ActionableRecommendationService = {
           );
           const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY);
           if (isUsableActionableCache(existingCache)) {
+            console.warn(`[ActionableRecommendationService] Kept cached recommendations after validation failed: ${JSON.stringify(existingCache.payload)}`);
             return { recommendations: existingCache.payload, insufficientData: false };
           }
           // No previous good cache to fall back to (e.g. first-ever run) —
@@ -1673,12 +1675,13 @@ const ActionableRecommendationService = {
         payload = { ...payload, forecastGeneratedAt: forecastAvailability.productForecastGeneratedAt };
 
         await AiCacheModel.upsert(AR_CACHE_KEY, payload, AR_CACHE_TTL_MS);
+        console.log(`[ActionableRecommendationService] Fresh recommendations generated and cached: ${JSON.stringify({ forecastGeneratedAt: payload.forecastGeneratedAt, salesOptimization: payload.salesOptimization, inventoryOptimization: payload.inventoryOptimization })}`);
         return { recommendations: payload, insufficientData: false };
       } catch (err) {
         console.error("[ActionableRecommendationService] Gemini recommendation failed:", err.message);
         const existingCache = await AiCacheModel.getByKey(AR_CACHE_KEY).catch(() => null);
         if (isUsableActionableCache(existingCache)) {
-          console.warn("[ActionableRecommendationService] Kept the previous cached recommendations.");
+          console.warn(`[ActionableRecommendationService] Kept previous cached recommendations: ${JSON.stringify(existingCache.payload)}`);
           return { recommendations: existingCache.payload, insufficientData: false };
         }
         return {
@@ -2916,12 +2919,13 @@ const PerformanceSummaryService = {
         }
 
         await AiCacheModel.upsert(PS_MASTER_CACHE_KEY, payload, PS_CACHE_TTL_MS);
+        console.log(`[PerformanceSummaryService] Fresh summary generated and cached: ${JSON.stringify(payload)}`);
         return { ...payload, insufficientData: false };
       } catch (err) {
         console.error("[PerformanceSummaryService] Gemini summary failed:", err.message);
         const existingCache = await AiCacheModel.getByKey(PS_MASTER_CACHE_KEY).catch(() => null);
         if (isUsableSummaryCache(existingCache)) {
-          console.warn("[PerformanceSummaryService] Kept the previous cached summary.");
+          console.warn(`[PerformanceSummaryService] Kept previous cached summary: ${JSON.stringify(existingCache.payload)}`);
           return { ...existingCache.payload, insufficientData: false };
         }
         return {
