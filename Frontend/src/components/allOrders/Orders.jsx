@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Calendar, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Badge, Button, Table, Tr, Td, Skeleton, EmptyState, ErrorState } from '../ui';
 import QrScanner from './QrScanner';
@@ -6,7 +6,6 @@ import { formatCount } from '../../utils/numberGuards';
 
 const ORDER_STATUSES = ['All', 'Pending Verification', 'Confirmed', 'Ready', 'Completed', 'Cancelled'];
 const PER_PAGE = 8;
-const WIDE_PER_PAGE = 12;
 
 function fmt(n) {
   return '₱' + Number(n).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -219,18 +218,6 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
   const [statusFilter, setStatusFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [widePerPage, setWidePerPage] = useState(WIDE_PER_PAGE);
-
-  useEffect(() => {
-    const updateWidePerPage = () => {
-      const isWideViewport = window.matchMedia('(min-width: 1280px) and (min-height: 800px)').matches;
-      setWidePerPage(isWideViewport ? WIDE_PER_PAGE : PER_PAGE);
-      setPage(1);
-    };
-    updateWidePerPage();
-    window.addEventListener('resize', updateWidePerPage);
-    return () => window.removeEventListener('resize', updateWidePerPage);
-  }, []);
 
   const filtered = orders.filter(o => {
     const statusOk = statusFilter === 'All' || o.status === statusFilter;
@@ -250,7 +237,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
     return statusOk && searchOk;
   });
 
-  const pageSize = widePerPage;
+  const pageSize = PER_PAGE;
   const maxPage = Math.max(1, Math.ceil(filtered.length / pageSize));
   const visiblePage = Math.min(page, maxPage);
   const paged = filtered.slice((visiblePage - 1) * pageSize, visiblePage * pageSize);
@@ -375,7 +362,7 @@ export default function Orders({ orders, loading, error, onRetry, onViewOrder, o
       </div>
 
       <div className="hidden lg:block bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
-        <Table columns={COLUMNS} fixedLayout>
+        <Table columns={COLUMNS} fixedLayout className="[&_td]:py-2 [&_th]:py-2">
           {showLoading ? (
             Array.from({ length: 6 }).map((_, row) => (
               <Tr key={`orders-skeleton-${row}`}>
