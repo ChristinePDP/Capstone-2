@@ -460,6 +460,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       availability: posAvailabilityById[String(item.product_id)],
     })),
   }));
+  const visibleItemCount = activeProducts.length + inactiveProducts.length + bundlesWithAvailability.length;
 
   // Package at Bundle ay parehong na-e-edit na sa Promo Bundles form (doon
   // na ang Package Contents UI); ginagamit lang dito ang BundleCard grid
@@ -635,14 +636,17 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:gap-4 mb-5 sm:mb-6">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full sm:w-64" />
-        <CategoryTabs
-          options={TAB_ITEMS}
-          value={category}
-          onChange={setCategory}
-          onPromoBundleClick={() => navigate('/productAndEvent/bundles')}
-        />
+      <div className="flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 mb-5 sm:mb-6">
+        <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full md:w-64 md:shrink-0" />
+        <div className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+          <CategoryTabs
+            options={TAB_ITEMS}
+            value={category}
+            onChange={setCategory}
+            onPromoBundleClick={() => navigate('/productAndEvent/bundles')}
+          />
+          <span className="shrink-0 text-xs font-semibold text-[#8A7264]">Total: {visibleItemCount}</span>
+        </div>
       </div>
 
       {error && (products.length > 0 || bundlesWithAvailability.length > 0) && (

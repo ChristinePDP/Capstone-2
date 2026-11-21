@@ -603,6 +603,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   // package) at ang sarili nitong record kapag Edit.
   const [pendingPackageProductId, setPendingPackageProductId] = useState('');
   const [pendingPackageQty, setPendingPackageQty] = useState(1);
+  const [pendingBundleQty, setPendingBundleQty] = useState(1);
   const isEditingPackage = Boolean(editPackageProduct?.id) || (bundle?.category === 'Package' && Boolean(bundle?.id));
   // Anumang existing row (Bundle man o Package) — para sa title/button labels.
   const isEditing = Boolean(bundle?.id || editPackageProduct?.id);
@@ -617,7 +618,8 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       const initialItems = (bundle?.product_ids || []).map(pid => {
          return {
            productId: pid,
-           options: bundle?.bundle_options?.[pid] || {}
+           options: bundle?.bundle_options?.[pid] || {},
+           quantity: Math.max(1, Number(bundle?.bundle_options?.__quantities?.[pid]) || 1)
          };
       });
 
@@ -763,7 +765,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
 
   const originalTotal = selectedProducts.reduce((sum, p) => {
     const item = form.product_items.find(i => i.productId === p.id);
-    return sum + getVariantPrice(p, item?.options || {});
+    return sum + getVariantPrice(p, item?.options || {}) * Math.max(1, Number(item?.quantity) || 1);
   }, 0);
 
   const discountPercent = Number(form.discount_percent || 0);
@@ -776,9 +778,21 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   const addBundleProduct = () => {
     const selected = (allProducts || []).find(p => String(p.id) === String(pendingBundleProductId));
     if (!selected) return;
-    toggleProduct(selected);
+    let defaultOptions = {};
+    if (selected.pricing_mode === 'variable' && selected.price_groups) {
+      selected.price_groups.forEach(g => { defaultOptions[g.name] = g.options[0]; });
+    }
+    setForm(prev => ({ ...prev, product_items: [...prev.product_items, { productId: selected.id, options: defaultOptions, quantity: Math.max(1, Number(pendingBundleQty) || 1) }] }));
     setPendingBundleProductId('');
+    setPendingBundleQty(1);
   };
+
+  const updateBundleItemQty = (productId, qty) => setForm(prev => ({
+    ...prev,
+    product_items: prev.product_items.map(item => item.productId === productId
+      ? { ...item, quantity: Math.max(1, Number(qty) || 1) }
+      : item)
+  }));
 
   const toggleProduct = (product) => {
     const exists = form.product_items.some(item => item.productId === product.id);
@@ -872,6 +886,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
          acc[item.productId] = item.options;
          return acc;
       }, {});
+      bundleOptions.__quantities = Object.fromEntries(form.product_items.map(item => [item.productId, Math.max(1, Number(item.quantity) || 1)]));
 
       const payload = {
         category: 'Bundle',
@@ -1231,7 +1246,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
               : `Pick 2 to ${MAX_BUNDLE_PRODUCTS} products to include in this bundle (${form.product_items.length}/${MAX_BUNDLE_PRODUCTS} added).`}
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-2.5 mb-1 items-end">
+          <div className="flex flex-wrap sm:flex-nowrap gap-2.5 mb-1 items-end">
             <ProductPicker
               label="Add a product"
               value={pendingBundleProductId}
@@ -1243,6 +1258,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 label: `${p.name} — ${p.pricing_mode === 'variable' ? 'Variable Pricing' : formatPeso(p.price)}`,
               }))}
             />
+            <div className="w-24 shrink-0">
+              <Input label="Qty" type="number" min="1" value={pendingBundleQty} onChange={e => setPendingBundleQty(e.target.value)} />
+            </div>
             <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="w-full sm:w-auto">
               <Plus size={14} /> Add
             </Button>
@@ -1263,6 +1281,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                       <div className="flex items-center gap-2.5">
                         <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{p.name}</span>
                         <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">{formatPeso(currentPrice)}</span>
+                        <input type="number" min="1" aria-label={`${p.name} quantity`} value={item?.quantity || 1} onChange={e => updateBundleItemQty(p.id, e.target.value)} className="w-14 shrink-0 text-xs border border-[#DED4CC] rounded-lg px-2 py-1.5 outline-none focus:border-[#5A453C] bg-white text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                         <button type="button" onClick={() => toggleProduct(p)} className="text-red-500 p-1.5 hover:bg-red-50 rounded-lg transition-colors">
                           <Trash2 size={14} />
                         </button>
