@@ -33,18 +33,6 @@ const discardUploadedImage = (url) => {
 // naka-highlight dito. Pag-click sa ibang item, bumabalik sa Product Catalog.
 const TAB_ITEMS = ['All', 'Promo Bundle', 'Pastry', 'Cake', 'Package', 'Celebration Material'];
 
-// Quantity ng bawat product sa isang Bundle. Walang hiwalay na column para
-// dito, kaya naka-save ito sa loob ng `bundle_options` sa reserved key na
-// `__quantities` ({ [productId]: qty }). Hiwalay ito sa per-product options
-// (size, flavor, etc.) kaya hindi nito nagugulo ang price matrix matching.
-export const BUNDLE_QTY_KEY = '__quantities';
-
-export const getBundleItemQty = (bundleOptions, productId) => {
-  const quantities = bundleOptions?.[BUNDLE_QTY_KEY] || {};
-  const raw = quantities[productId] ?? quantities[String(productId)];
-  return Math.max(1, Math.floor(Number(raw)) || 1);
-};
-
 const parseResponse = async (res) => {
   const result = await res.json().catch(() => ({}));
   if (!res.ok || result.success === false) {
@@ -370,16 +358,14 @@ export function BundleCard({ bundle, onEdit, onDelete }) {
     ? `Unavailable for pre-order: ${missingPreOrderLimitNames.join(', ')}.`
     : '';
 
-  // Katulad ng Package: may quantity sa bawat product (hal. "2x Chocolate Cake").
   const productDescription = products.length > 0 
     ? products.map(p => {
-        const qty = getBundleItemQty(bundleOptions, p.id);
-        const opts = bundleOptions[p.id] ?? bundleOptions[String(p.id)];
+        const opts = bundleOptions[p.id];
         if (opts && Object.keys(opts).length > 0) {
           const optionStrings = Object.values(opts).join(', ');
-          return `${qty}x ${p.name} (${optionStrings})`;
+          return `${p.name} (${optionStrings})`;
         }
-        return `${qty}x ${p.name}`;
+        return p.name;
       }).join(' + ') 
     : '\u00A0';
 
@@ -534,7 +520,6 @@ const ORDER_TYPES = ['Pick-up Today', 'Pre-order', 'Both'];
 export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, allProducts, events, onSaved }) {
   const [form, setForm] = useState(emptyForm);
   const [pendingBundleProductId, setPendingBundleProductId] = useState('');
-  const [pendingBundleQty, setPendingBundleQty] = useState(1);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -634,11 +619,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
          return {
            productId: pid,
            options: bundle?.bundle_options?.[pid] || {},
-<<<<<<< Updated upstream
            quantity: Math.max(1, Number(bundle?.bundle_options?.__quantities?.[pid]) || 1)
-=======
-           quantity: getBundleItemQty(bundle?.bundle_options, pid),
->>>>>>> Stashed changes
          };
       });
 
@@ -704,7 +685,6 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
       setPendingPackageProductId('');
       setPendingPackageQty(1);
       setPendingBundleProductId('');
-      setPendingBundleQty(1);
       setFormError(null);
       setFieldErrors({});
       setImageError(null);
@@ -798,20 +778,15 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   const addBundleProduct = () => {
     const selected = (allProducts || []).find(p => String(p.id) === String(pendingBundleProductId));
     if (!selected) return;
-<<<<<<< Updated upstream
     let defaultOptions = {};
     if (selected.pricing_mode === 'variable' && selected.price_groups) {
       selected.price_groups.forEach(g => { defaultOptions[g.name] = g.options[0]; });
     }
     setForm(prev => ({ ...prev, product_items: [...prev.product_items, { productId: selected.id, options: defaultOptions, quantity: Math.max(1, Number(pendingBundleQty) || 1) }] }));
-=======
-    toggleProduct(selected, Math.max(1, Math.floor(Number(pendingBundleQty)) || 1));
->>>>>>> Stashed changes
     setPendingBundleProductId('');
     setPendingBundleQty(1);
   };
 
-<<<<<<< Updated upstream
   const updateBundleItemQty = (productId, qty) => setForm(prev => ({
     ...prev,
     product_items: prev.product_items.map(item => item.productId === productId
@@ -820,9 +795,6 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
   }));
 
   const toggleProduct = (product) => {
-=======
-  const toggleProduct = (product, quantity = 1) => {
->>>>>>> Stashed changes
     const exists = form.product_items.some(item => item.productId === product.id);
 
     // Max 3 products lang per bundle — huwag payagang magdagdag kapag
@@ -843,20 +815,9 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
            defaultOptions[g.name] = g.options[0];
          });
       }
-      return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions, quantity }] };
+      return { ...prev, product_items: [...prev.product_items, { productId: product.id, options: defaultOptions }] };
     });
 
-  };
-
-  const updateBundleItemQty = (productId, qty) => {
-    setForm(prev => ({
-      ...prev,
-      product_items: prev.product_items.map(item =>
-        item.productId === productId
-          ? { ...item, quantity: Math.max(1, Math.floor(Number(qty)) || 1) }
-          : item
-      )
-    }));
   };
 
   const updateItemOption = (productId, groupName, value) => {
@@ -925,15 +886,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
          acc[item.productId] = item.options;
          return acc;
       }, {});
-<<<<<<< Updated upstream
       bundleOptions.__quantities = Object.fromEntries(form.product_items.map(item => [item.productId, Math.max(1, Number(item.quantity) || 1)]));
-=======
-      // Quantity ng bawat product — naka-save sa reserved key (tingnan ang BUNDLE_QTY_KEY).
-      bundleOptions[BUNDLE_QTY_KEY] = form.product_items.reduce((acc, item) => {
-         acc[item.productId] = Math.max(1, Math.floor(Number(item.quantity)) || 1);
-         return acc;
-      }, {});
->>>>>>> Stashed changes
 
       const payload = {
         category: 'Bundle',
@@ -1308,11 +1261,7 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
             <div className="w-24 shrink-0">
               <Input label="Qty" type="number" min="1" value={pendingBundleQty} onChange={e => setPendingBundleQty(e.target.value)} />
             </div>
-<<<<<<< Updated upstream
             <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="w-full sm:w-auto">
-=======
-            <Button variant="secondary" type="button" onClick={addBundleProduct} disabled={!pendingBundleProductId || atMaxProducts} className="flex-1 sm:flex-none">
->>>>>>> Stashed changes
               <Plus size={14} /> Add
             </Button>
           </div>
@@ -1327,25 +1276,12 @@ export function BundleFormModal({ isOpen, onClose, bundle, editPackageProduct, a
                 {selectedProducts.map(p => {
                   const item = form.product_items.find(i => i.productId === p.id);
                   const currentPrice = getVariantPrice(p, item?.options || {});
-                  const itemQty = Math.max(1, Number(item?.quantity) || 1);
                   return (
                     <div key={p.id} className="flex flex-col gap-2 p-2.5 sm:p-3 bg-[#FCFAF9] rounded-2xl border border-[#DED4CC]">
                       <div className="flex items-center gap-2.5">
                         <span className="flex-1 min-w-0 text-xs font-bold text-[#3B1F0A] truncate">{p.name}</span>
-<<<<<<< Updated upstream
                         <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">{formatPeso(currentPrice)}</span>
                         <input type="number" min="1" aria-label={`${p.name} quantity`} value={item?.quantity || 1} onChange={e => updateBundleItemQty(p.id, e.target.value)} className="w-14 shrink-0 text-xs border border-[#DED4CC] rounded-lg px-2 py-1.5 outline-none focus:border-[#5A453C] bg-white text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-=======
-                        <span className="text-[10px] font-semibold text-[#8A7264] shrink-0">{formatPeso(currentPrice * itemQty)}</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={itemQty}
-                          onChange={e => updateBundleItemQty(p.id, e.target.value)}
-                          aria-label={`Quantity of ${p.name}`}
-                          className="w-14 sm:w-16 shrink-0 text-xs border border-[#DED4CC] rounded-lg px-2 py-1.5 outline-none focus:border-[#5A453C] bg-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
->>>>>>> Stashed changes
                         <button type="button" onClick={() => toggleProduct(p)} className="text-red-500 p-1.5 hover:bg-red-50 rounded-lg transition-colors">
                           <Trash2 size={14} />
                         </button>

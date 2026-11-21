@@ -13,7 +13,9 @@ import {
   addEvent,
   editEvent,
   removeEvent,
+  getHomepageAds,
   getEventAds,
+  regenerateHomepageAds,
   regenerateEventAds,
   getBundles,
   getBundle,
@@ -72,6 +74,7 @@ router.get('/events', getEvents);
 // ============================================================
 // ADS GENERATORS
 // ============================================================
+router.get('/homepage-ads', getHomepageAds);
 router.get('/event-ads', getEventAds);
 
 // Public reads above are consumed by customer-facing pages. Admin mutations
@@ -82,6 +85,8 @@ router.get('/bundles/:id', getBundle);
 router.get('/events/:id', getEvent);
 router.post('/add', addProduct);
 router.put('/:id', editProduct);
+// NOTE: dapat NASA ITAAS ng router.delete('/:id') ang '/upload-image',
+// kung hindi ay mate-treat itong id = "upload-image".
 router.delete('/upload-image', removeUploadedImage);
 router.post('/images/cleanup', cleanupOrphanImages);
 router.delete('/:id', removeProduct);
@@ -92,7 +97,9 @@ router.delete('/bundles/:id', removeBundle);
 router.post('/events', addEvent);
 router.put('/events/:id', editEvent);
 router.delete('/events/:id', removeEvent);
+router.get('/homepage-ads', getHomepageAds);
 router.get('/event-ads', getEventAds);
+router.post('/homepage-ads/regenerate', regenerateHomepageAds);
 router.post('/event-ads/regenerate', regenerateEventAds);
 
 export default router;

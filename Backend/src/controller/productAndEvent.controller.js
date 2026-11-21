@@ -11,6 +11,7 @@ import {
   createEvent,
   updateEvent,
   deleteEvent,
+  generateHomepageAds,
   generateEventAds,
   getLiveEventAds,
   getAllBundles,
@@ -20,6 +21,7 @@ import {
   deleteBundle
 } from '../services/productAndEvent.service.js';
 
+import { AiCacheModel } from '../model/AiCache.model.js';
 import { invalidateLiveEventAdsMemo } from '../services/productAndEvent.service.js';
 import { emitRealtimeChange } from '../services/realtime.service.js';
 
@@ -498,6 +500,20 @@ export const removeEvent = async (req, res) => {
 // ADS GENERATORS
 // ============================================================
 
+export const getHomepageAds = async (req, res) => {
+  try {
+    const cachedData = await AiCacheModel.getByKey('homepage_ad_recommendations');
+    
+    if (!cachedData) {
+      return res.status(404).json({ success: false, message: 'Ads not yet generated' });
+    }
+
+    res.status(200).json({ success: true, data: cachedData.payload });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const getEventAds = async (req, res) => {
   try {
     // Rule-based na: kinukuwenta mula sa live events + product event tags
@@ -509,6 +525,16 @@ export const getEventAds = async (req, res) => {
       data: payload || { active: false, events: [] }
     });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const regenerateHomepageAds = async (req, res) => {
+  try {
+    const result = await generateHomepageAds();
+    res.status(200).json({ success: true, message: 'Homepage ads (best sellers) regenerated.', data: result });
+  } catch (error) {
+    console.error('Regenerate Homepage Ads Error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
