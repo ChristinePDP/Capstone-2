@@ -537,6 +537,9 @@ const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
   const products = await ProductModel.findByIds(safeIds);
   const formulaAvailability = await getFormulaAvailability(safeIds, products);
   const bundleOptions = bundle.bundle_options || {};
+  // Quantity ng bawat product sa bundle — naka-save sa bundle_options.__quantities
+  // ({ [productId]: qty }). Default 1 para sa mga lumang bundle na walang quantity.
+  const bundleQuantities = bundleOptions.__quantities || {};
 
   const originalTotal = products.reduce((sum, p) => {
     // bundle_options keys may have been saved as either the string or
@@ -552,7 +555,9 @@ const enrichBundleWithPricing = async (bundle, occasionsByTag = {}) => {
       }
     }
 
-    return sum + price;
+    const qty = Math.max(1, Math.floor(Number(bundleQuantities[p.id] ?? bundleQuantities[String(p.id)])) || 1);
+
+    return sum + price * qty;
   }, 0);
 
   const bundlePrice = Number(bundle.discounted_price || 0);
@@ -969,66 +974,6 @@ export const deleteEvent = async (id) => {
     return await OccasionModel.remove(id);
   } catch (error) {
     throw new Error(`Service Error (deleteEvent): ${error.message}`);
-  }
-};
-
-// ============================================================
-// HOMEPAGE AI ADVERTISEMENT GENERATOR
-// ============================================================
-
-const BEST_SELLERS_THEME = {
-  title: 'Best Selling Treats.',
-  subtitle: 'Our most-loved cakes and pastries, picked by our customers.',
-  badge: 'Customer Favorites',
-  bgGradient: 'bg-[#FCFAF9]',
-  textColor: 'text-[#8A7264]',
-  badgeBg: 'bg-[#3B1F0A]'
-};
-
-export const generateHomepageAds = async () => {
-  try {
-    const { data: productsData, error: prodError } = await supabase
-      .from('products')
-      .select(`
-        id, 
-        name, 
-        category, 
-        price, 
-        image_url,
-        pricing_mode,
-        price_matrix,
-        event_tags,
-        order_items ( quantity )
-      `)
-      .eq('is_active', true);
-
-    if (prodError) throw prodError;
-
-    const productsWithSales = productsData.map(p => {
-      const totalSold = p.order_items.reduce((sum, item) => sum + (item.quantity || 0), 0);
-      const { order_items, ...cleanProduct } = p;
-      return { ...cleanProduct, total_sold: totalSold };
-    });
-
-    const topProducts = productsWithSales
-      .sort((a, b) => b.total_sold - a.total_sold)
-      .slice(0, 5);
-
-    const homepageAds = {
-      theme: BEST_SELLERS_THEME,
-      products: topProducts
-    };
-
-    const CACHE_KEY = 'homepage_ad_recommendations';
-    const TTL_MS = 24 * 60 * 60 * 1000; 
-
-    await AiCacheModel.upsert(CACHE_KEY, homepageAds, TTL_MS);
-    console.log(`[SERVICE] Homepage Ads (Best Sellers) successfully generated and cached.`);
-
-    return homepageAds;
-  } catch (error) {
-    console.error(`[SERVICE] Error generating homepage ads:`, error);
-    throw error;
   }
 };
 
