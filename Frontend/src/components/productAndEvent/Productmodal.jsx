@@ -400,6 +400,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
   const isEditing = !!product?.id;
   const isCelebration = form.category === CELEBRATION_CATEGORY;
   const isPartner = isCelebration && form.sourcingType === 'partner';
+  const isPickUpToday = !isPartner && form.orderType === 'Pick-up Today';
 
   const detailsCardRef = useRef(null);
 
@@ -570,7 +571,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
             price: derivedBasePrice, 
             inclusion: form.inclusion,
             image_url: finalImageUrl, 
-            daily_limit: Number(form.dailyLimit), 
+            daily_limit: isPickUpToday ? 0 : Number(form.dailyLimit), 
             allow_file_upload: form.allowFileUpload,
             order_slip_fields: cleanFields, 
             pricing_mode: 'fixed',
@@ -815,7 +816,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
           </button>
         </div>
 
-        <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
+        {!isPickUpToday && <div className="border border-[#EAE4E0] bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm w-full">
           <div className="flex items-center gap-3 mb-2">
             <input
               type="checkbox"
@@ -862,7 +863,7 @@ export default function ProductModal({ isOpen = true, onClose, product, onSaveSu
               )}
             </div>
           </div>
-        </div>
+        </div>}
 
       </div>
     </Modal>
