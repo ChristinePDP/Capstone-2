@@ -188,6 +188,7 @@ export function AppProvider({ children }) {
   const [products,       setProducts]       = useState([]);
   const [orders,         setOrders]         = useState([]);
   const [pendingMaterialFulfillment, setPendingMaterialFulfillment] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [previousAdminRoute, setPreviousAdminRoute] = useState(isAdminRoute);
   if (previousAdminRoute !== isAdminRoute) {
     setPreviousAdminRoute(isAdminRoute);
@@ -208,7 +209,6 @@ export function AppProvider({ children }) {
     dashboardRowsRef.current = { ingredients, materials };
   }, [ingredients, materials]);
 
-  const [loading, setLoading] = useState(false);
   const [error] = useState(null);
   const [loadErrors, setLoadErrors] = useState({});
 

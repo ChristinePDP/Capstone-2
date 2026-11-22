@@ -17,8 +17,7 @@ import { Layout } from './components/Sidebar.jsx';
 import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
 
 function ProtectedAdminRoute({ children }) {
-  const { isAuthed, authReady, authError, retryAuth } = useApp();
-  const navigate = useNavigate();
+  const { isAuthed, authReady, authError, retryAuth, logout } = useApp();
 
   if (!authReady) {
     return null;
@@ -43,9 +42,11 @@ function ProtectedAdminRoute({ children }) {
     try {
       await authService.logout(); // Hindi na kailangang ipasa ang getToken()
     } finally {
+      logout(); // i-sync din ang in-memory auth state at cached admin data
       localStorage.removeItem('isLoggedIn'); // matiks palaging ma-clear kahit mag-fail ang API call
       localStorage.removeItem('admin');
-      navigate('/login', { replace: true });
+      // Full navigation avoids a protected-route redirect racing this logout.
+      window.location.replace('/login');
     }
   };
 
