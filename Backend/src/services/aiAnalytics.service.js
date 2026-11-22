@@ -639,7 +639,7 @@ const isUsableProductCache = (cached) =>
 // matching historical context. It does not run if either forecast is unavailable.
 const AR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
-const AR_CACHE_KEY = "actionable_recommendations_v9";
+const AR_CACHE_KEY = "actionable_recommendations_v10";
 const AR_MAX_PER_CATEGORY = 2;
 // Product Bundling: fast/slow movers come from ACTUAL sales of the past 30 days (historical, not the forecast).
 const BUNDLE_WINDOW_DAYS = 30;
