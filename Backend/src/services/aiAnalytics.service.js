@@ -4,6 +4,8 @@ import { InventoryLogModel as InventoryLogsModel } from "../model/inventoryLog.m
 import { WasteLogsModel } from "../model/wasteLogs.model.js";
 import { AiCacheModel } from "../model/AiCache.model.js";
 import { RecipeModel } from "../model/recipe.model.js";
+import { IngredientModel } from "../model/ingredient.model.js";
+import { MaterialModel } from "../model/material.model.js";
 
 import { callGeminiJSON } from "../utils/analytics/geminiForecast.util.js";
 import { getLookbackDateRange } from "../utils/analytics/ForecastTimeframe.utils.js";
@@ -639,7 +641,7 @@ const isUsableProductCache = (cached) =>
 // matching historical context. It does not run if either forecast is unavailable.
 const AR_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const AR_VALID_TYPES = ["success", "warning", "danger", "info", "neutral"];
-const AR_CACHE_KEY = "actionable_recommendations_v10";
+const AR_CACHE_KEY = "actionable_recommendations_v11";
 const AR_MAX_PER_CATEGORY = 2;
 // Product Bundling: fast/slow movers come from ACTUAL sales of the past 30 days (historical, not the forecast).
 const BUNDLE_WINDOW_DAYS = 30;
@@ -852,11 +854,21 @@ async function getExpiryAdvisoryContext(days, ingredientToProducts) {
   const { startDate: activityStart, endDate: activityEnd } = getLookbackDateRange(days);
   const { startDate: wasteStart, endDate: wasteEnd } = getLookbackDateRange(WASTE_WINDOW_DAYS);
 
-  const [nearExpiringRaw, inventoryLogs, recentWaste] = await Promise.all([
+  const [nearExpiringRaw, inventoryLogs, recentWaste, ingredientResult, materialResult] = await Promise.all([
     InventoryLogsModel.getNearExpiring(days),
     InventoryLogsModel.getByDateRange(activityStart, activityEnd),
     WasteLogsModel.getRecent(wasteStart, wasteEnd),
+    IngredientModel.findAll(),
+    MaterialModel.findAll(),
   ]);
+  if (ingredientResult.error) throw ingredientResult.error;
+  if (materialResult.error) throw materialResult.error;
+  const currentStockItems = [
+    ...(ingredientResult.data || []).map((item) => ({ ...item, itemType: "ingredient" })),
+    ...(materialResult.data || [])
+      .filter((item) => item.material_type === "product")
+      .map((item) => ({ ...item, itemType: "material" })),
+  ];
 
   const inventoryActivitySummary = (inventoryLogs || []).reduce((acc, log) => {
     if (!acc[log.item_name]) acc[log.item_name] = { in_restock: 0, out_used: 0, waste: 0 };
@@ -885,7 +897,7 @@ async function getExpiryAdvisoryContext(days, ingredientToProducts) {
     };
   });
 
-  return { nearExpiringItems, inventoryActivitySummary, recentWaste, wasteSummary: summarizeWasteLogs(recentWaste) };
+  return { nearExpiringItems, inventoryActivitySummary, currentStockItems, recentWaste, wasteSummary: summarizeWasteLogs(recentWaste) };
 }
 
 async function getBundleOpportunityContext(days) {
@@ -924,31 +936,32 @@ async function getBundleOpportunityContext(days) {
 // trending toward a stockout (heavy usage, little restock => negative net
 // movement) and items sitting overstocked (heavy restock, little usage,
 // not yet wasted).
-function getStockLevelContext(inventoryActivitySummary) {
-  const entries = Object.entries(inventoryActivitySummary || {});
-
-  const stockSignals = entries.map(([itemName, activity]) => {
-    const netMovement = activity.in_restock - activity.out_used - activity.waste;
-    return {
-      itemName,
-      inRestock: activity.in_restock,
-      outUsed: activity.out_used,
-      waste: activity.waste,
-      netMovement,
-    };
-  });
-
-  const understockRisk = stockSignals
-    .filter((s) => s.outUsed > 0 && s.netMovement < 0)
-    .sort((a, b) => a.netMovement - b.netMovement)
+function getStockLevelContext(inventoryActivitySummary, currentStockItems = []) {
+  const activityByName = new Map(
+    Object.entries(inventoryActivitySummary || {}).map(([name, activity]) => [name.trim().toLowerCase(), activity])
+  );
+  const understockRisk = (currentStockItems || [])
+    .map((item) => {
+      const activity = activityByName.get(String(item.name || "").trim().toLowerCase()) || {};
+      return {
+        itemName: item.name,
+        itemType: item.itemType,
+        currentStock: Number(item.stock_quantity ?? 0),
+        minimumStock: Number(item.minimum_stock ?? 0),
+        unit: item.unit || "",
+        inRestock: Number(activity.in_restock || 0),
+        outUsed: Number(activity.out_used || 0),
+      };
+    })
+    .filter((item) => item.currentStock <= 0 || (item.minimumStock > 0 && item.currentStock <= item.minimumStock))
+    .sort((a, b) => {
+      const aRatio = a.minimumStock > 0 ? a.currentStock / a.minimumStock : 0;
+      const bRatio = b.minimumStock > 0 ? b.currentStock / b.minimumStock : 0;
+      return aRatio - bRatio;
+    })
     .slice(0, 5);
 
-  const overstockRisk = stockSignals
-    .filter((s) => s.inRestock > 0 && s.netMovement > 0 && s.outUsed < s.inRestock * 0.3)
-    .sort((a, b) => b.netMovement - a.netMovement)
-    .slice(0, 5);
-
-  return { understockRisk, overstockRisk };
+  return { understockRisk, overstockRisk: [] };
 }
 
 // Pulls the last cached recommendation titles (if any) so the prompt can
@@ -1128,7 +1141,7 @@ async function getRecommendationContext(historicalWindowDays, ingredientToProduc
   // Stock levels are always computed now: the "Stock & Waste Control" item is
   // a separate topic from "Expiry Management", so it needs its own data even
   // when something is near-expiring.
-  const stockContext = getStockLevelContext(expiryContext.inventoryActivitySummary);
+  const stockContext = getStockLevelContext(expiryContext.inventoryActivitySummary, expiryContext.currentStockItems);
 
   return {
     historicalWindowDays,
@@ -1221,7 +1234,7 @@ Follow the per-category counts below; never pad with unsupported recommendations
 
    b. Stock & Waste Control — "kind": "stock" — the SECOND item. It is about stock levels or waste ONLY. Do NOT mention expiry dates or near-expiring items here (job a covers them), and do not pick an item just because it is near expiry. Choose the source in this order:
       1) If expiryContext.wasteSummary.totalLogs is more than 0: write about waste, following the WASTE LOGS rules below.
-      2) Otherwise use stockContext: call out a specific item trending toward a stockout (stockContext.understockRisk) or sitting overstocked (stockContext.overstockRisk), using its actual inRestock/outUsed numbers over the last ${context.historicalWindowDays} days, and suggest a concrete adjustment (reorder sooner, reduce the next restock, or use it in a recipe). Ignore the "waste" numbers inside stockContext — waste is only reported from wasteSummary.
+      2) Otherwise use stockContext.understockRisk only when currentStock is at or below minimumStock. State both exact values and the unit before recommending a reorder. Inventory movement totals (inRestock/outUsed) describe past activity only; they do NOT prove current stock is low or overstocked. Never claim an item is low, nearly out, or needs an immediate order based only on movement totals. If no item is below its minimum, leave this stock item out. Waste is reported only from wasteSummary.
       3) If neither has anything meaningful, leave this item out and return only the Expiry Management item.
 
    c. If expiryContext.nearExpiringItems is EMPTY: there is NO "expiry" item — leave it out completely. Return ONLY ONE item, "kind": "stock" (Stock & Waste Control), following job b. Never return two "stock" items and never return an item with a missing or different kind.
@@ -1361,6 +1374,24 @@ function validateActionablePayload(payload, context) {
       }
       if (rec.kind === "stock" && AR_EXPIRY_TOPIC_REGEX.test(rtext)) {
         issues.push(`"${rec.title}" is a Stock & Waste Control item but talks about expiry/near-expiring items. Keep it ONLY about stock levels or waste logs; expiry belongs in the separate Expiry Management item.`);
+      }
+      if (rec.kind === "stock" && /\b(low stock|(?:very )?low|running (?:very )?low|nearly out|run out|running out|reorder now|order now|order.{0,20}(?:right away|immediately)|(?:right away|immediately).{0,20}order)\b/i.test(rtext)) {
+        const stockSignals = context?.stockContext?.understockRisk || [];
+        const namedItem = (context?.expiryContext?.currentStockItems || []).find((item) =>
+          item.name && rtext.toLowerCase().includes(String(item.name).trim().toLowerCase())
+        );
+        const signal = namedItem && stockSignals.find((item) =>
+          String(item.itemName).trim().toLowerCase() === String(namedItem.name).trim().toLowerCase()
+        );
+        if (!signal) {
+          issues.push(`"${rec.title}" claims an item is low or needs an immediate reorder without current stock being at or below its minimum. Movement totals alone do not support this claim.`);
+        } else {
+          const exactStock = String(signal.currentStock);
+          const exactMinimum = String(signal.minimumStock);
+          if (!rtext.includes(exactStock) || !rtext.includes(exactMinimum)) {
+            issues.push(`"${rec.title}" claims low stock for "${signal.itemName}" but must state its exact current stock (${exactStock} ${signal.unit}) and minimum (${exactMinimum} ${signal.unit}).`);
+          }
+        }
       }
     }
     const audienceHit = findBannedAudienceWord(`${rec.title} ${rec.desc}`);
