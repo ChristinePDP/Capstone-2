@@ -162,9 +162,10 @@ export default function PosPage() {
     setCart(prev => prev.flatMap(item => {
       const product = products.find(candidate => candidate.id === item.id);
       if (!product) return [item];
-      if (orderType === 'Pre-Order' && product.pre_order_unlimited) return [item];
+      const lineType = item.fulfillmentType || orderType;
+      if (lineType === 'Pre-Order' && product.pre_order_unlimited) return [item];
 
-      const limit = orderType === 'Pre-Order'
+      const limit = lineType === 'Pre-Order'
         ? product.pre_order_available_stock ?? product.available_stock
         : product.buy_now_available_stock ?? product.available_stock;
 
@@ -259,12 +260,15 @@ export default function PosPage() {
       return;
     }
 
-    const finalItem = item.qty ? item : {
+    const finalItem = {
+      ...(item.qty ? item : {
       ...item,
       qty: 1,
       order_slip_details: null,
       selected_price_options: null,
       inspiration_image: null
+      }),
+      fulfillmentType: orderType,
     };
 
     setCart(prev => {
@@ -276,6 +280,7 @@ export default function PosPage() {
       
       const idx = prev.findIndex(i => 
         i.id === finalItem.id && 
+        (i.fulfillmentType || orderType) === finalItem.fulfillmentType &&
         slipSignature(i.order_slip_details) === currentSlipStr &&
         JSON.stringify(i.selected_price_options) === currentOptionsStr
       );

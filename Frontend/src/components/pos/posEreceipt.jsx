@@ -38,9 +38,13 @@ function logQrRenderTime(id, phase, actualDuration) {
 export default function PosEReceipt({
   orderId,
   orderNumber,
+  transactionId,
   cart = [],
   totalAmount = 0,
   paymentType = 'full',
+  amountPaid,
+  balance,
+  transactionBreakdown = [],
   pickupDate,
   pickupTime,
   confirmToken,
@@ -63,8 +67,8 @@ export default function PosEReceipt({
   }, []);
 
   const halfAmount = Math.ceil(totalAmount / 2);
-  const amountPaid = paymentType === 'half' ? halfAmount : totalAmount;
-  const balance = paymentType === 'half' ? totalAmount - halfAmount : 0;
+  const receiptAmountPaid = amountPaid ?? (paymentType === 'half' ? halfAmount : totalAmount);
+  const receiptBalance = balance ?? (paymentType === 'half' ? totalAmount - halfAmount : 0);
 
   const formattedDate = now.toLocaleDateString('en-US', {
     month: '2-digit',
@@ -143,6 +147,11 @@ export default function PosEReceipt({
               <div>
                 <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Order No.</p>
                 <p className="text-[11px] sm:text-xs font-semibold text-[#3B1F0A]">{orderNumber || orderId}</p>
+                {transactionId && (
+                  <p className="text-[8px] text-[#8A7264] mt-1 break-all">
+                    Transaction: {transactionId}
+                  </p>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Date</p>
@@ -172,19 +181,36 @@ export default function PosEReceipt({
               ))}
             </div>
 
+            {transactionBreakdown.length > 0 && (
+              <div className="mt-2 border-t border-dashed border-[#DED4CC] pt-2 flex flex-col gap-1.5 shrink-0">
+                {transactionBreakdown.map((group, idx) => (
+                  <div key={`${group.orderType}-${idx}`} className="rounded-lg bg-white border border-[#EEE7E2] px-2.5 py-2 text-[10px] text-[#5A453C]">
+                    <div className="flex justify-between font-bold text-[#3B1F0A]">
+                      <span>{group.orderType}</span>
+                      <span>{formatPeso(group.grandTotal)}</span>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span>{group.paymentType === 'deposit' ? '50% Deposit' : 'Full Payment'} · {group.status}</span>
+                      <span>Paid {formatPeso(group.amountPaid)} · Balance {formatPeso(group.balance)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="bg-[#F5EFEB] rounded-xl p-3 sm:p-4 mt-3 shrink-0 flex flex-col gap-1.5">
               <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-[#8A7264]">
                 <span className="uppercase tracking-[0.1em]">Grand Total</span>
                 <span>{formatPeso(totalAmount)}</span>
               </div>
               <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-[#3B1F0A] font-semibold">
-                <span className="uppercase tracking-[0.1em]">Paid ({paymentType === 'half' ? '50% Deposit' : 'Full'})</span>
-                <span className="text-[#15803D]">{formatPeso(amountPaid)}</span>
+                <span className="uppercase tracking-[0.1em]">Paid ({paymentType === 'mixed' ? 'Mixed Payment' : paymentType === 'half' ? '50% Deposit' : 'Full'})</span>
+                <span className="text-[#15803D]">{formatPeso(receiptAmountPaid)}</span>
               </div>
               <div className="w-full h-px bg-[#DED4CC] my-0.5"></div>
               <div className="flex justify-between items-center">
                 <span className="text-[11px] uppercase tracking-[0.15em] text-[#8A7264] font-bold">Balance</span>
-                <span className="font-serif text-base sm:text-lg text-[#3B1F0A]">{formatPeso(balance)}</span>
+                <span className="font-serif text-base sm:text-lg text-[#3B1F0A]">{formatPeso(receiptBalance)}</span>
               </div>
             </div>
           </div>

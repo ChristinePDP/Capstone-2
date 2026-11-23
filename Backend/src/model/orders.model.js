@@ -82,6 +82,16 @@ const OrdersModel = {
     return data;
   },
 
+  async findByTransactionGroupId(groupId) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*, customers(name, phone), order_items(*)')
+      .eq('transaction_group_id', groupId)
+      .order('order_type');
+    if (error) throw error;
+    return data || [];
+  },
+
   async create(payload) {
     // FIX: Ini-extract na natin ang { data, error } para id lang ang ibalik
     const { data, error } = await getSupabase()

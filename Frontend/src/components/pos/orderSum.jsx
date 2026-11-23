@@ -195,13 +195,19 @@ export default function OrderSummaryModal({
   subtotal,
   cartTotal,
   amountDue,
+  buyNowTotal = 0,
+  preOrderTotal = 0,
+  hasPreOrder = false,
+  hasBuyNow = false,
   isProcessing,
   uploadProgress,
   onPlaceOrder,
   onValidate,
   errors = {},
 }) {
-  const isBuyNow = orderType === 'Buy Now';
+  const isBuyNow = !hasPreOrder && orderType === 'Buy Now';
+  const isMixed = hasBuyNow && hasPreOrder;
+  const checkoutTypeLabel = isMixed ? 'Mixed Checkout' : orderType;
   const [expandedItemIndexes, setExpandedItemIndexes] = useState(() => new Set());
   const [cashTendered, setCashTendered] = useState('');
   const cashTenderedAmount = Number(cashTendered) || 0;
@@ -456,14 +462,14 @@ export default function OrderSummaryModal({
     return () => clearInterval(id);
   }, [show]);
 
-  const isSlotDisabled = (slot) => isSlotPast(slot, orderType);
+  const isSlotDisabled = (slot) => isSlotPast(slot, isBuyNow ? 'Buy Now' : 'Pre-Order');
   const noSlotsLeftToday = isBuyNow && !hasOpenSlotsToday(orderType);
 
   if (!show) return null;
 
   const isCashShort = cashTendered !== '' && cashTenderedCents < amountDueCents;
   const isDeposit = paymentMode === '50% Deposit';
-  const hasBreakdown = discountAmount > 0 || chargeAmount > 0 || isDeposit;
+  const hasBreakdown = discountAmount > 0 || chargeAmount > 0 || isDeposit || isMixed;
 
   return createPortal(
     <div className="fixed inset-0 z-[1900] flex items-center justify-center bg-black/50 px-4 py-6 animate-in fade-in duration-200">
@@ -522,7 +528,7 @@ export default function OrderSummaryModal({
                     </h4>
                     <div className="ml-auto flex items-center gap-2">
                       {/* Mobile: Order Type bilang maliit na badge sa tabi ng heading (walang sariling row) */}
-                      <span className="md:hidden shrink-0 text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{orderType}</span>
+                      <span className="md:hidden shrink-0 text-[10px] font-bold text-[#5A453C] bg-[#F5EFEB] border border-[#EAE4E0] px-2 py-0.5 rounded-full">{checkoutTypeLabel}</span>
                       {/* Hide button — Buy Now lang (optional ang details), at hindi
                           ipinapakita habang may error na kailangang makita. */}
                       {isBuyNow && !hasCustomerErrors && (
@@ -544,7 +550,7 @@ export default function OrderSummaryModal({
                   <div className="flex flex-col gap-1.5">
                     <div className="hidden md:flex flex-col gap-0.5">
                       <span className="text-[10px] text-[#B7A99F] font-semibold uppercase tracking-wide">Order Type</span>
-                      <span className="text-xs text-[#3B1F0A] font-semibold">{orderType}</span>
+                      <span className="text-xs text-[#3B1F0A] font-semibold">{checkoutTypeLabel}</span>
                     </div>
 
                     <div className="flex flex-col">
@@ -601,7 +607,12 @@ export default function OrderSummaryModal({
 
                     <div className="grid grid-cols-2 gap-x-2.5 gap-y-0 items-start">
                       <div className="relative min-w-0" ref={calendarWrapRef}>
-                        {orderType === 'Buy Now' ? (
+                        {isMixed || !isBuyNow ? (
+                          <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-[#8A7264]">
+                            Pre-Order Pick-up Date
+                          </p>
+                        ) : null}
+                        {isBuyNow ? (
                           <div className="w-full border border-[#EAE4E0] px-3.5 py-2 text-xs rounded-xl bg-[#F5EFEB] opacity-70 cursor-not-allowed text-[#3B1F0A] flex items-center justify-between">
                             <div className="flex items-center gap-1.5 truncate">
                               <Lock size={12} className="shrink-0" />
@@ -623,7 +634,7 @@ export default function OrderSummaryModal({
                           </button>
                         )}
                         <FieldError message={errors.pickupDate} />
-                        {orderType !== 'Buy Now' && showCalendar && calendarPos && createPortal(
+                        {!isBuyNow && showCalendar && calendarPos && createPortal(
                           <div ref={calendarPortalRef}>
                             <MonthCalendar
                               selectedDate={form.pickupDate}
@@ -643,6 +654,11 @@ export default function OrderSummaryModal({
                       </div>
 
                       <div className="relative min-w-0" ref={timeDropdownWrapRef}>
+                        {isMixed || !isBuyNow ? (
+                          <p className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-[#8A7264]">
+                            Pre-Order Pick-up Time
+                          </p>
+                        ) : null}
                         <button
                           type="button"
                           ref={timeDropdownTriggerRef}
@@ -869,6 +885,20 @@ export default function OrderSummaryModal({
             <div className={`rounded-xl border border-[#EAE4E0] bg-white px-4 py-2.5 flex flex-col ${hasBreakdown ? 'justify-between gap-2' : 'justify-center'}`}>
               {hasBreakdown && (
                 <div className="flex flex-col gap-1">
+                  {hasBuyNow && hasPreOrder && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#8A7264]">Buy Now (Full Payment)</span>
+                        <span className="text-xs text-[#8A7264] font-medium">{formatPeso(buyNowTotal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#8A7264]">
+                          Pre-Order ({paymentMode === '50% Deposit' ? '50% Deposit' : 'Full Payment'})
+                        </span>
+                        <span className="text-xs text-[#8A7264] font-medium">{formatPeso(preOrderTotal)}</span>
+                      </div>
+                    </>
+                  )}
                   {discountAmount > 0 && (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-[#8A7264]">Subtotal</span>

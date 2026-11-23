@@ -42,10 +42,11 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
 }
 
 function findStockIssue(cartItems = [], type) {
+  const scopedItems = cartItems.filter(i => (i.fulfillmentType || i.orderType || type) === type);
   const qtyById = {};
-  cartItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
+  scopedItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
   const seen = new Set();
-  for (const item of cartItems) {
+  for (const item of scopedItems) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     if (!isQuantityTracked(item, type)) continue;
@@ -108,11 +109,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const [discountPercentage, setDiscountPercentage] = useState(() => localStorage.getItem('pos_discountPercentage') || '');
   const [paymentMode, setPaymentMode] = useState(() => localStorage.getItem('pos_paymentMode') || 'Full Payment'); 
 
-  const hasPreOrder = cart.some(item => item.order_type === 'Pre-order');
-  const hasBuyNow = cart.some(item => item.order_type === 'Pick-up Today');
+  const hasPreOrder = cart.some(item => (item.fulfillmentType || orderType) === 'Pre-Order');
+  const hasBuyNow = cart.some(item => (item.fulfillmentType || orderType) === 'Buy Now');
+  const mixedFulfillment = hasPreOrder && hasBuyNow;
   
-  const isPreOrderOnly = hasPreOrder && !hasBuyNow;
-  const isBuyNowOnly = hasBuyNow && !hasPreOrder;
 
   const buyNowIssue = cart.length > 0 ? findStockIssue(cart, 'Buy Now') : null;
   const preOrderIssue = cart.length > 0 ? findStockIssue(cart, 'Pre-Order') : null;
@@ -134,11 +134,12 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const handleUpdateQty = (idx, delta) => {
     const item = cart[idx];
 
-    if (delta > 0 && isQuantityTracked(item, orderType)) {
+    const itemOrderType = item.fulfillmentType || orderType;
+    if (delta > 0 && isQuantityTracked(item, itemOrderType)) {
       const currentQtyInCart = cart
-        .filter(i => i.id === item.id)
+        .filter(i => i.id === item.id && (i.fulfillmentType || orderType) === itemOrderType)
         .reduce((sum, i) => sum + i.qty, 0);
-      const limit = getQuantityLimit(item, orderType);
+      const limit = getQuantityLimit(item, itemOrderType);
 
       if (currentQtyInCart + delta > limit) {
         showLimitToast(`Sorry, you've reached the available limit for "${item.name}".`);
@@ -153,32 +154,18 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     if (cart.length > prevCartLength.current || cart.length === 0) {
       if (cart.length === 0) {
         setOrderType('Buy Now');
-      } else if (hasPreOrder && hasBuyNow) {
-        setOrderType('Buy Now');
-      } else if (isPreOrderOnly) {
-        setOrderType('Pre-Order');
-      } else if (isBuyNowOnly) {
-        setOrderType('Buy Now');
       }
     }
     prevCartLength.current = cart.length;
-  }, [cart.length, hasPreOrder, hasBuyNow, isPreOrderOnly, isBuyNowOnly, setOrderType]);
+  }, [cart.length, setOrderType]);
 
   useEffect(() => {
-    if (isPreOrderOnly && orderType !== 'Pre-Order') {
-      setOrderType('Pre-Order');
-    } else if (isBuyNowOnly && orderType !== 'Buy Now') {
-      setOrderType('Buy Now');
-    }
-  }, [isPreOrderOnly, isBuyNowOnly, orderType, setOrderType]);
-
-  useEffect(() => {
-    if (orderType === 'Buy Now' && paymentMode !== 'Full Payment') {
+    if (!hasPreOrder && paymentMode !== 'Full Payment') {
       setPaymentMode('Full Payment');
     }
-  }, [orderType, paymentMode]);
+  }, [hasPreOrder, paymentMode]);
 
-  const hasStrictPreOrder = cart.some(item => item.order_type === 'Pre-order');
+  const hasStrictPreOrder = cart.some(item => (item.fulfillmentType || orderType) === 'Pre-Order' && item.order_type === 'Pre-order');
   const minPreOrderDate = addDaysToDateString(getLiveNow().dateStr, hasStrictPreOrder ? 3 : 1);
 
   const [form, setForm] = useState(() => {
@@ -202,16 +189,16 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   useEffect(() => { localStorage.setItem('pos_paymentMode', paymentMode); }, [paymentMode]);
 
   useEffect(() => {
-    if (orderType === 'Buy Now') {
+    if (!hasPreOrder) {
       const { dateStr } = getLiveNow();
       setForm(f => ({ ...f, pickupDate: dateStr, pickupTime: '' }));
-    } else {
-      setForm(f => ({ ...f, pickupDate: '', pickupTime: '' }));
+    } else if (!form.pickupDate || form.pickupDate < minPreOrderDate) {
+      setForm(f => ({ ...f, pickupDate: minPreOrderDate, pickupTime: '' }));
     }
-  }, [orderType]);
+  }, [hasPreOrder, minPreOrderDate]);
 
   useEffect(() => {
-    if (orderType !== 'Buy Now') return;
+    if (hasPreOrder) return;
     const sync = () => {
       const { dateStr } = getLiveNow();
       setForm(f => (f.pickupDate === dateStr ? f : { ...f, pickupDate: dateStr }));
@@ -219,7 +206,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     sync();
     const id = setInterval(sync, 30000);
     return () => clearInterval(id);
-  }, [orderType]);
+  }, [hasPreOrder]);
 
   const handleProceedToOrder = () => {
     if (cart.length === 0) return;
@@ -230,7 +217,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const errors = {};
 
 
-    if (orderType === 'Pre-Order') {
+    if (hasPreOrder) {
       const nameErr = getNameError(form.name, true);
       if (nameErr) errors.name = nameErr;
       if (!form.pickupDate) errors.pickupDate = 'Please select a date.';
@@ -240,14 +227,14 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       const nameErr = getNameError(form.name, false);
       if (nameErr) errors.name = nameErr;
     }
-    if (orderType === 'Pre-Order' || form.phone) {
+    if (hasPreOrder || form.phone) {
       if (!form.phone) errors.phone = 'Phone number is required.';
       else if (!PH_MOBILE_REGEX.test(form.phone)) errors.phone = 'Must start with 09 (11 digits).';
     }
     if (form.altPhone && !PH_MOBILE_REGEX.test(form.altPhone)) {
       errors.altPhone = 'Must start with 09 (11 digits).';
     }
-    if (orderType === 'Buy Now' && form.pickupTime) {
+    if (!hasPreOrder && form.pickupTime) {
       const chosen = TIME_SLOTS.find(s => s.value === form.pickupTime);
       if (isSlotPast(chosen, orderType)) {
         errors.pickupTime = 'That time slot has already passed. Please choose another.';
@@ -271,7 +258,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         Object.keys(next).every(k => next[k] === prev[k]) ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, orderType, additionalCharge, additionalChargeReason]);
+  }, [form, orderType, hasPreOrder, additionalCharge, additionalChargeReason]);
 
   const validateOrderForm = () => {
     const errors = computeFormErrors();
@@ -283,10 +270,11 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     if (submissionLockRef.current || isProcessing) return;
     submissionLockRef.current = true;
 
-    const stockIssue = findStockIssue(cart, orderType);
+    const stockIssue = findStockIssue(cart, 'Buy Now') || findStockIssue(cart, 'Pre-Order');
     if (stockIssue) {
       submissionLockRef.current = false;
-      showToast(stockIssueMessage(stockIssue, orderType), 'error');
+      const issueType = cart.some(item => (item.fulfillmentType || orderType) === 'Buy Now' && item.name === stockIssue.name) ? 'Buy Now' : 'Pre-Order';
+      showToast(stockIssueMessage(stockIssue, issueType), 'error');
       return;
     }
 
@@ -378,6 +366,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const formattedItems = updatedCart.map(item => {
       if (item.type === 'bundle') {
         return {
+          fulfillmentType: item.fulfillmentType || orderType,
           type: 'bundle',
           bundleId: item.bundleId,
           quantity: item.qty,
@@ -388,6 +377,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       }
       if (item.type === 'package') {
         return {
+          fulfillmentType: item.fulfillmentType || orderType,
           type: 'package',
           packageId: item.packageId,
           quantity: item.qty,
@@ -397,6 +387,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
         };
       }
       return {
+        fulfillmentType: item.fulfillmentType || orderType,
         productId: item.id,
         name: item.name,
         quantity: item.qty,
@@ -413,32 +404,62 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
     const percentageNumberVal = Number(discountPercentage) || 0;
     const discountAmountCalc = subtotalCalc * (percentageNumberVal / 100);
     const chargeAmountCalc = Number(additionalCharge) || 0;
-    const calculatedTotal = subtotalCalc - discountAmountCalc + chargeAmountCalc;
-    const grandTotalCalc = paymentMode === '50% Deposit' ? Math.round(calculatedTotal) : calculatedTotal;
-    const amountDueCalc = paymentMode === '50% Deposit' ? Math.ceil(grandTotalCalc / 2) : grandTotalCalc;
-
-    const discountPayload = percentageNumberVal > 0 ? {
-      name: discountName || 'Discount',
-      percentage: percentageNumberVal,
-      amount: discountAmountCalc
-    } : {};
-    const additionalChargeDetails = chargeAmountCalc > 0 ? {
-      amount: chargeAmountCalc,
-      reason: additionalChargeReason.trim()
-    } : {};
+    const buyNowSubtotal = cart.filter(i => (i.fulfillmentType || orderType) === 'Buy Now').reduce((sum, i) => sum + i.price * i.qty, 0);
+    const preOrderSubtotal = cart.filter(i => (i.fulfillmentType || orderType) === 'Pre-Order').reduce((sum, i) => sum + i.price * i.qty, 0);
+    const preOrderShare = subtotalCalc > 0 ? preOrderSubtotal / subtotalCalc : (hasPreOrder ? 1 : 0);
+    const preOrderDiscount = discountAmountCalc * preOrderShare;
+    const buyNowDiscount = discountAmountCalc - preOrderDiscount;
+    const preOrderCharge = chargeAmountCalc * preOrderShare;
+    const buyNowCharge = chargeAmountCalc - preOrderCharge;
+    const buyNowTotal = Math.max(0, buyNowSubtotal - buyNowDiscount + buyNowCharge);
+    const preOrderTotal = Math.max(0, preOrderSubtotal - preOrderDiscount + preOrderCharge);
+    const preOrderDue = paymentMode === '50% Deposit' && hasPreOrder ? Math.ceil(preOrderTotal / 2) : preOrderTotal;
+    const grandTotalCalc = buyNowTotal + preOrderTotal;
+    const amountDueCalc = buyNowTotal + preOrderDue;
+    const calculatedTotal = grandTotalCalc;
+    const discountPayload = percentageNumberVal > 0
+      ? {
+          name: discountName || 'Discount',
+          percentage: percentageNumberVal,
+          amount: discountAmountCalc,
+        }
+      : {};
+    const additionalChargeDetails = chargeAmountCalc > 0
+      ? { amount: chargeAmountCalc, reason: additionalChargeReason.trim() }
+      : {};
+    const buildGroupPayment = (type, groupSubtotal, groupDiscount, groupCharge, groupTotal) => {
+      const deposit = type === 'Pre-Order' && paymentMode === '50% Deposit';
+      const dueNow = deposit ? Math.ceil(groupTotal / 2) : groupTotal;
+      return {
+        subtotal: groupSubtotal,
+        grandTotal: groupTotal,
+        type: deposit ? '50% Deposit' : 'Full Payment',
+        amountDueNow: dueNow,
+        balance: groupTotal - dueNow,
+        discount: percentageNumberVal > 0 ? { name: discountName || 'Discount', percentage: percentageNumberVal, amount: groupDiscount } : {},
+        additionalCharge: groupCharge,
+        additionalChargeDetails: groupCharge > 0 ? { amount: groupCharge, reason: additionalChargeReason.trim() } : {},
+      };
+    };
+    const groupPayments = {
+      'Buy Now': buildGroupPayment('Buy Now', buyNowSubtotal, buyNowDiscount, buyNowCharge, buyNowTotal),
+      'Pre-Order': buildGroupPayment('Pre-Order', preOrderSubtotal, preOrderDiscount, preOrderCharge, preOrderTotal),
+    };
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
-    const livePickupDate = orderType === 'Buy Now' ? getLiveNow().dateStr : form.pickupDate;
-    const isWalkIn = orderType === 'Buy Now' && !form.pickupTime;
+    const livePickupDate = hasPreOrder ? form.pickupDate : getLiveNow().dateStr;
+    const isWalkIn = !hasPreOrder && !form.pickupTime;
 
     const payload = {
       checkoutReservationId: checkoutReservationIdRef.current || (checkoutReservationIdRef.current = crypto.randomUUID()),
-      orderType: orderType,
+      transactionGroupId: checkoutReservationIdRef.current || crypto.randomUUID(),
+      orderType: mixedFulfillment ? 'Mixed' : hasPreOrder ? 'Pre-Order' : 'Buy Now',
+      groupPayments,
       customer: { name: form.name, phone: form.phone, altPhone: form.altPhone },
       payment: {
         subtotal: subtotalCalc,
         grandTotal: grandTotalCalc,
-        type: paymentMode,
+        type: mixedFulfillment ? 'Mixed' : paymentMode,
         amountDueNow: amountDueCalc,
         balance: grandTotalCalc - amountDueCalc,
         discount: discountPayload,
@@ -476,15 +497,33 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
       setShowSummaryModal(false);
 
       const isScheduledBuyNow = orderType === 'Buy Now' && Boolean(form.name) && Boolean(form.phone) && Boolean(form.pickupTime);
-      const shouldShowEreceipt = orderType === 'Pre-Order' || isScheduledBuyNow;
+      const shouldShowEreceipt = mixedFulfillment || orderType === 'Pre-Order' || isScheduledBuyNow;
 
       if (shouldShowEreceipt) {
+        const mixedOrders = Array.isArray(result.data.orders) ? result.data.orders : [];
+        const transactionBreakdown = mixedFulfillment
+          ? mixedOrders.map(order => ({
+              orderType: order.order_type,
+              orderNumber: order.order_number,
+              grandTotal: Number(order.grand_total || 0),
+              amountPaid: Number(order.amount_paid || 0),
+              balance: Number(order.balance || 0),
+              paymentType: order.payment_type,
+              status: order.status,
+            }))
+          : [];
         setEreceiptData({
           orderId: result.data.id,
           orderNumber: result.data.order_number,
-          cart: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
-          totalAmount: result.data.grand_total ?? grandTotalCalc,
-          paymentType: result.data.payment_type === 'deposit' ? 'half' : 'full',
+          transactionId: result.data.transactionId || result.data.transactionGroupId || result.data.transaction_group_id,
+          cart: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price, orderType: i.fulfillmentType || orderType })),
+          totalAmount: result.data.grandTotal ?? result.data.grand_total ?? grandTotalCalc,
+          amountPaid: result.data.amountPaid ?? result.data.amount_paid,
+          balance: result.data.balance,
+          transactionBreakdown,
+          paymentType: mixedFulfillment
+            ? 'mixed'
+            : result.data.payment_type === 'deposit' ? 'half' : 'full',
           pickupDate: livePickupDate ? formatDateLong(livePickupDate) : '',
           pickupTime: getSlotLabel(form.pickupTime),
           confirmToken: result.data.receiptToken,
@@ -558,9 +597,13 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
   const percentageNumber = Number(discountPercentage) || 0;
   const discountAmount = subtotal * (percentageNumber / 100);
   const chargeAmount = Number(additionalCharge) || 0;
-  const calculatedCartTotal = subtotal - discountAmount + chargeAmount;
-  const cartTotal = paymentMode === '50% Deposit' ? Math.round(calculatedCartTotal) : calculatedCartTotal;
-  const amountDue = paymentMode === '50% Deposit' ? Math.ceil(cartTotal / 2) : cartTotal;
+  const buyNowSubtotal = cart.filter(i => (i.fulfillmentType || orderType) === 'Buy Now').reduce((sum, i) => sum + i.price * i.qty, 0);
+  const preOrderSubtotal = cart.filter(i => (i.fulfillmentType || orderType) === 'Pre-Order').reduce((sum, i) => sum + i.price * i.qty, 0);
+  const preOrderShare = subtotal > 0 ? preOrderSubtotal / subtotal : (hasPreOrder ? 1 : 0);
+  const preOrderTotal = Math.max(0, preOrderSubtotal - discountAmount * preOrderShare + chargeAmount * preOrderShare);
+  const buyNowTotal = Math.max(0, buyNowSubtotal - discountAmount * (1 - preOrderShare) + chargeAmount * (1 - preOrderShare));
+  const cartTotal = buyNowTotal + preOrderTotal;
+  const amountDue = buyNowTotal + (hasPreOrder && paymentMode === '50% Deposit' ? Math.ceil(preOrderTotal / 2) : preOrderTotal);
 
   return (
     <>
@@ -603,33 +646,21 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
             <button
               onClick={() => {
-                if (isPreOrderOnly) return; 
-                if (orderType !== 'Buy Now' && buyNowIssue) {
-                  showToast(`Can't switch to Buy Now. ${stockIssueMessage(buyNowIssue, 'Buy Now')}`, 'error');
-                  return;
-                }
                 setOrderType('Buy Now');
               }}
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Buy Now' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-              } ${(isPreOrderOnly || (orderType !== 'Buy Now' && buyNowIssue)) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={isPreOrderOnly}
+              }`}
             >
               Buy Now
             </button>
             <button
               onClick={() => {
-                if (isBuyNowOnly) return; 
-                if (orderType !== 'Pre-Order' && preOrderIssue) {
-                  showToast(`Can't switch to Pre-Order. ${stockIssueMessage(preOrderIssue, 'Pre-Order')}`, 'error');
-                  return;
-                }
                 setOrderType('Pre-Order');
               }}
               className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
                 orderType === 'Pre-Order' ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
-              } ${(isBuyNowOnly || (orderType !== 'Pre-Order' && preOrderIssue)) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={isBuyNowOnly}
+              }`}
             >
               Pre-Order
             </button>
@@ -743,6 +774,13 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
                         <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
                         {expandedCartIndexes.has(idx) ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
                       </button>
+                      <span className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                        (item.fulfillmentType || orderType) === 'Pre-Order'
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'bg-emerald-100 text-emerald-700'
+                      }`}>
+                        {(item.fulfillmentType || orderType) === 'Pre-Order' ? 'PRE-ORDER' : 'BUY NOW'}
+                      </span>
                       {!expandedCartIndexes.has(idx) && <p className="text-[10px] text-[#8A7264] mt-0.5">Qty {formatCount(item.qty)}</p>}
                       {expandedCartIndexes.has(idx) && item.details && <p className="text-[10px] text-[#8A7264] leading-snug mt-0.5 max-w-[200px] truncate">Note: {item.details}</p>}
 
@@ -798,6 +836,18 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
         <div className="p-4 border-t border-[#EAE4E0] bg-[#FCFAF9] shrink-0">
           <div className="flex flex-col gap-1 mb-2">
+            {mixedFulfillment && (
+              <>
+                <div className="flex items-center justify-between text-[11px] text-[#8A7264]">
+                  <span>Buy Now total (Full Payment)</span>
+                  <span className="font-semibold">{formatPeso(buyNowTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-[#8A7264]">
+                  <span>Pre-Order total ({paymentMode === '50% Deposit' ? '50% Deposit' : 'Full Payment'})</span>
+                  <span className="font-semibold">{formatPeso(preOrderTotal)}</span>
+                </div>
+              </>
+            )}
             {(discountAmount > 0 || chargeAmount > 0) && (
               <div className="flex items-center justify-between text-[11px] text-[#8A7264]">
                 <span>Subtotal</span>
@@ -825,7 +875,7 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
 
           <div className="flex items-center justify-between gap-3 mt-2 pt-3 border-t border-[#EAE4E0] mb-3">
             <div className="flex bg-[#F5EFEB] rounded-lg p-1 gap-1 shrink-0">
-              {(orderType === 'Buy Now' ? ['Full Payment'] : ['Full Payment', '50% Deposit']).map(mode => (
+              {(hasPreOrder ? ['Full Payment', '50% Deposit'] : ['Full Payment']).map(mode => (
                 <button
                   key={mode}
                   onClick={() => setPaymentMode(mode)}
@@ -858,6 +908,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           onBack={() => { setShowSummaryModal(false); setFormErrors({}); }}
           cart={cart}
           orderType={orderType}
+          hasPreOrder={hasPreOrder}
+          hasBuyNow={hasBuyNow}
           form={form}
           setForm={setForm}
           minPreOrderDate={minPreOrderDate}
@@ -869,6 +921,8 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           subtotal={subtotal}
           cartTotal={cartTotal}
           amountDue={amountDue}
+          buyNowTotal={buyNowTotal}
+          preOrderTotal={preOrderTotal}
           isProcessing={isProcessing}
           onPlaceOrder={handlePlaceOrder}
           uploadProgress={uploadProgress}

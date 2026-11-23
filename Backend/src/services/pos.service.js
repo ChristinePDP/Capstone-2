@@ -32,7 +32,7 @@ function makeReceiptToken(orderId) {
   return Buffer.from(`${orderId}${RECEIPT_SECRET}`).toString('base64');
 }
 
-async function cleanupFailedPosOrder(orderId, customerId) {
+async function cleanupFailedPosOrder(orderId, customerId, deleteCustomer = true) {
   try {
     await OrderItemsModel.deleteByOrderId(orderId);
   } catch (cleanupError) {
@@ -45,10 +45,12 @@ async function cleanupFailedPosOrder(orderId, customerId) {
     console.error('[POS SERVICE] Failed to remove incomplete order:', cleanupError?.stack || cleanupError);
   }
 
-  try {
-    await CustomersModel.deleteById(customerId);
-  } catch (cleanupError) {
-    console.error('[POS SERVICE] Failed to remove incomplete order customer:', cleanupError?.stack || cleanupError);
+  if (deleteCustomer) {
+    try {
+      await CustomersModel.deleteById(customerId);
+    } catch (cleanupError) {
+      console.error('[POS SERVICE] Failed to remove incomplete order customer:', cleanupError?.stack || cleanupError);
+    }
   }
 }
 
@@ -193,6 +195,69 @@ const getManilaNow = () => {
 };
 
 export const createPosOrder = async (payload) => {
+  const fulfillmentTypes = [...new Set((payload.items || []).map(item => item.fulfillmentType || item.orderType || payload.orderType))];
+  if (fulfillmentTypes.length > 1) {
+    const transactionGroupId = payload.transactionGroupId || payload.checkoutReservationId || randomUUID();
+    const existing = await OrdersModel.findByTransactionGroupId(transactionGroupId);
+    const createdByType = new Map((existing || []).map(order => [order.order_type, { ...order, receiptToken: makeReceiptToken(order.id) }]));
+    const existingIds = new Set((existing || []).map(order => order.id));
+    const createdThisAttempt = [];
+    let sharedCustomerId = existing?.[0]?.customer_id || payload.customerId || null;
+    try {
+      // Gumawa muna ng Pre-Order at huwag munang gumawa ng Buy Now.
+      // Kapag nabigo ang isa sa dalawang group, walang Buy Now inventory
+      // commit na kailangang i-reverse.
+      for (const type of ['Pre-Order', 'Buy Now']) {
+        const groupItems = payload.items.filter(item => (item.fulfillmentType || item.orderType || payload.orderType) === type);
+        if (!groupItems.length || createdByType.has(type)) continue;
+        const child = await createPosOrder({
+          ...payload,
+          transactionGroupId,
+          orderType: type,
+          customerId: sharedCustomerId,
+          checkoutReservationId: createdByType.size === 0 ? payload.checkoutReservationId : randomUUID(),
+          items: groupItems,
+          payment: payload.groupPayments?.[type] || payload.payment,
+          pickup: type === 'Buy Now'
+            ? { date: getManilaNow().date, time: '', timeEnd: '', timeSlot: '', timeLabel: 'Walk-in' }
+            : payload.pickup,
+        });
+        if (!existingIds.has(child.id)) createdThisAttempt.push(child);
+        sharedCustomerId = child.customer_id;
+        createdByType.set(type, child);
+      }
+    } catch (error) {
+      for (const child of createdThisAttempt) {
+        await cleanupFailedPosOrder(child.id, child.customer_id, false);
+        if (child.checkout_reservation_id) {
+          try {
+            await CheckoutReservationModel.release(child.checkout_reservation_id);
+          } catch (releaseError) {
+            console.error('[POS SERVICE] Failed to release mixed-checkout reservation:', releaseError?.stack || releaseError);
+          }
+        }
+      }
+      throw error;
+    }
+    const orders = [...createdByType.values()].sort((a, b) => ['Buy Now', 'Pre-Order'].indexOf(a.order_type) - ['Buy Now', 'Pre-Order'].indexOf(b.order_type));
+    const preOrder = orders.find(order => order.order_type === 'Pre-Order');
+    const primaryOrder = preOrder || orders[0];
+    return {
+      transactionGroupId,
+      transactionId: transactionGroupId,
+      orders,
+      grandTotal: orders.reduce((sum, order) => sum + Number(order.grand_total || 0), 0),
+      amountPaid: orders.reduce((sum, order) => sum + Number(order.amount_paid || 0), 0),
+      balance: orders.reduce((sum, order) => sum + Number(order.balance || 0), 0),
+      id: primaryOrder?.id,
+      order_number: primaryOrder?.order_number,
+      receiptToken: primaryOrder?.receiptToken,
+      orderType: 'Mixed',
+      paymentType: 'mixed',
+      pickup_date: preOrder?.pickup_date || primaryOrder?.pickup_date,
+      pickup_time: preOrder?.pickup_time || primaryOrder?.pickup_time,
+    };
+  }
   // 0. I-resolve/i-validate muna ang lahat ng items (kasama ang pag-explode
   //    ng mga bundle sa kani-kanilang component products, at ang pag-map ng
   //    order_slip_details / selected_price_options / customer_reference_url)
@@ -244,7 +309,7 @@ export const createPosOrder = async (payload) => {
   
   let customerData;
   try {
-    customerData = await CustomersModel.create({
+    customerData = payload.customerId ? { id: payload.customerId } : await CustomersModel.create({
       name: customerName,
       phone: customerPhone,
       alt_phone: payload.customer?.altPhone || ''
@@ -286,10 +351,10 @@ export const createPosOrder = async (payload) => {
   const grandTotal = Number(payload.payment?.grandTotal) || 0;
   const amountPaid = isBuyNow
     ? grandTotal
-    : (Number(payload.payment?.amountDueNow) || 0);
+    : (isDeposit ? Math.ceil(grandTotal / 2) : grandTotal);
   const balance = isBuyNow
     ? 0
-    : (Number(payload.payment?.balance) || 0);
+    : Math.max(0, grandTotal - amountPaid);
   let dbPaymentType = 'full';
   if (isDeposit) {
     dbPaymentType = 'deposit'; 
@@ -298,6 +363,7 @@ export const createPosOrder = async (payload) => {
   const orderToInsert = {
     customer_id: customerData.id,
     order_type: payload.orderType,
+    transaction_group_id: payload.transactionGroupId || null,
     source: 'walk-in', 
     status: orderStatus,
     subtotal: payload.payment?.subtotal || 0,
@@ -381,7 +447,7 @@ export const createPosOrder = async (payload) => {
   try {
     await OrderItemsModel.createMany(itemsToInsert);
   } catch (err) {
-    await cleanupFailedPosOrder(newOrder.id, customerData.id);
+    await cleanupFailedPosOrder(newOrder.id, customerData.id, !payload.customerId);
     if (preorderReservationId) {
       try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release reservation after item insert failure:', releaseError);
@@ -395,7 +461,7 @@ export const createPosOrder = async (payload) => {
       await CheckoutReservationModel.link(preorderReservationId, newOrder.id);
     } catch (err) {
       console.error('[POS SERVICE] Failed to link the checkout reservation:', err?.stack || err);
-      await cleanupFailedPosOrder(newOrder.id, customerData.id);
+      await cleanupFailedPosOrder(newOrder.id, customerData.id, !payload.customerId);
       try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release reservation after link failure:', releaseError?.stack || releaseError);
       }
@@ -413,7 +479,7 @@ export const createPosOrder = async (payload) => {
     try {
       await CheckoutReservationModel.commit(preorderReservationId);
     } catch (err) {
-      await cleanupFailedPosOrder(newOrder.id, customerData.id);
+      await cleanupFailedPosOrder(newOrder.id, customerData.id, !payload.customerId);
       try { await CheckoutReservationModel.release(preorderReservationId); } catch (releaseError) {
         console.error('[POS SERVICE] Failed to release reservation after commit failure:', releaseError?.stack || releaseError);
       }
