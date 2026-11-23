@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Edit2, Trash2, Search, Package, Archive, RotateCcw, ArrowLeft } from 'lucide-react';
+import { Edit2, Trash2, Search, Package, Archive, RotateCcw } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
@@ -95,7 +95,7 @@ function SearchBar({ value, onChange, placeholder, className = '' }) {
   );
 }
 
-function CategoryTabs({ options, value, onChange, onPromoBundleClick }) {
+function CategoryTabs({ options, value, onChange, onPromoBundleClick, trailing }) {
   return (
     <div className="flex items-center gap-5 sm:gap-7 overflow-x-auto flex-nowrap border-b border-[#EAE4E0] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {options.map(opt => {
@@ -110,12 +110,32 @@ function CategoryTabs({ options, value, onChange, onPromoBundleClick }) {
             }`}
           >
             {opt}
-            {active && (
-              <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-[#3B1F0A] rounded-full" />
-            )}
+            {active && <span className="absolute left-0 right-0 bottom-0 h-0.5 bg-[#3B1F0A] rounded-full" />}
           </button>
         );
       })}
+      {trailing && <span className="ml-auto shrink-0 pl-4 pb-3 pt-1 text-xs font-semibold text-[#8A7264]">{trailing}</span>}
+    </div>
+  );
+}
+
+// View switcher (Active / Archived) — same visual language as the page-level
+// "Product Management | Event Manager" switcher, just smaller.
+function ViewSwitch({ showArchives, archivedCount, onChange }) {
+  const item = active =>
+    `flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+      active ? 'bg-white text-[#3B1F0A] shadow-sm' : 'text-[#8A7264] hover:text-[#3B1F0A]'
+    }`;
+  return (
+    <div className="flex w-full sm:w-auto shrink-0 items-center gap-1 rounded-xl border border-[#EAE4E0] bg-[#F5EFEB] p-1">
+      <button onClick={() => onChange(false)} className={item(!showArchives)}>Active</button>
+      <button onClick={() => onChange(true)} className={item(showArchives)}>
+        <Archive size={13} />
+        Archived
+        {archivedCount > 0 && (
+          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${showArchives ? 'bg-[#3B1F0A] text-white' : 'bg-[#EAE4E0] text-[#5A453C]'}`}>{archivedCount}</span>
+        )}
+      </button>
     </div>
   );
 }
@@ -248,6 +268,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
   const [modalOpen, setModalOpen] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
 
   const fetchProducts = async (force = false, silent = false) => {
     if (!silent && (force || products.length === 0)) setIsLoading(true);
@@ -639,43 +660,25 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 mb-5 sm:mb-6">
-        <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full md:w-64 md:shrink-0" />
-        <div className="min-w-0 flex-1">
-          <CategoryTabs
-            options={showArchives ? CATEGORIES : TAB_ITEMS}
-            value={category}
-            onChange={setCategory}
-            onPromoBundleClick={() => navigate('/productAndEvent/bundles')}
-          />
+      <div className="mb-5 sm:mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full sm:w-64" />
+          <ViewSwitch showArchives={showArchives} archivedCount={archivedCount} onChange={setShowArchives} />
         </div>
-        <div className="shrink-0 flex items-center justify-between md:justify-end gap-3">
-          <span className="text-xs font-semibold text-[#8A7264]">Total: {visibleItemCount}</span>
-          <button
-            onClick={() => setShowArchives(value => !value)}
-            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold border transition-colors ${
-              showArchives
-                ? 'bg-[#3B1F0A] text-white border-[#3B1F0A] hover:bg-[#5A453C]'
-                : 'bg-white text-[#3B1F0A] border-[#DED4CC] hover:bg-[#F5EFEB]'
-            }`}
-          >
-            {showArchives ? (
-              <><ArrowLeft size={13} />Back to Products</>
-            ) : (
-              <>
-                <Archive size={13} />Archives
-                <span className="min-w-5 rounded-full bg-[#F5EFEB] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-[#5A453C]">{archivedCount}</span>
-              </>
-            )}
-          </button>
-        </div>
+        <CategoryTabs
+          options={showArchives ? CATEGORIES : TAB_ITEMS}
+          value={category}
+          onChange={setCategory}
+          onPromoBundleClick={() => navigate('/productAndEvent/bundles')}
+          trailing={`${visibleItemCount} ${visibleItemCount === 1 ? 'item' : 'items'}`}
+        />
       </div>
 
       {showArchives && (
-        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[#EAE4E0] bg-[#F5EFEB] px-4 py-3 text-xs leading-relaxed text-[#5A453C]">
-          <Archive size={14} className="mt-0.5 shrink-0" />
-          <p><span className="font-bold text-[#3B1F0A]">Archived products.</span> Restore a product to bring it back, or delete it permanently.</p>
-        </div>
+        <p className="mb-4 flex items-center gap-2 text-xs text-[#8A7264]">
+          <Archive size={13} className="shrink-0" />
+          Archived products are hidden from the active catalog. Restore one to bring it back, or delete it permanently.
+        </p>
       )}
 
       {error && (products.length > 0 || bundlesWithAvailability.length > 0) && (
@@ -691,7 +694,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         <div className="@container">
         <div className="grid grid-cols-1 @xs:grid-cols-2 @lg:grid-cols-3 @3xl:grid-cols-4 @5xl:grid-cols-5 gap-3 sm:gap-4">
           {activeProducts.map(p => (
-            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={showArchives ? handleDelete : product => archiveProduct(product, true)} archived={showArchives} onRestore={product => archiveProduct(product, false)} />
+            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={showArchives ? handleDelete : setArchiveTarget} archived={showArchives} onRestore={product => archiveProduct(product, false)} />
           ))}
           {/* Isinasama ang mga Promo Bundle sa "All" view — sa hulihan ng
               listahan, pagkatapos ng lahat ng regular na product. */}
@@ -713,6 +716,18 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         onSaveSuccess={handleSaveSuccess}
         showToast={showToast}
         allProducts={products}
+      />
+
+      <ConfirmModal
+        isOpen={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={async () => {
+          await archiveProduct(archiveTarget, true);
+          setArchiveTarget(null);
+        }}
+        title={<>Archive <span className="font-extrabold text-[#3B1F0A]">"{archiveTarget?.name}"</span>?</>}
+        message="This product will be hidden from the regular product list, POS, online ordering, and Inventory. You can restore it anytime from Archives."
+        confirmLabel="Archive"
       />
 
       <ConfirmModal

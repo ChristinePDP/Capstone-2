@@ -8,6 +8,7 @@ const IngredientModel = {
   create: (data) => supabase.from('raw_ingredients').insert(data).select().single(),
   update: (id, data) => supabase.from('raw_ingredients').update(data).eq('id', id).select().single(),
   delete: (id) => supabase.from('raw_ingredients').delete().eq('id', id),
+  setArchived: (id, archived) => supabase.from('raw_ingredients').update({ is_archived: archived }).eq('id', id).select().single(),
   setStock: (id, stock_quantity) =>
     supabase.from('raw_ingredients').update({ stock_quantity }).eq('id', id).select().single(),
 

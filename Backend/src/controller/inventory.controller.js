@@ -46,6 +46,13 @@ restock: async (req, res, next) => {
       ok(res, null, 'Ingredient deleted');
     } catch (err) { next(err); }
   },
+  setArchived: async (req, res, next) => {
+    try {
+      const result = await IngredientService.setArchived(req.params.id, req.body?.archived === true);
+      emitRealtimeChange({ table: 'raw_ingredients', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Ingredient archive status updated');
+    } catch (err) { next(err); }
+  },
 };
 
 
@@ -85,6 +92,13 @@ const MaterialController = {
       await MaterialService.delete(req.params.id);
       emitRealtimeChange({ table: 'celebration_materials', event: 'DELETE', recordId: req.params.id });
       ok(res, null, 'Material deleted');
+    } catch (err) { next(err); }
+  },
+  setArchived: async (req, res, next) => {
+    try {
+      const result = await MaterialService.setArchived(req.params.id, req.body?.archived === true);
+      emitRealtimeChange({ table: 'celebration_materials', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Material archive status updated');
     } catch (err) { next(err); }
   },
 };
@@ -177,6 +191,13 @@ const RecipeController = {
       await RecipeService.delete(req.params.id);
       emitRealtimeChange({ table: 'recipes', event: 'DELETE', recordId: req.params.id });
       ok(res, null, 'Recipe deleted');
+    } catch (err) { next(err); }
+  },
+  setArchived: async (req, res, next) => {
+    try {
+      const result = await RecipeService.setArchived(req.params.id, req.body?.archived === true);
+      emitRealtimeChange({ table: 'recipes', event: 'UPDATE', recordId: req.params.id });
+      ok(res, result, 'Formula archive status updated');
     } catch (err) { next(err); }
   },
 };

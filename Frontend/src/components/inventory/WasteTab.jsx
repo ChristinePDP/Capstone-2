@@ -222,7 +222,7 @@ export default function WasteTab() {
   // Product materials lang ang may stock sa shop; ang celebration materials
   // ay galing sa ibang shop kaya hindi kasama sa waste log.
   const productMaterials = useMemo(
-    () => materials.filter(m => (m.materialType ?? m.material_type) === 'product'),
+    () => materials.filter(m => (m.materialType ?? m.material_type) === 'product' && !m.is_archived),
     [materials]
   );
 
@@ -813,7 +813,7 @@ export default function WasteTab() {
                 error={visibleFormErrors.item}
                 placeholder="— Select an ingredient —"
                 value={ingName}
-                options={ingredients.map(i => ({ value: i.name, label: `${i.name} (In stock: ${i.stock} ${i.unit})` }))}
+                options={ingredients.filter(i => !i.is_archived).map(i => ({ value: i.name, label: `${i.name} (In stock: ${i.stock} ${i.unit})` }))}
                 onChange={val => {
                   const matched = ingredients.find(i => i.name === val);
                   setIngName(val);
@@ -881,7 +881,7 @@ export default function WasteTab() {
                 error={visibleFormErrors.item}
                 placeholder="— Select a product —"
                 value={productName}
-                options={products.filter(p => p.stock > 0).map(p => ({ value: p.name, label: `${p.name} (Current Stock: ${formatCount(p.stock)} pcs)` }))}
+                options={products.filter(p => !p.is_archived && p.stock > 0).map(p => ({ value: p.name, label: `${p.name} (Current Stock: ${formatCount(p.stock)} pcs)` }))}
                 onChange={val => {
                   setProductName(val); setProductQty(''); setProductUnit('pcs');
                 }}

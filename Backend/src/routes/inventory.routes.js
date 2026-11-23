@@ -18,6 +18,7 @@ router.get('/ingredients', IngredientController.getAll);
 router.post('/ingredients', IngredientController.create); 
 router.put('/ingredients/:id', IngredientController.update); 
 router.patch('/ingredients/:id/restock', IngredientController.restock); 
+router.patch('/ingredients/:id/archive', IngredientController.setArchived);
 router.delete('/ingredients/:id', IngredientController.delete); 
 
 // ── MATERIALS ───────────────────────────────────────
@@ -25,6 +26,7 @@ router.get('/materials', MaterialController.getAll);
 router.post('/materials', MaterialController.create);
 router.put('/materials/:id', MaterialController.update); 
 router.patch('/materials/:id/restock', MaterialController.restock); 
+router.patch('/materials/:id/archive', MaterialController.setArchived);
 router.delete('/materials/:id', MaterialController.delete); 
 
 // ── PRODUCTS ────────────────────────────────────────
@@ -40,6 +42,7 @@ router.get('/recipes', RecipeController.getAll);
 router.get('/recipes/:id', RecipeController.getById); 
 router.post('/recipes', RecipeController.create);
 router.put('/recipes/:id', RecipeController.update);
+router.patch('/recipes/:id/archive', RecipeController.setArchived);
 router.delete('/recipes/:id', RecipeController.delete); 
 
 // ── WASTE ───────────────────────────────────────────

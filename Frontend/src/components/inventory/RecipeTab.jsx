@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, Edit2, Search, Tag, Package, ChevronDown, Check } from 'lucide-react';
+import { Plus, Trash2, Edit2, Search, Tag, Package, ChevronDown, Check, Archive, RotateCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Card, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { sanitizeNumericText, getQtyError, MAX_QTY } from '../../utils/numberGuards';
 import { normalizeText, normalizeUnit, getCompatibleUnits, convertToBase } from '../../utils/unitUtils';
 import { useIsCompact } from '../../hooks/useIsCompact';
+import ArchiveToggle from './ArchiveToggle';
 
 const PAGE_SIZE = 8;
 
@@ -285,13 +286,15 @@ export default function RecipeTab() {
   const ingredients = useMemo(() => context.ingredients || [], [context.ingredients]);
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const products = useMemo(() => context.products || [], [context.products]);
-  const { addRecipe, updateRecipe, deleteRecipe } = context;
+  const { addRecipe, updateRecipe, deleteRecipe, archiveRecipe } = context;
 
   const { show: showToast } = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editRecipe, setEditRecipe] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [showArchives, setShowArchives] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isDeletingRef = useRef(false);
@@ -315,7 +318,7 @@ export default function RecipeTab() {
   );
 
   const inventoryOptions = useMemo(() => {
-    const ingredientOptions = ingredients.map(item => ({
+    const ingredientOptions = ingredients.filter(item => !item.is_archived).map(item => ({
       id: item.id,
       name: item.name,
       unit: normalizeUnit(item.unit),
@@ -326,7 +329,7 @@ export default function RecipeTab() {
 
     // Celebration Materials are not recipe ingredients — only
     // Product Materials (e.g. boxes) are offered here.
-    const materialOptions = materials
+    const materialOptions = materials.filter(item => !item.is_archived)
       .filter(item => getMaterialViewKey(item, productsById) !== 'celebration')
       .map(item => ({
         id: item.id,
@@ -736,7 +739,20 @@ export default function RecipeTab() {
     }
   };
 
-  const filteredRecipes = recipes.filter(r => (r.product || '').toLowerCase().includes(search.toLowerCase()));
+  const handleArchiveRecipe = async () => {
+    if (!archiveTarget?.id) return;
+    try {
+      await archiveRecipe?.(archiveTarget.id, true);
+      showToast('Formula moved to Archives.', 'success');
+    } catch (err) { showToast(err?.message || 'Could not archive formula.', 'error'); }
+    finally { setArchiveTarget(null); }
+  };
+  const restoreRecipe = async (recipe) => {
+    try { await archiveRecipe?.(recipe.id, false); showToast('Formula restored.', 'success'); }
+    catch (err) { showToast(err?.message || 'Could not restore formula.', 'error'); }
+  };
+
+  const filteredRecipes = recipes.filter(r => (r.is_archived === true) === showArchives && (r.product || '').toLowerCase().includes(search.toLowerCase()));
   const totalPages = Math.max(1, Math.ceil(filteredRecipes.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const paged = filteredRecipes.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -749,8 +765,19 @@ export default function RecipeTab() {
             <h3 className="font-bold text-brand-800">Production Formulas</h3>
             <p className="text-xs text-brand-400 mt-0.5">Manage the recipe and product materials needed to make each product.</p>
           </div>
-          <div className="flex items-center gap-4 w-full sm:w-auto">
-            <Button variant="dark" onClick={openAdd} className="flex-1 sm:flex-none justify-center"><Plus size={14} /> Add Formula</Button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {!showArchives && (
+              <Button variant="dark" onClick={openAdd} className="flex-1 sm:flex-none justify-center">
+                <Plus size={14} /> Add Formula
+              </Button>
+            )}
+            <ArchiveToggle
+              active={showArchives}
+              count={recipes.filter(r => r.is_archived).length}
+              backLabel="Back to Formulas"
+              onClick={() => { setShowArchives(value => !value); setCurrentPage(1); }}
+              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+            />
           </div>
         </div>
 
@@ -795,8 +822,7 @@ export default function RecipeTab() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-auto">
-                    <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openEdit(r)}><Edit2 size={13} /> Edit</Button>
-                    <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(r)}><Trash2 size={13} /> Delete</Button>
+                    {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreRecipe(r)}><RotateCcw size={13} /> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(r)}><Trash2 size={13} /> Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openEdit(r)}><Edit2 size={13} /> Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(r)}><Archive size={13} /> Archive</Button></>}
                   </div>
                 </div>
               );
@@ -818,8 +844,7 @@ export default function RecipeTab() {
                   </Td>
                   <Td align="right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button>
-                      <button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+                      {showArchives ? <><button onClick={() => restoreRecipe(r)} className="p-1.5 text-brand-400 hover:text-brand-700" title="Restore"><RotateCcw size={14} /></button><button onClick={() => setDeleteTarget(r)} className="p-1.5 text-red-400 hover:text-red-600" title="Delete permanently"><Trash2 size={14} /></button></> : <><button onClick={() => openEdit(r)} className="p-1.5 text-brand-400 hover:text-brand-700"><Edit2 size={14} /></button><button onClick={() => setArchiveTarget(r)} className="p-1.5 text-brand-400 hover:text-brand-700" title="Archive"><Archive size={14} /></button></>}
                     </div>
                   </Td>
                 </Tr>
@@ -988,6 +1013,14 @@ export default function RecipeTab() {
       {closeGuard.confirmation}
 
       {/* DELETE FORMULA CONFIRMATION MODAL */}
+      <ConfirmModal
+        isOpen={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={handleArchiveRecipe}
+        title={`Archive formula for "${archiveTarget?.product}"?`}
+        message="The formula and its ingredient links will be kept. This product will no longer be treated as having an active production formula until you restore it."
+        confirmLabel="Archive"
+      />
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)}

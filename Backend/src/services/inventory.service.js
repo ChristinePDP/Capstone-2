@@ -153,8 +153,27 @@ const IngredientService = {
   },
 
   delete: async (id) => {
+    const { data: current, error: findError } = await IngredientModel.findById(id);
+    if (findError || !current) throw new AppError('Ingredient not found.', 404);
+    if (!current.is_archived) throw new AppError('Archive this ingredient before permanently deleting it.', 409);
     const { error } = await IngredientModel.delete(id);
     if (error) throw error;
+  },
+  setArchived: async (id, archived) => {
+    if (archived) {
+      const { data: links, error: linkError } = await supabase.from('recipe_ingredients')
+        .select('recipe_id').eq('raw_ingredient_id', id);
+      if (linkError) throw new AppError(`Failed to check formula links: ${linkError.message}`, 500);
+      const recipeIds = [...new Set((links || []).map(link => link.recipe_id).filter(Boolean))];
+      if (recipeIds.length) {
+        const { count, error } = await supabase.from('recipes').select('id', { count: 'exact', head: true }).in('id', recipeIds).eq('is_archived', false);
+        if (error) throw new AppError(`Failed to check formula links: ${error.message}`, 500);
+        if (count > 0) throw new AppError('This ingredient is used by an active production formula. Archive the linked formula first.', 409);
+      }
+    }
+    const { data, error } = await IngredientModel.setArchived(id, archived);
+    if (error) throw error;
+    return data;
   },
 };
 
@@ -330,8 +349,39 @@ const MaterialService = {
   },
 
   delete: async (id) => {
+    const { data: current, error: findError } = await MaterialModel.findById(id);
+    if (findError || !current) throw new AppError('Material not found.', 404);
+    if (!current.is_archived) throw new AppError('Archive this material before permanently deleting it.', 409);
     const { error } = await MaterialModel.delete(id);
     if (error) throw error;
+  },
+  setArchived: async (id, archived) => {
+    if (archived) {
+      const { data: material, error: materialError } = await MaterialModel.findById(id);
+      if (materialError || !material) throw new AppError('Material not found.', 404);
+      if (material.material_type === 'celebration' && material.product_id) {
+        const { data: linkedProduct, error: productError } = await supabase.from('products')
+          .select('id, name, is_archived').eq('id', material.product_id).maybeSingle();
+        if (productError) throw new AppError(`Failed to check linked product: ${productError.message}`, 500);
+        if (linkedProduct && !linkedProduct.is_archived) {
+          throw new AppError(`Archive the linked product "${linkedProduct.name}" in Product Management first.`, 409);
+        }
+      }
+      if (material.material_type === 'product') {
+        const { data: links, error: linkError } = await supabase.from('recipe_ingredients')
+          .select('recipe_id').eq('material_id', id);
+        if (linkError) throw new AppError(`Failed to check formula links: ${linkError.message}`, 500);
+        const recipeIds = [...new Set((links || []).map(link => link.recipe_id).filter(Boolean))];
+        if (recipeIds.length) {
+          const { count, error } = await supabase.from('recipes').select('id', { count: 'exact', head: true }).in('id', recipeIds).eq('is_archived', false);
+          if (error) throw new AppError(`Failed to check formula links: ${error.message}`, 500);
+          if (count > 0) throw new AppError('This product material is used by an active production formula. Archive the linked formula first.', 409);
+        }
+      }
+    }
+    const { data, error } = await MaterialModel.setArchived(id, archived);
+    if (error) throw error;
+    return data;
   },
 };
 
@@ -449,6 +499,7 @@ const ProductionService = {
     const deductFactor = Number.isFinite(deductionBatches) ? deductionBatches : body.batches;
     const { data: recipe, error: recipeErr } = await RecipeModel.findWithIngredients(body.recipe_id);
     if (recipeErr || !recipe) throw new AppError('Recipe not found', 404);
+    if (recipe.is_archived) throw new AppError('This production formula is archived. Restore it before producing this item.', 409);
     if (!Array.isArray(recipe.recipe_ingredients) || recipe.recipe_ingredients.length === 0
       || recipe.recipe_ingredients.some(ingredient => Number(ingredient.quantity) <= 0)) {
       throw new AppError('Production formula must contain valid ingredients', 400);
@@ -887,8 +938,16 @@ const RecipeService = {
   },
 
   delete: async (id) => {
+    const { data: current, error: findError } = await RecipeModel.findById(id);
+    if (findError || !current) throw new AppError('Formula not found.', 404);
+    if (!current.is_archived) throw new AppError('Archive this formula before permanently deleting it.', 409);
     const { error } = await RecipeModel.delete(id);
     if (error) throw error;
+  },
+  setArchived: async (id, archived) => {
+    const { data, error } = await RecipeModel.setArchived(id, archived);
+    if (error) throw error;
+    return data;
   },
 };
 

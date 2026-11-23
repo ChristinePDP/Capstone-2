@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown } from 'lucide-react';
+import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, ShoppingCart, ChevronDown, Archive, RotateCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, TableSkeleton, CardSkeleton, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
@@ -9,6 +9,7 @@ import { sanitizeNumericText, parseFractionInput, formatPesoLive, parseFormatted
 import { STOCK_UNIT_CATEGORIES, convertToBase } from '../../utils/unitUtils';
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { useIsCompact } from '../../hooks/useIsCompact';
+import ArchiveToggle from './ArchiveToggle';
 
 const PER_PAGE = 10;
 
@@ -98,7 +99,7 @@ const needsNoStock = product => product.sourcing_type === 'partner' || isPreOrde
 
 export default function CelebrationTab() {
   const context = useApp() || {};
-  const { addMaterial, updateMaterial, deleteMaterial, restockMaterial } = context;
+  const { addMaterial, updateMaterial, deleteMaterial, archiveMaterial, restockMaterial } = context;
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const pendingFulfillment = context.pendingMaterialFulfillment || [];
   const allProducts = useMemo(() => context.products || [], [context.products]);
@@ -193,6 +194,8 @@ export default function CelebrationTab() {
   const [modalOpen, setModalOpen]   = useState(false);
   const [editMat, setEditMat]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [showArchives, setShowArchives] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
   const isDeletingRef = useRef(false);
@@ -225,8 +228,9 @@ export default function CelebrationTab() {
 
   const materialsInView = useMemo(() => {
     const own = ownMaterials.filter(m => getMaterialViewKey(m) === materialView);
-    return materialView === 'celebration' ? [...partnerRows, ...ownProductRows, ...own] : own;
-  }, [ownMaterials, partnerRows, ownProductRows, materialView]);
+    const archiveRows = own.filter(m => (m.is_archived === true) === showArchives);
+    return showArchives ? archiveRows : materialView === 'celebration' ? [...partnerRows, ...ownProductRows, ...archiveRows] : archiveRows;
+  }, [ownMaterials, partnerRows, ownProductRows, materialView, showArchives]);
 
   // One status label per row. Used by the Status column, the filter and the
   // dropdown counts so they always agree.
@@ -314,6 +318,15 @@ export default function CelebrationTab() {
       setDeleteTarget(null);
     }
   };
+  const handleArchive = async () => {
+    try { await archiveMaterial?.(archiveTarget.id, true); showToast(`${archiveTarget.name} moved to Archives.`, 'success'); }
+    catch (err) { showToast(err.message || 'Failed to archive material.', 'error'); }
+    finally { setArchiveTarget(null); }
+  };
+  const restoreMaterial = async (item) => {
+    try { await archiveMaterial?.(item.id, false); showToast(`${item.name} restored.`, 'success'); }
+    catch (err) { showToast(err.message || 'Failed to restore material.', 'error'); }
+  };
 
   return (
     <div className="space-y-5">
@@ -345,9 +358,20 @@ export default function CelebrationTab() {
                 : 'Manage packaging materials used for your products, like boxes.'}
             </p>
           </div>
-          <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
-            <Plus size={14} /> Add New {activeView.label}
-          </Button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {!showArchives && (
+              <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="flex-1 sm:flex-none justify-center">
+                <Plus size={14} /> Add New {activeView.label}
+              </Button>
+            )}
+            <ArchiveToggle
+              active={showArchives}
+              count={ownMaterials.filter(m => m.is_archived).length}
+              backLabel="Back to Materials"
+              onClick={() => { setShowArchives(value => !value); setStatusFilter('all'); setPage(1); }}
+              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+            />
+          </div>
         </div>
 
         <div className="flex gap-4 sm:gap-6 border-b-2 border-brand-100 px-4 mt-3">
@@ -463,8 +487,7 @@ export default function CelebrationTab() {
                               <LevelBar stock={mat.stock} min={mat.min} />
                             </div>
                             <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
-                              <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
-                              <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(mat)}>Delete</Button>
+                              {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreMaterial(mat)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(mat)}>Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(mat)}><Archive size={13}/> Archive</Button></>}
                             </div>
                           </>
                         )}
@@ -510,8 +533,7 @@ export default function CelebrationTab() {
                             </div>
                           ) : (
                             <div className="flex gap-2 justify-end">
-                              <Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button>
-                              <Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button>
+                              {showArchives ? <><Button size="sm" variant="secondary" onClick={() => restoreMaterial(mat)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" onClick={() => setDeleteTarget(mat)}>Delete</Button></> : <><Button size="sm" variant="secondary" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button><Button size="sm" variant="secondary" onClick={() => setArchiveTarget(mat)}><Archive size={13}/> Archive</Button></>}
                             </div>
                           )}
                         </Td>
@@ -549,6 +571,11 @@ export default function CelebrationTab() {
         onSave={handleSave}
       />
 
+      <ConfirmModal
+        isOpen={!!archiveTarget} onClose={() => setArchiveTarget(null)} onConfirm={handleArchive}
+        title={`Archive Material`} message={`Archive "${archiveTarget?.name}"? Its stock and inventory history will be preserved. You can restore it later.`}
+        confirmLabel="Archive"
+      />
       <ConfirmModal
         isOpen={!!deleteTarget} onClose={() => !isDeletingRef.current && setDeleteTarget(null)} onConfirm={handleDelete}
         title="Delete Material" message={`Delete "${deleteTarget?.name}"?`}

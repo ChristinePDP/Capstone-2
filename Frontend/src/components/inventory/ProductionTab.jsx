@@ -177,7 +177,7 @@ function PreOrderProduction({ tabBar }) {
   const context = useApp() || {};
   const isLoading = !!context.loading;
   const orders = useMemo(() => context.orders || [], [context.orders]);
-  const recipes = useMemo(() => context.recipes || [], [context.recipes]);
+  const recipes = useMemo(() => (context.recipes || []).filter(recipe => !recipe.is_archived), [context.recipes]);
   const ingredients = useMemo(() => context.ingredients || [], [context.ingredients]);
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const products = useMemo(() => context.products || [], [context.products]);
@@ -874,7 +874,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 function BatchProduction({ tabBar }) {
   const context = useApp() || {};
   const isLoading = !!context.loading;
-  const recipes = useMemo(() => context.recipes || [], [context.recipes]);
+  const recipes = useMemo(() => (context.recipes || []).filter(recipe => !recipe.is_archived), [context.recipes]);
   const ingredients = useMemo(() => context.ingredients || [], [context.ingredients]);
   const materials = useMemo(() => context.materials || [], [context.materials]);
   const products = useMemo(() => context.products || [], [context.products]);

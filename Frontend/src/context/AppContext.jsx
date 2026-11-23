@@ -43,6 +43,7 @@ const normalizeIngredientRow = item => ({
   minimum_stock: Number(item.minimum_stock ?? 0),
   cost_per_unit: Number(item.cost_per_unit ?? 0),
   category: item.category,
+  is_archived: item.is_archived === true,
 });
 
 const normalizeMaterialRow = item => ({
@@ -60,6 +61,7 @@ const normalizeMaterialRow = item => ({
   category: item.category,
   materialType: item.material_type,
   material_type: item.material_type,
+  is_archived: item.is_archived === true,
 });
 
 const normalizeProductRow = product => ({
@@ -260,6 +262,7 @@ export function AppProvider({ children }) {
         minimum_stock: Number(item.minimum_stock ?? 0),
         cost_per_unit: Number(item.cost_per_unit ?? 0),
         category: item.category,
+        is_archived: item.is_archived === true,
       }));
 
       const normalizedMaterials = (mat.data || []).map(item => ({
@@ -278,6 +281,7 @@ export function AppProvider({ children }) {
         // 'celebration' | 'product' - used by CelebrationTab to split the two tabs
         materialType: item.material_type,
         material_type: item.material_type,
+        is_archived: item.is_archived === true,
       }));
 
       const normalizedRecipes = (rec.data || []).map(recipe => {
@@ -287,6 +291,7 @@ export function AppProvider({ children }) {
 
         return ({
           id: recipe.id,
+          is_archived: recipe.is_archived === true,
           productId: recipe.product_id,
           product: relatedProduct?.name || recipe.product_name || '',
           estimatedCost: Number(recipe.estimated_cost ?? 0),
@@ -741,6 +746,15 @@ export function AppProvider({ children }) {
       throw new Error(getErrMsg(err, 'Failed to delete ingredient'), { cause: err });
     }
   };
+  const archiveIngredient = async (id, archived) => {
+    try {
+      await apiClient.patch(`/ingredients/${id}/archive`, { archived });
+      logInventoryCrud('update', archived ? 'stocks.ingredients.archive' : 'stocks.ingredients.restore', { id });
+      await fetchAll();
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to update ingredient archive status'), { cause: err });
+    }
+  };
   const restockIngredient = async (id, data) => {
     try {
       const res = await apiClient.patch(`/ingredients/${id}/restock`, data);
@@ -795,6 +809,15 @@ export function AppProvider({ children }) {
       await fetchAll();
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to delete material'), { cause: err });
+    }
+  };
+  const archiveMaterial = async (id, archived) => {
+    try {
+      await apiClient.patch(`/materials/${id}/archive`, { archived });
+      logInventoryCrud('update', archived ? 'stocks.materials.archive' : 'stocks.materials.restore', { id });
+      await fetchAll();
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to update material archive status'), { cause: err });
     }
   };
   const restockMaterial = async (id, data) => {
@@ -861,6 +884,18 @@ export function AppProvider({ children }) {
       }));
     } catch (err) {
       throw new Error(getErrMsg(err, 'Failed to delete recipe'), { cause: err });
+    }
+  };
+  const archiveRecipe = async (id, archived) => {
+    try {
+      await apiClient.patch(`/recipes/${id}/archive`, { archived });
+      logInventoryCrud('update', archived ? 'recipes.archive' : 'recipes.restore', { id });
+      await fetchAll();
+      window.dispatchEvent(new CustomEvent('cake:data-changed', {
+        detail: { table: 'recipes', action: archived ? 'archived' : 'restored', id },
+      }));
+    } catch (err) {
+      throw new Error(getErrMsg(err, 'Failed to update formula archive status'), { cause: err });
     }
   };
 
@@ -961,9 +996,9 @@ export function AppProvider({ children }) {
     fetchOrders, fetchOrderById, updateOrderStatus, verifyOrderPayment,
     addProduct, updateProduct, deleteProduct, uploadProductImage,
     addOrder, addOnlineOrder,
-    addIngredient, updateIngredient, deleteIngredient, restockIngredient,
-    addMaterial, updateMaterial, deleteMaterial, restockMaterial,
-    addRecipe, updateRecipe, deleteRecipe,
+    addIngredient, updateIngredient, deleteIngredient, archiveIngredient, restockIngredient,
+    addMaterial, updateMaterial, deleteMaterial, archiveMaterial, restockMaterial,
+    addRecipe, updateRecipe, deleteRecipe, archiveRecipe,
     confirmBatch, producePreOrder,
     logWaste, voidWasteLog, voidRestockLog,
     fetchInventoryHistory,

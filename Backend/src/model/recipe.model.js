@@ -13,11 +13,12 @@ const RecipeModel = {
       .single(),
 
   findWithIngredients: (id) =>
-    supabase.from('recipes').select('recipe_ingredients(*)').eq('id', id).single(),
+    supabase.from('recipes').select('is_archived, recipe_ingredients(*)').eq('id', id).single(),
 
   create: (data) => supabase.from('recipes').insert(data).select().single(),
   update: (id, data) => supabase.from('recipes').update(data).eq('id', id).select().single(),
   delete: (id) => supabase.from('recipes').delete().eq('id', id),
+  setArchived: (id, archived) => supabase.from('recipes').update({ is_archived: archived }).eq('id', id).select().single(),
 
   insertIngredients: (recipeId, ingredients) =>
     supabase.from('recipe_ingredients')
@@ -40,6 +41,7 @@ const RecipeModel = {
     const { data, error } = await supabase
       .from('recipes')
       .select('id, product_id, recipe_ingredients(quantity)')
+      .eq('is_archived', false)
       .in('product_id', ids);
 
     if (error) throw error;

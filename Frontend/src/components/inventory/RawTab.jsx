@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check } from 'lucide-react';
+import { Plus, Search, Pencil, Wallet, Tag, Package, RefreshCw, Check, Archive, RotateCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToast, Button, Modal, Table, Tr, Td, Pagination, Badge, Card, LevelBar, ConfirmModal, useUnsavedChanges, EmptyState, ErrorState } from '../../components/ui/index';
 import { ingStatus } from '../../utils/inventoryHelpers';
@@ -9,6 +9,7 @@ import { STOCK_UNIT_CATEGORIES, UNIT_CONVERSION_HINTS, convertToBase } from '../
 import { RestockHistoryPanel } from './InventoryHistoryModal';
 import { TableSkeleton, CardSkeleton } from '../../components/ui/index';
 import { useIsCompact } from '../../hooks/useIsCompact';
+import ArchiveToggle from './ArchiveToggle';
 
 const PER_PAGE = 10;
 const daysUntil = (date) => {
@@ -82,7 +83,7 @@ function FormSelect({ label, required, error, hint, className = '', children, ..
 
 export default function IngredientsTab() {
   const context = useApp() || {};
-  const { addIngredient, updateIngredient, deleteIngredient, restockIngredient, fetchExpiringInventoryBatches } = context;
+  const { addIngredient, updateIngredient, deleteIngredient, archiveIngredient, restockIngredient, fetchExpiringInventoryBatches } = context;
   const ingredients = context.ingredients || [];
   const isLoading = !!context.loading;
 
@@ -97,6 +98,8 @@ export default function IngredientsTab() {
   const [modalOpen, setModalOpen]   = useState(false);
   const [editIng, setEditIng]       = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [showArchives, setShowArchives] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   
   const isDeletingRef = useRef(false);
@@ -129,7 +132,8 @@ export default function IngredientsTab() {
 
   const currentEditIng = ingredients.find(ing => ing.id === editIng?.id) || editIng;
 
-  const filtered = ingredients.filter(ing => {
+  const visibleIngredients = ingredients.filter(ing => (ing.is_archived === true) === showArchives);
+  const filtered = visibleIngredients.filter(ing => {
     const matchesSearch = ing.name.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || (statusFilter !== 'expiring' && ingStatus(ing.stock, ing.min).label === statusFilter);
     return matchesSearch && matchesStatus;
@@ -149,18 +153,18 @@ export default function IngredientsTab() {
   // Counts shown in the status dropdown. Uses the same ingStatus() as the
   // table's Status column and the filter, so the numbers always match what
   // you get after picking that option.
-  const statusCounts = ingredients.reduce((acc, ing) => {
+  const statusCounts = visibleIngredients.reduce((acc, ing) => {
     const label = ingStatus(ing.stock, ing.min).label;
     acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
 
   const statusOptions = [
-    { key: 'all',          label: 'All',          count: ingredients.length },
+    { key: 'all',          label: 'All',          count: visibleIngredients.length },
     { key: 'In Stock',     label: 'In Stock',     count: statusCounts['In Stock'] || 0 },
     { key: 'Low Stock',    label: 'Low Stock',    short: 'Low',    count: statusCounts['Low Stock'] || 0 },
     { key: 'Out of Stock', label: 'Out of Stock', short: 'Out', count: statusCounts['Out of Stock'] || 0 },
-    { key: 'expiring', label: 'Expiring / Expired', short: 'Expiry', count: expiringBatches.length },
+    ...(!showArchives ? [{ key: 'expiring', label: 'Expiring / Expired', short: 'Expiry', count: expiringBatches.length }] : []),
   ];
 
   const handleSave = async (payload) => {
@@ -201,6 +205,17 @@ export default function IngredientsTab() {
       setDeleteTarget(null);
     }
   };
+  const handleArchive = async () => {
+    try {
+      await archiveIngredient?.(archiveTarget.id, true);
+      showToast(`${archiveTarget.name} moved to Archives.`, 'success');
+    } catch (err) { showToast(err.message || 'Failed to archive ingredient.', 'error'); }
+    finally { setArchiveTarget(null); }
+  };
+  const restoreIngredient = async (item) => {
+    try { await archiveIngredient?.(item.id, false); showToast(`${item.name} restored.`, 'success'); }
+    catch (err) { showToast(err.message || 'Failed to restore ingredient.', 'error'); }
+  };
 
   return (
     <div className="space-y-5">
@@ -213,9 +228,20 @@ export default function IngredientsTab() {
             </h3>
             <p className="text-xs text-brand-400 mt-0.5">Keep track of the key raw ingredients used to produce your products.</p>
           </div>
-          <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="w-full sm:w-auto justify-center">
-            <Plus size={14} /> Add New Ingredient
-          </Button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {!showArchives && (
+              <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="flex-1 sm:flex-none justify-center">
+                <Plus size={14} /> Add New Ingredient
+              </Button>
+            )}
+            <ArchiveToggle
+              active={showArchives}
+              count={ingredients.filter(i => i.is_archived).length}
+              backLabel="Back to Ingredients"
+              onClick={() => { setShowArchives(value => !value); setStatusFilter('all'); setPage(1); }}
+              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+            />
+          </div>
         </div>
 
         <div className="px-4 py-3 border-b border-brand-100 bg-brand-50/40">
@@ -352,8 +378,7 @@ export default function IngredientsTab() {
                           <LevelBar stock={ing.stock} min={ing.min} />
                         </div>
                         <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
-                          <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
-                          <Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(ing)}>Delete</Button>
+                          {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreIngredient(ing)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(ing)}>Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(ing)}><Archive size={13}/> Archive</Button></>}
                         </div>
                       </div>
                     );
@@ -377,8 +402,7 @@ export default function IngredientsTab() {
                         <Td><Badge variant={st.cls}>{st.label}</Badge></Td>
                         <Td align="right">
                           <div className="flex gap-2 justify-end">
-                            <Button size="sm" variant="secondary" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button>
-                            <Button size="sm" variant="danger" onClick={() => setDeleteTarget(ing)}>Delete</Button>
+                            {showArchives ? <><Button size="sm" variant="secondary" onClick={() => restoreIngredient(ing)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" onClick={() => setDeleteTarget(ing)}>Delete</Button></> : <><Button size="sm" variant="secondary" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button><Button size="sm" variant="secondary" onClick={() => setArchiveTarget(ing)}><Archive size={13}/> Archive</Button></>}
                           </div>
                         </Td>
                       </Tr>
@@ -411,6 +435,14 @@ export default function IngredientsTab() {
         onSave={handleSave}
       />
 
+      <ConfirmModal
+        isOpen={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={handleArchive}
+        title={`Archive ${archiveTarget?.name}?`}
+        message="The ingredient and its current stock history will be kept. It will be hidden from the active ingredient list and can be restored from Archives."
+        confirmLabel="Archive"
+      />
       <ConfirmModal
         isOpen={!!deleteTarget} 
         onClose={() => !isDeletingRef.current && setDeleteTarget(null)} 

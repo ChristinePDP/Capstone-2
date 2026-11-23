@@ -9,6 +9,7 @@ const MaterialModel = {
   create: (data) => supabase.from('celebration_materials').insert(data).select().single(),
   update: (id, data) => supabase.from('celebration_materials').update(data).eq('id', id).select().single(),
   delete: (id) => supabase.from('celebration_materials').delete().eq('id', id),
+  setArchived: (id, archived) => supabase.from('celebration_materials').update({ is_archived: archived }).eq('id', id).select().single(),
   setStock: (id, stock_quantity) =>
     supabase.from('celebration_materials').update({ stock_quantity }).eq('id', id).select().single(),
 
