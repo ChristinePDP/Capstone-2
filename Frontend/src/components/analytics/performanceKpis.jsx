@@ -15,16 +15,8 @@ function formatDeltaPercent(delta) {
   // not a genuine "infinite%" spike. Label it plainly instead.
   if (!Number.isFinite(delta)) return 'New';
 
-  const abs = Math.abs(delta);
-
-  // Once a swing gets into the thousands (usually because the prior
-  // period's base was tiny, not necessarily zero), compact-format it
-  // (e.g. "12K%" instead of "12,400.0%") so it always fits the badge and
-  // stays roughly legible at a glance.
-  if (abs >= 1000) {
-    return `${new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(abs)}%`;
-  }
-
+  // Cap the displayed magnitude at 100%; keep the raw delta for trend direction and color.
+  const abs = Math.min(Math.abs(delta), 100);
   return `${abs.toFixed(1)}%`;
 }
 
@@ -44,7 +36,7 @@ function TrendBadge({ delta, invert = false }) {
   return (
     <span
       className={`inline-flex items-center gap-0.5 px-1 sm:px-1.5 py-1 sm:py-0.5 rounded-md text-[10px] xl:text-[11px] font-bold tabular-nums shrink-0 whitespace-nowrap ${colorClasses}`}
-      title={Number.isFinite(delta) ? `${delta.toFixed(1)}% vs. prior period` : 'No prior-period data to compare against'}
+      title={Number.isFinite(delta) ? `${Math.max(-100, Math.min(delta, 100)).toFixed(1)}% vs. prior period (capped at 100%)` : 'No prior-period data to compare against'}
     >
       <Icon size={12} strokeWidth={2.5} className="shrink-0" />
       {/* Sa mobile, icon na lang (up/down arrow) ang bisible — natatago
