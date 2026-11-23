@@ -2098,8 +2098,15 @@ export default function Menu({ cart, setCart }) {
   
   const displayItems = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
-    return products.filter(p => !q || p.name.toLowerCase().includes(q));
-  }, [products, searchQuery]);
+    return products.filter(p => {
+      const preOrderOnly = isPreOrderOnlyType(p);
+      const pickupOnly = isPickUpOnlyType(p);
+      if (effectiveOrderType === 'Buy Now' && preOrderOnly) return false;
+      if (effectiveOrderType === 'Pre-Order' && pickupOnly) return false;
+      if (isQuantityTracked(p) && Number(getQuantityLimit(p, effectiveOrderType)) <= 0) return false;
+      return !q || p.name.toLowerCase().includes(q);
+    });
+  }, [products, searchQuery, effectiveOrderType]);
 
   const renderProductGrid = () => {
     const isAllView = activeTab === 'All';

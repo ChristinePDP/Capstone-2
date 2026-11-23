@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Edit2, Trash2, Search, Package } from 'lucide-react';
+import { Edit2, Trash2, Search, Package, Archive, RotateCcw, ArrowLeft } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
@@ -138,18 +138,19 @@ function useToast() {
 // ─────────────────────────────────────────────────────────────
 // Product Card
 // ─────────────────────────────────────────────────────────────
-function ProductCard({ product, onEdit, onDelete }) {
+function ProductCard({ product, onEdit, onDelete, archived = false, onRestore }) {
   const dailyLimit = product.dailyLimit ?? product.daily_limit ?? 0;
   const imageUrl = product.image || product.image_url;
   const isVariablePricing = product.pricing_mode === 'variable';
   const missingFormula = product.category !== 'Celebration Material'
     && product.has_production_formula === false;
-  const isInactive = product.is_active === false;
+  const isInactive = false;
+  const dimImage = archived;
 
   return (
     <div className={`bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden shadow-sm flex flex-col h-full min-w-0`}>
       {/* Pinaliit nang konti ang height sa mobile para hindi mukhang humahaba */}
-      <div className={`@container relative aspect-video @xs:aspect-4/3 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center ${isInactive ? 'opacity-60 grayscale' : ''}`}>
+      <div className={`@container relative aspect-video @xs:aspect-4/3 bg-[#F5EFEB] overflow-hidden shrink-0 flex items-center justify-center ${isInactive || dimImage ? 'opacity-60 grayscale' : ''}`}>
         {imageUrl ? (
           <img src={imageUrl} alt={product.name} className="w-full h-full object-cover" />
         ) : (
@@ -172,7 +173,7 @@ function ProductCard({ product, onEdit, onDelete }) {
             Inactive
           </span>
         )}
-        {missingFormula && !isInactive && (
+        {missingFormula && !isInactive && !archived && (
           <div className="absolute left-2 right-2 bottom-2">
             <span className="block rounded-lg bg-red-700 px-2 py-1.5 text-[9px] font-bold leading-tight text-white shadow-sm">
               No production formula yet - Cannot appear in POS/Online Ordering
@@ -205,17 +206,14 @@ function ProductCard({ product, onEdit, onDelete }) {
 
       <div className="flex border-t border-[#EAE4E0] shrink-0">
         <button
-          onClick={() => onEdit(product)}
+          onClick={() => (archived ? onRestore(product) : onEdit(product))}
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 text-[11px] font-bold uppercase tracking-wide text-[#8A7264] hover:bg-[#F5EFEB] hover:text-[#3B1F0A] transition-colors"
         >
-          <Edit2 size={12} className="sm:w-[13px] sm:h-[13px]" />Edit
+          {archived ? <><RotateCcw size={12} />Restore</> : <><Edit2 size={12} className="sm:w-[13px] sm:h-[13px]" />Edit</>}
         </button>
         <div className="w-px bg-[#EAE4E0]" />
-        <button
-          onClick={() => onDelete(product)}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 text-[11px] font-bold uppercase tracking-wide text-red-600 hover:bg-red-50 transition-colors"
-        >
-          <Trash2 size={12} className="sm:w-[13px] sm:h-[13px]" />Delete
+        <button onClick={() => onDelete(product)} className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 sm:py-3 text-[11px] font-bold uppercase tracking-wide transition-colors ${archived ? 'text-red-700 hover:bg-red-50' : 'text-red-600 hover:bg-red-50'}`}>
+          {archived ? <><Trash2 size={12} />Delete</> : <><Archive size={12} className="sm:w-[13px] sm:h-[13px]" />Archive</>}
         </button>
       </div>
     </div>
@@ -244,6 +242,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const { toast, show: showToast } = useToast();
   const [category, setCategory] = useState('All');
+  const [showArchives, setShowArchives] = useState(false);
   const [search, setSearch] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -427,7 +426,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     };
   }, [bundles]);
 
-  const filtered = products.filter(p => {
+  const filtered = products.filter(p => (p.is_archived === true) === showArchives).filter(p => {
     const catOk = category === 'All' || p.category === category;
     const searchOk = !search || p.name.toLowerCase().includes(search.toLowerCase());
     return catOk && searchOk;
@@ -435,9 +434,7 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   // Sa lahat ng tab (All, Cake, Pastry, atbp.): ang inactive products ay nasa
   // pinakahuli ng listahan (pagkatapos pati ng mga bundle).
-  const isInactiveProduct = (p) => p.is_active === false;
-  const activeProducts = filtered.filter(p => !isInactiveProduct(p));
-  const inactiveProducts = filtered.filter(isInactiveProduct);
+  const activeProducts = filtered;
 
   const bundleSearchOk = (b) => !search || (b.bundle_name || '').toLowerCase().includes(search.toLowerCase());
 
@@ -460,7 +457,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       availability: posAvailabilityById[String(item.product_id)],
     })),
   }));
-  const visibleItemCount = activeProducts.length + inactiveProducts.length + bundlesWithAvailability.length;
+  const archivedCount = products.filter(p => p.is_archived).length;
+  const visibleItemCount = activeProducts.length + (showArchives ? 0 : bundlesWithAvailability.length);
 
   // Package at Bundle ay parehong na-e-edit na sa Promo Bundles form (doon
   // na ang Package Contents UI); ginagamit lang dito ang BundleCard grid
@@ -506,9 +504,9 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       ? {
           ...refreshedProduct,
           ...savedProduct,
-          is_active: savedProduct.is_active
-            ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.is_active
-            ?? true,
+          is_archived: savedProduct.is_archived
+            ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.is_archived
+            ?? false,
           linked_inventory_material: savedProduct.linked_inventory_material
             ?? (refreshedProducts || []).find(product => product.id === savedProduct.id)?.linked_inventory_material
             ?? null,
@@ -547,6 +545,18 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
   const handleDelete = (product) => setDeleteTarget(product);
 
+  const archiveProduct = async (product, archived) => {
+    try {
+      const res = await apiClient.patch(`${PRODUCTS_BASE}/${product.id}/archive`, { archived });
+      unwrapData(res.data, 'Failed to update archive status.');
+      productsCache = (productsCache || products).map(p => String(p.id) === String(product.id) ? { ...p, is_archived: archived } : p);
+      setProducts(productsCache);
+      showToast(archived ? `${product.name} moved to Archives.` : `${product.name} restored.`);
+    } catch (err) {
+      showToast(getErrMsg(err, 'Failed to update archive status.'), 'warning');
+    }
+  };
+
   const confirmDelete = async () => {
     try {
       const res = await apiClient.delete(`${PRODUCTS_BASE}/${deleteTarget.id}?devtools_label=delete_product`);
@@ -560,13 +570,6 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
     } finally {
       setDeleteTarget(null);
     }
-  };
-
-  const handleModalDelete = (id) => {
-    const productToDelete = products.find(product => String(product.id) === String(id)) || editProduct;
-    if (!productToDelete) return;
-    handleCloseModal();
-    setDeleteTarget(productToDelete);
   };
 
   // Ang edit form ay nangangailangan ng allProducts at events (shared cache sa
@@ -638,16 +641,42 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
 
       <div className="flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 mb-5 sm:mb-6">
         <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full md:w-64 md:shrink-0" />
-        <div className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+        <div className="min-w-0 flex-1">
           <CategoryTabs
-            options={TAB_ITEMS}
+            options={showArchives ? CATEGORIES : TAB_ITEMS}
             value={category}
             onChange={setCategory}
             onPromoBundleClick={() => navigate('/productAndEvent/bundles')}
           />
-          <span className="shrink-0 text-xs font-semibold text-[#8A7264]">Total: {visibleItemCount}</span>
+        </div>
+        <div className="shrink-0 flex items-center justify-between md:justify-end gap-3">
+          <span className="text-xs font-semibold text-[#8A7264]">Total: {visibleItemCount}</span>
+          <button
+            onClick={() => setShowArchives(value => !value)}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold border transition-colors ${
+              showArchives
+                ? 'bg-[#3B1F0A] text-white border-[#3B1F0A] hover:bg-[#5A453C]'
+                : 'bg-white text-[#3B1F0A] border-[#DED4CC] hover:bg-[#F5EFEB]'
+            }`}
+          >
+            {showArchives ? (
+              <><ArrowLeft size={13} />Back to Products</>
+            ) : (
+              <>
+                <Archive size={13} />Archives
+                <span className="min-w-5 rounded-full bg-[#F5EFEB] px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-[#5A453C]">{archivedCount}</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
+
+      {showArchives && (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[#EAE4E0] bg-[#F5EFEB] px-4 py-3 text-xs leading-relaxed text-[#5A453C]">
+          <Archive size={14} className="mt-0.5 shrink-0" />
+          <p><span className="font-bold text-[#3B1F0A]">Archived products.</span> Restore a product to bring it back, or delete it permanently.</p>
+        </div>
+      )}
 
       {error && (products.length > 0 || bundlesWithAvailability.length > 0) && (
         <div className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
@@ -662,19 +691,16 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         <div className="@container">
         <div className="grid grid-cols-1 @xs:grid-cols-2 @lg:grid-cols-3 @3xl:grid-cols-4 @5xl:grid-cols-5 gap-3 sm:gap-4">
           {activeProducts.map(p => (
-            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
+            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={showArchives ? handleDelete : product => archiveProduct(product, true)} archived={showArchives} onRestore={product => archiveProduct(product, false)} />
           ))}
           {/* Isinasama ang mga Promo Bundle sa "All" view — sa hulihan ng
               listahan, pagkatapos ng lahat ng regular na product. */}
-          {bundlesWithAvailability.map(b => (
+          {!showArchives && bundlesWithAvailability.map(b => (
             <BundleCard key={`bundle-${b.id}`} bundle={b} onEdit={handleEditBundle} onDelete={handleDeleteBundle} />
-          ))}
-          {inactiveProducts.map(p => (
-            <ProductCard key={p.id} product={p} onEdit={handleEdit} onDelete={handleDelete} />
           ))}
           {!filtered.length && !filteredBundles.length && (error
             ? <ErrorState className="col-span-full" description={error} onRetry={() => fetchProducts(true)} />
-            : <EmptyState className="col-span-full" title={search ? 'No matching products' : 'No products yet'} description={search ? 'Try a different search term or clear the search.' : 'Products you add will appear here.'} />
+            : <EmptyState className="col-span-full" title={search ? 'No matching products' : showArchives ? 'No archived products' : 'No products yet'} description={search ? 'Try a different search term or clear the search.' : showArchives ? 'Products you archive will appear here.' : 'Products you add will appear here.'} />
           )}
         </div>
         </div>
@@ -685,7 +711,6 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
         onClose={handleCloseModal}
         product={editProduct}
         onSaveSuccess={handleSaveSuccess}
-        onDelete={handleModalDelete}
         showToast={showToast}
         allProducts={products}
       />

@@ -19,12 +19,8 @@ const ProductModel = {
       query = query.eq('id', filters.productId);
     }
 
-    if (filters.activeOnly !== false) {
-      // Treat NULL as active for legacy/new rows created before the
-      // is_active default was enforced. Only an explicit false hides a
-      // product from the catalog.
-      query = query.or('is_active.eq.true,is_active.is.null');
-    }
+    if (filters.archiveOnly === true) query = query.eq('is_archived', true);
+    else if (filters.archiveOnly !== false) query = query.or('is_archived.eq.false,is_archived.is.null');
 
     return query;
   },
@@ -74,6 +70,12 @@ const ProductModel = {
       .select()
       .single();
 
+    if (error) throw error;
+    return { data, error };
+  },
+  async setArchived(id, archived) {
+    const { data, error } = await getSupabase().from('products')
+      .update({ is_archived: archived }).eq('id', id).select().single();
     if (error) throw error;
     return { data, error };
   },

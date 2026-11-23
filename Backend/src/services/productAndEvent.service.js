@@ -270,7 +270,7 @@ export const createDatabaseProduct = async (productData) => {
   const productToInsert = {
     name: productData.name,
     category: productData.category,
-    is_active: productData.is_active ?? true,
+    is_archived: false,
     order_type: productData.order_type || 'Both',
     price: productData.price,
     inclusion: productData.inclusion || '',
@@ -312,9 +312,6 @@ export const updateDatabaseProduct = async (id, productData) => {
   const productToUpdate = {
     name: productData.name,
     category: productData.category,
-    // Active/Inactive toggle. Boolean lang ang tinatanggap; kung hindi
-    // pinadala (undefined), hindi ito galaw (tatanggalin sa ibaba).
-    is_active: typeof productData.is_active === 'boolean' ? productData.is_active : undefined,
     order_type: productData.order_type,
     price: productData.price,
     inclusion: productData.inclusion,
@@ -367,6 +364,11 @@ export const deleteDatabaseProduct = async (id) => {
   } catch (error) {
     throw new Error(`Service Error (deleteDatabaseProduct): ${error.message}`);
   }
+};
+
+export const archiveDatabaseProduct = async (id, archived) => {
+  const response = await ProductModel.setArchived(id, archived);
+  return response.data;
 };
 
 export const uploadImageToProductBucket = async (file) => {
@@ -1039,7 +1041,7 @@ const buildEventAdsPayload = async () => {
     const { data: productsData, error: prodError } = await supabase
       .from('products')
       .select('id, name, category, price, image_url, pricing_mode, price_matrix, event_tags')
-      .eq('is_active', true);
+      .or('is_archived.eq.false,is_archived.is.null');
 
     if (prodError) throw prodError;
 

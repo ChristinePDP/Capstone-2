@@ -125,7 +125,7 @@ export default function CelebrationTab() {
     () => allProducts.filter(p =>
       p.category === 'Celebration Material' &&
       needsNoStock(p) &&
-      p.is_active !== false
+      p.is_archived !== true
     ),
     [allProducts]
   );
@@ -162,7 +162,7 @@ export default function CelebrationTab() {
       .filter(p =>
         p.category === 'Celebration Material' &&
         !needsNoStock(p) &&
-        p.is_active !== false &&
+        p.is_archived !== true &&
         !linkedIds.has(p.id)
       )
       .map(p => ({

@@ -63,7 +63,7 @@ const ProductSchema = z.object({
   price:             z.coerce.number().min(0),
   inclusion:         z.string().default(''),
   daily_limit:       z.coerce.number().int().min(0).default(0),
-  is_active:         z.boolean().default(true),
+  is_archived:       z.boolean().default(false),
   allow_file_upload: z.boolean().default(false),
   variants: z.array(z.object({
     label: z.string().min(1),

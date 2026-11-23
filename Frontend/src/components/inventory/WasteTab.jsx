@@ -231,7 +231,7 @@ export default function WasteTab() {
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState('All');
+  const [filterReason, setFilterReason] = useState('All');
   const [filterDate, setFilterDate] = useState('All');
 
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -268,14 +268,19 @@ export default function WasteTab() {
   const [formErrors, setFormErrors] = useState({}); // inline field errors ng modal
   const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
 
+  const reasonOptions = useMemo(
+    () => ['All', ...new Set(wasteLogs.map(log => log.reason).filter(Boolean))],
+    [wasteLogs]
+  );
+
   const filteredLogs = useMemo(() => {
     return wasteLogs.filter(log => {
       const matchesSearch = log.item?.toLowerCase().includes(search.toLowerCase()) || 
                             log.reason?.toLowerCase().includes(search.toLowerCase()) ||
                             (log.notes && log.notes.toLowerCase().includes(search.toLowerCase()));
-      const matchesType = filterType === 'All' || log.type === filterType;
+      const matchesReason = filterReason === 'All' || log.reason === filterReason;
 
-      if (!matchesSearch || !matchesType) return false;
+      if (!matchesSearch || !matchesReason) return false;
       if (filterDate === 'All') return true;
 
       if (!log.dt) return false;
@@ -295,7 +300,7 @@ export default function WasteTab() {
       }
       return true;
     });
-  }, [wasteLogs, search, filterType, filterDate]);
+  }, [wasteLogs, search, filterReason, filterDate]);
 
   const pagedLogs = useMemo(() => {
     const start = (page - 1) * PER_PAGE;
@@ -556,18 +561,14 @@ export default function WasteTab() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700 min-w-[130px]">
-                <Filter size={13} className="text-gray-400 shrink-0" />
-                <select 
-                  className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" 
-                  value={filterType} 
-                  onChange={e => { setFilterType(e.target.value); setPage(1); }}
-                >
-                  <option value="All">All Categories</option>
-                  <option value="ingredient">Ingredient</option>
-                  <option value="product">Finished Product</option>
-                  <option value="material">Product Material</option>
-                </select>
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <Filter size={14} className="shrink-0 text-gray-400" />
+                {reasonOptions.map(reasonOption => {
+                  const active = filterReason === reasonOption;
+                  return <button key={reasonOption} type="button" onClick={() => { setFilterReason(reasonOption); setPage(1); }} className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${active ? 'border-brand-800 bg-brand-800 text-white' : 'border-brand-200 bg-white text-brand-700 hover:bg-brand-50'}`}>
+                    {reasonOption === 'All' ? 'All Reasons' : reasonOption}
+                  </button>;
+                })}
               </div>
 
               <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700 min-w-[110px]">

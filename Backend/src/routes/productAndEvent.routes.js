@@ -5,6 +5,7 @@ import {
   addProduct, 
   editProduct,
   removeProduct,
+  setProductArchived,
   uploadProductImage,
   removeUploadedImage,
   cleanupOrphanImages,
@@ -82,6 +83,7 @@ router.get('/bundles/:id', getBundle);
 router.get('/events/:id', getEvent);
 router.post('/add', addProduct);
 router.put('/:id', editProduct);
+router.patch('/:id/archive', setProductArchived);
 // NOTE: dapat NASA ITAAS ng router.delete('/:id') ang '/upload-image',
 // kung hindi ay mate-treat itong id = "upload-image".
 router.delete('/upload-image', removeUploadedImage);

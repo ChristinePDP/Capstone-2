@@ -298,6 +298,16 @@ function getQuantityLimit(item, orderType = 'Buy Now') {
   return item.buy_now_available_stock ?? item.available_stock ?? 0;
 }
 
+function isUnavailableInPos(item, orderType) {
+  const type = String(item.order_type || 'Both').toLowerCase().replace(/[^a-z]/g, '');
+  const preOrderOnly = type.includes('preorder') && !type.includes('pickup') && !type.includes('buynow');
+  const pickupOnly = (type.includes('pickup') || type.includes('buynow')) && !type.includes('preorder');
+  if (orderType === 'Buy Now' && preOrderOnly) return true;
+  if (orderType === 'Pre-Order' && pickupOnly) return true;
+  if (!isQuantityTracked(item, orderType)) return false;
+  return getQuantityLimit(item, orderType) <= 0;
+}
+
 // --- ORDER SLIP / OPTIONS MODAL ---
 function PosProductModal({ product, onClose, onAddToCart, checkAndWarnLimit }) {
   const [slipAnswers, setSlipAnswers] = useState({});
@@ -1261,8 +1271,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
 
   const displayItems = useMemo(() => {
     const regularProducts = products.filter(p => p.category !== 'Package');
-    return [...visibleBundleItems, ...regularProducts];
-  }, [visibleBundleItems, products]);
+    return [...visibleBundleItems, ...regularProducts].filter(p => !isUnavailableInPos(p, orderType));
+  }, [visibleBundleItems, products, orderType]);
 
   const categories = useMemo(() => {
     return bundleItems.length > 0

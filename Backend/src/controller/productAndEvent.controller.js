@@ -3,6 +3,7 @@ import {
   createDatabaseProduct, 
   updateDatabaseProduct,
   deleteDatabaseProduct,
+  archiveDatabaseProduct,
   uploadImageToProductBucket,
   deleteImageFromBucket,
   cleanOrphanImages,
@@ -48,7 +49,12 @@ const getCachedEvents = async (activeOnly) => {
 
 export const getProducts = async (req, res) => {
   try {
-    const products = await getAllProducts(req.query);
+    const products = await getAllProducts({
+      ...req.query,
+      // Admin catalog needs both regular and archived rows so its Archives
+      // view can filter locally. Public product reads stay archive-filtered.
+      archiveOnly: req.path.endsWith('/catalog') ? false : undefined,
+    });
     res.status(200).json({
       success: true,
       message: 'Products fetched successfully',
@@ -136,6 +142,16 @@ export const removeProduct = async (req, res) => {
       message: 'Failed to delete product.', 
       error: error.message 
     });
+  }
+};
+
+export const setProductArchived = async (req, res) => {
+  try {
+    const product = await archiveDatabaseProduct(req.params.id, req.body?.archived === true);
+    emitRealtimeChange({ table: 'products', event: 'UPDATE', recordId: req.params.id });
+    res.status(200).json({ success: true, message: 'Product archive status updated.', data: product });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update product archive status.', error: error.message });
   }
 };
 
