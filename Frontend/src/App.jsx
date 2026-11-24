@@ -51,43 +51,46 @@ function PosStandaloneLayout({ children, onLogout, activeTab, onTabChange }) {
 
   return (
     <div className="h-[100dvh] w-full overflow-hidden bg-brand-50 flex flex-col">
-      <header className="h-14 shrink-0 bg-white border-b border-brand-200 px-3 md:px-5 flex items-center justify-between gap-3">
-        <div className="flex items-center min-w-0 gap-2">
+      <header className="relative isolate h-14 shrink-0 overflow-hidden bg-[#3B1F0A] border-b border-[#6B4428] px-3 md:px-5 flex items-center justify-between gap-3 text-[#FFF8EE]">
+        <span aria-hidden="true" className="pointer-events-none absolute -top-16 left-[28%] h-44 w-44 rounded-full bg-[#D7A86E]/[0.09]" />
+        <span aria-hidden="true" className="pointer-events-none absolute -bottom-24 right-[12%] h-48 w-48 rounded-full bg-[#F7E7D2]/[0.06]" />
+        <span aria-hidden="true" className="pointer-events-none absolute -top-20 right-[-2rem] h-36 w-36 rounded-full bg-black/[0.12]" />
+        <div className="relative z-10 flex items-center min-w-0 gap-2">
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="md:hidden w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-brand-700 hover:bg-brand-50"
+            className="md:hidden w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-[#FFF8EE] hover:bg-white/10"
             aria-label="Open navigation menu"
           >
             <MenuIcon size={20} strokeWidth={2.2} />
           </button>
           <img src={brandLogo} alt="Aileen Cake Max" className="hidden md:block h-9 w-9 object-contain shrink-0" />
-          <h1 className="text-[16px] md:text-[20px] font-bold text-brand-800 tracking-wide truncate">
+          <h1 className="text-[16px] md:text-[20px] font-bold text-[#FFF8EE] tracking-wide truncate">
             {activeTab === 'pos' ? 'Point of Sale' : 'All Orders'}
           </h1>
         </div>
-        <nav className="hidden md:flex min-w-0 items-center gap-5" aria-label="Point of Sale sections">
+        <nav className="relative z-10 hidden md:flex min-w-0 items-center gap-5" aria-label="Point of Sale sections">
           <button
             type="button"
             onClick={() => onTabChange('pos')}
-            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'pos' ? 'text-brand-800' : 'text-brand-400 hover:text-brand-700'}`}
+            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'pos' ? 'text-[#FFF8EE]' : 'text-[#D8C2AA] hover:text-white'}`}
           >
             Point of Sale
-            {activeTab === 'pos' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-brand-800" />}
+            {activeTab === 'pos' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-[#E7B978]" />}
           </button>
           <button
             type="button"
             onClick={() => onTabChange('orders')}
-            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'orders' ? 'text-brand-800' : 'text-brand-400 hover:text-brand-700'}`}
+            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'orders' ? 'text-[#FFF8EE]' : 'text-[#D8C2AA] hover:text-white'}`}
           >
             All Orders
-            {activeTab === 'orders' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-brand-800" />}
+            {activeTab === 'orders' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-[#E7B978]" />}
           </button>
         </nav>
         <button
           type="button"
           onClick={onLogout}
-          className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-brand-700 hover:bg-brand-50 transition-colors"
+          className="relative z-10 hidden md:flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-[#FFF8EE] hover:bg-white/10 transition-colors"
         >
           <LogOut size={18} />
           <span>Log out</span>
