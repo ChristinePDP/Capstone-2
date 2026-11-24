@@ -16,7 +16,7 @@ const AuthModel = {
   getAdminById: (userId) =>
     supabase
       .from('admins')
-      .select('id, name, email, role, created_at')
+      .select('*')
       .eq('id', userId)
       .single(),
 
