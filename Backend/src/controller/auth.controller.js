@@ -9,8 +9,8 @@ const AuthController = {
     try {
       const body   = LoginSchema.parse(req.body);
       const result = await AuthService.login(body.email, body.password, body.workspace);
-      const isLocalRequest =
-        !process.env.NODE_ENV || process.env.NODE_ENV !== 'production';
+      const origin = String(req.headers.origin || '');
+      const isLocalRequest = /^https?:\/\/(localhost|127\.0\.0\.1)(:\\d+)?$/i.test(origin);
 
       res.cookie('token', result.token, {
         httpOnly: true,
