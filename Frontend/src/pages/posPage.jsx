@@ -189,15 +189,9 @@ export default function PosPage({ standalone = false }) {
         ? [record?.product_id]
         : table === 'order_items' ? [record?.product_id] : table === 'products' ? [record?.id || recordId] : [];
       if (table === 'orders' && recordId && operation !== 'DELETE') {
-        try {
-          const API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3000/api`;
-          const response = await apiClient.get(`${API_BASE}/allOrders/${encodeURIComponent(recordId)}`);
-          const order = response.data?.data;
-          productIds = [...new Set((order?.items || order?.order_items || []).map(item => item.product_id).filter(Boolean))];
-        } catch (error) {
-          console.error('Silent POS order refresh failed:', error);
-          return;
-        }
+        posProductsCache = null;
+        loadProducts(true, true).catch(error => console.error('Silent POS refresh failed:', error));
+        return;
       }
       productIds = [...new Set(productIds.filter(Boolean).map(String))];
       if (productIds.length === 0) {

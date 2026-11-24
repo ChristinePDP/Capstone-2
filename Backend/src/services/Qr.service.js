@@ -5,7 +5,15 @@ import { completeOrderAndDeductStock } from './onlineOrdering.service.js';
 export const scanOrderByNumber = async (orderNumber) => {
   try {
     const data = await OrdersModel.findByOrderNumber(orderNumber);
-    return data;
+    if (!data) return data;
+    const transactionGroupId = data.transaction_group_id || null;
+    if (!transactionGroupId) return data;
+    const transactionOrders = await OrdersModel.findByTransactionGroupId(transactionGroupId);
+    return {
+      ...data,
+      transactionOrders,
+      transactionGroupId,
+    };
   } catch (error) {
     throw new Error(error.message);
   }

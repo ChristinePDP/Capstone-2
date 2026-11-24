@@ -74,7 +74,7 @@ function ProtectedPosRoute() {
   if (!authReady) return null;
 
   if (!isAuthed) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+    return <Navigate to="/login" replace />;
   }
 
   if (!hasStoredRole('cashier')) {
@@ -156,6 +156,7 @@ function ProtectedPosRoute() {
 
 function ProtectedAdminRoute({ children }) {
   const { isAuthed, authReady, authError, retryAuth, logout } = useApp();
+  const location = useLocation();
 
   if (!authReady) {
     return null;
@@ -285,6 +286,22 @@ function CakeSliceIcon({ className }) {
 // protected route (hal. "/inventory") nang hindi pa naka-login.
 function Unauthorized() {
   const navigate = useNavigate();
+  const { isAuthed, logout } = useApp();
+  const hasCashierAccess = hasStoredRole('cashier');
+  const hasAdminAccess = hasStoredRole('admin');
+
+  const handleSignIn = async () => {
+    try {
+      await authService.logout();
+    } catch {
+      // Continue to the login page even if the logout request fails.
+    } finally {
+      logout();
+      localStorage.removeItem('isLoggedIn');
+      localStorage.removeItem('admin');
+      navigate('/login', { replace: true });
+    }
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#FBF6EF] px-6">
@@ -294,15 +311,29 @@ function Unauthorized() {
         <h1 className="mb-3 text-2xl font-semibold text-stone-800">
           This part of the kitchen is RESTRICTED
         </h1>
-        <p className="mb-8 text-stone-500">
-          Sign in with your admin account to reach this page.
+        <p className="mb-6 text-stone-500">
+          {hasCashierAccess
+            ? 'This account is restricted to Point of Sale. Sign in with an admin account to open the Admin UI.'
+            : 'Sign in with your admin account to reach this page.'}
         </p>
-        <button
-          onClick={() => navigate('/login', { replace: true })}
-          className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white transition-colors hover:bg-brand-700"
-        >
-          Sign in
-        </button>
+        <div className="flex flex-col gap-3">
+          {isAuthed && hasCashierAccess && (
+            <button
+              onClick={() => navigate('/pos', { replace: true })}
+              className="w-full rounded-lg border border-brand-300 bg-white py-2.5 font-medium text-brand-700 transition-colors hover:bg-brand-50"
+            >
+              Back to Current Page
+            </button>
+          )}
+          {(!isAuthed || (isAuthed && !hasAdminAccess)) && (
+            <button
+              onClick={handleSignIn}
+              className="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white transition-colors hover:bg-brand-700"
+            >
+              Sign in to Admin
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

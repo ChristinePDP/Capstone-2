@@ -40,6 +40,7 @@ export default function Confirm({ orderId }) {
           orderType,
           items,
           total: Number(order.grand_total ?? order.grandTotal ?? items.reduce((sum, item) => sum + (item.price ?? 0) * (item.qty ?? 1), 0)),
+          balance: Number(order.balance ?? 0),
         };
       })
     : [{ order_number: id, orderType: state.orderType || 'Buy Now', items: cart, total: 0 }];
@@ -53,6 +54,9 @@ export default function Confirm({ orderId }) {
   const halfAmount = totalAmount / 2;
   const amountPaid = manualOrder?.amountPaid ?? (paymentType === 'half' ? halfAmount : totalAmount);
   const balance = manualOrder?.balance ?? (paymentType === 'half' ? halfAmount : 0);
+  const preOrderBalance = isMixedOrder
+    ? orderGroups.find(group => (group.orderType || '').toLowerCase() === 'pre-order')?.balance ?? balance
+    : balance;
 
   const orderDate = state.orderDate
     ? new Date(state.orderDate)
@@ -171,6 +175,12 @@ export default function Confirm({ orderId }) {
                       <span>Order total</span>
                       <span>{formatPeso(group.total)}</span>
                     </div>
+                    {isMixedOrder && String(group.orderType || '').toLowerCase() === 'pre-order' && group.balance > 0 && (
+                      <div className="flex justify-between mt-1 text-[10px] font-bold text-[#7C3AED]">
+                        <span>Balance upon Pre-Order pickup</span>
+                        <span>{formatPeso(group.balance)}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -181,16 +191,18 @@ export default function Confirm({ orderId }) {
                   <span>{formatPeso(totalAmount)}</span>
                 </div>
                 <div className="flex justify-between items-center text-[10px] sm:text-[11px] text-[#3B1F0A] font-semibold">
-                  <span className="uppercase tracking-[0.1em]">Paid ({paymentType === 'half' ? '50% Deposit' : 'Full'})</span>
+                  <span className="uppercase tracking-[0.1em]">
+                    Paid ({isMixedOrder && paymentType === 'half' ? 'Buy Now Full + Pre-Order 50%' : paymentType === 'half' ? '50% Deposit' : 'Full'})
+                  </span>
                   <span className="text-[#15803D]">{formatPeso(amountPaid)}</span>
                 </div>
                 <div className="w-full h-px bg-[#DED4CC] my-0.5"></div>
                 <div className="flex justify-between items-center">
                   <span className="text-[11px] uppercase tracking-[0.15em] text-[#8A7264] font-bold">
-                    Balance
+                    Balance upon Pre-Order pickup
                   </span>
                   <span className="font-serif text-base sm:text-lg text-[#3B1F0A]">
-                    {formatPeso(balance)}
+                    {formatPeso(isMixedOrder ? preOrderBalance : balance)}
                   </span>
                 </div>
               </div>
@@ -274,6 +286,12 @@ export default function Confirm({ orderId }) {
                         <span>Order total</span>
                         <span>{formatPeso(group.total)}</span>
                       </div>
+                      {isMixedOrder && String(group.orderType || '').toLowerCase() === 'pre-order' && group.balance > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, fontWeight: 700, color: '#7C3AED' }}>
+                          <span>Balance upon Pre-Order pickup</span>
+                          <span>{formatPeso(group.balance)}</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -284,16 +302,16 @@ export default function Confirm({ orderId }) {
                     <span>{formatPeso(totalAmount)}</span>
                   </div>
                   <div className="flex justify-between items-center text-[11px] text-[#3B1F0A] font-semibold" style={{ lineHeight: 1.6 }}>
-                    <span className="uppercase tracking-[0.1em]">Paid ({paymentType === 'half' ? '50% Deposit' : 'Full'})</span>
+                    <span className="uppercase tracking-[0.1em]">Paid ({isMixedOrder && paymentType === 'half' ? 'Buy Now Full + Pre-Order 50%' : paymentType === 'half' ? '50% Deposit' : 'Full'})</span>
                     <span className="text-[#15803D]">{formatPeso(amountPaid)}</span>
                   </div>
                   <div className="w-full h-px bg-[#DED4CC] my-1"></div>
                   <div className="flex justify-between items-center">
                     <span className="text-[11px] uppercase tracking-[0.15em] text-[#8A7264] font-bold" style={{ lineHeight: 1.6 }}>
-                      Balance
+                      {isMixedOrder ? 'Balance upon Pre-Order pickup' : 'Balance'}
                     </span>
                     <span className="font-serif text-lg text-[#3B1F0A]" style={{ lineHeight: 1.6 }}>
-                      {formatPeso(balance)}
+                      {formatPeso(isMixedOrder ? preOrderBalance : balance)}
                     </span>
                   </div>
                 </div>
