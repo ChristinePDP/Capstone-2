@@ -149,8 +149,11 @@ export function AppProvider({ children }) {
     }
 
     getProfile()
-      .then(() => {
+      .then((response) => {
         if (active) {
+          if (response?.data) {
+            localStorage.setItem('admin', JSON.stringify(response.data));
+          }
           localStorage.setItem('isLoggedIn', 'true');
           setAuthError(null);
           setIsAuthed(true);

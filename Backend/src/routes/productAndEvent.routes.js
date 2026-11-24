@@ -22,7 +22,7 @@ import {
   editBundle,
   removeBundle
 } from '../controller/productAndEvent.controller.js';
-import { authMiddlewareJwt } from '../middleware/auth.middleware.js';
+import { authMiddlewareJwt, requireRole } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -78,6 +78,7 @@ router.get('/event-ads', getEventAds);
 // Public reads above are consumed by customer-facing pages. Admin mutations
 // and management reads below require the logged-in admin session.
 router.use(authMiddlewareJwt);
+router.use(requireRole('admin'));
 
 router.get('/bundles/:id', getBundle);
 router.get('/events/:id', getEvent);

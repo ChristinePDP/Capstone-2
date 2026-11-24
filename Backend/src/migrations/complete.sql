@@ -5,6 +5,8 @@ CREATE TABLE public.admins (
   id uuid NOT NULL,
   name text NOT NULL,
   email text NOT NULL UNIQUE,
+  role text NOT NULL DEFAULT 'admin'
+    CHECK (role in ('admin', 'cashier', 'admin,cashier', 'cashier,admin')),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT admins_pkey PRIMARY KEY (id),
   CONSTRAINT admins_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id)

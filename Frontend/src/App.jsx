@@ -17,6 +17,28 @@ import { ToastProvider, ErrorState } from './components/ui/index.jsx';
 import { Layout } from './components/Sidebar.jsx';
 import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
 
+function normalizeRoles(role) {
+  const roles = String(role || 'admin')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+  const uniqueRoles = [...new Set(roles)];
+  return ['admin', 'cashier'].filter(value => uniqueRoles.includes(value));
+}
+
+function getStoredAdminRoles() {
+  try {
+    const admin = JSON.parse(localStorage.getItem('admin') || 'null');
+    return normalizeRoles(admin?.role);
+  } catch {
+    return ['admin'];
+  }
+}
+
+function hasStoredRole(role) {
+  return getStoredAdminRoles().includes(role);
+}
+
 function PosStandaloneLayout({ children, onLogout }) {
   return (
     <div className="h-[100dvh] w-full overflow-hidden bg-brand-50 flex flex-col">
@@ -53,6 +75,10 @@ function ProtectedPosRoute() {
 
   if (!isAuthed) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  if (!hasStoredRole('cashier')) {
+    return <Navigate to="/unauthorized" replace />;
   }
 
   if (authError) {
@@ -142,6 +168,10 @@ function ProtectedAdminRoute({ children }) {
     return <Navigate to="/unauthorized" replace />;
   }
 
+  if (!hasStoredRole('admin')) {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
   if (authError) {
     return (
       <div className="min-h-screen bg-brand-50 px-4 py-12 flex items-center justify-center">
@@ -180,7 +210,13 @@ function GuestRoute({ children }) {
 
   if (isAuthed) {
     const savedWorkspace = localStorage.getItem('login_workspace');
-    return <Navigate to={savedWorkspace === 'pos' ? '/pos' : '/analytics'} replace />;
+    if (savedWorkspace === 'pos' && hasStoredRole('cashier')) {
+      return <Navigate to="/pos" replace />;
+    }
+    if (savedWorkspace !== 'pos' && hasStoredRole('admin')) {
+      return <Navigate to="/analytics" replace />;
+    }
+    return <Navigate to="/unauthorized" replace />;
   }
 
   return children;
@@ -208,8 +244,17 @@ function LoginRoute() {
   const navigate = useNavigate();
   const { login } = useApp();
 
-  const handleLogin = (_admin, workspace) => {
+  const handleLogin = (admin, workspace) => {
     login();               // i-sync ang AppContext (triggers fetchAll)
+    const roles = normalizeRoles(admin?.role);
+    if (workspace === 'pos' && !roles.includes('cashier')) {
+      navigate('/unauthorized', { replace: true });
+      return;
+    }
+    if (workspace === 'admin' && !roles.includes('admin')) {
+      navigate('/unauthorized', { replace: true });
+      return;
+    }
     navigate(workspace === 'pos' ? '/pos' : '/analytics', { replace: true });
   };
 

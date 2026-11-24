@@ -8,7 +8,7 @@ const AuthController = {
   login: async (req, res, next) => {
     try {
       const body   = LoginSchema.parse(req.body);
-      const result = await AuthService.login(body.email, body.password);
+      const result = await AuthService.login(body.email, body.password, body.workspace);
       const isLocalRequest =
         !process.env.NODE_ENV || process.env.NODE_ENV !== 'production';
 

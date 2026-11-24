@@ -6,6 +6,7 @@ const LoginSchema = z.object({
   email:    z.string().trim().toLowerCase().email('Please enter a valid email address.'),
   // Login validates presence only; password strength belongs to password creation/reset.
   password: z.string().min(1, 'Password is required.'),
+  workspace: z.enum(['admin', 'pos']).optional(),
 });
 
 // Validate the credentials submitted by the logged-in password-change form using the same password rules as recovery.

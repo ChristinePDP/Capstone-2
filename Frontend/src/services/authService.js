@@ -8,9 +8,9 @@ function getApiErrorMessage(error, fallback) {
   return fieldError || response?.message || fallback;
 }
 
-export async function login(email, password) {
+export async function login(email, password, workspace = null) {
   try {
-    const res = await axios.post(`${API_BASE}/login`, { email, password }, {
+    const res = await axios.post(`${API_BASE}/login`, { email, password, workspace }, {
       withCredentials: true 
     });
     localStorage.setItem('isLoggedIn', 'true');

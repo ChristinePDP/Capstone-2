@@ -444,7 +444,7 @@ export default function LoginPage({ onLogin }) {
 
     setLoginPending(true);
     try {
-      const result = await authService.login(email, password);
+      const result = await authService.login(email, password, workspace);
       localStorage.setItem('login_workspace', workspace);
       onLogin(result.admin, workspace);
     } catch (err) {

@@ -1,7 +1,20 @@
 import jwt from 'jsonwebtoken';
 import { AuthModel } from '../model/auth.model.js';
 
-async function login(email, password) {
+function normalizeRoles(role) {
+  const roles = String(role || 'admin')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .filter(Boolean);
+  const uniqueRoles = [...new Set(roles)];
+  return ['admin', 'cashier'].filter(value => uniqueRoles.includes(value));
+}
+
+function roleIncludes(role, requiredRole) {
+  return normalizeRoles(role).includes(requiredRole);
+}
+
+async function login(email, password, workspace = null) {
   const { data: authData, error: authError } = await AuthModel.signIn(email, password);
   if (authError || !authData?.user) {
     const err = new Error('Invalid email or password');
@@ -16,8 +29,22 @@ async function login(email, password) {
     throw err;
   }
 
+  const normalizedRole = normalizeRoles(admin.role).join(',');
+  admin.role = normalizedRole;
+
+  if (workspace === 'admin' && !roleIncludes(normalizedRole, 'admin')) {
+    const err = new Error('This account does not have Admin Dashboard access');
+    err.statusCode = 403;
+    throw err;
+  }
+  if (workspace === 'pos' && !roleIncludes(normalizedRole, 'cashier')) {
+    const err = new Error('This account does not have Point of Sale access');
+    err.statusCode = 403;
+    throw err;
+  }
+
   const token = jwt.sign(
-    { id: admin.id, email: admin.email, name: admin.name },
+    { id: admin.id, email: admin.email, name: admin.name, role: normalizedRole },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
   );
