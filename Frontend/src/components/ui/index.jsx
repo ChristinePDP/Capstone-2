@@ -439,14 +439,18 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confi
     setIsProcessing(true);
     try {
       await onConfirm();
+      onClose();
+    } catch (error) {
+      // Keep the confirmation open when the async operation fails so the
+      // customer/action can retry instead of appearing as completed.
+      console.error('Confirmation action failed:', error);
     } finally {
       setIsProcessing(false);
     }
-    onClose();
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-brand-900/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[130] flex items-center justify-center p-3 sm:p-4 bg-brand-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-md max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain shadow-2xl p-4 sm:p-6 animate-modalIn">
         <h3 className="text-base sm:text-lg font-bold text-brand-800 mb-2 leading-snug wrap-break-word">{title}</h3>
         <p className="text-xs sm:text-sm text-brand-500 mb-4 sm:mb-6 leading-relaxed wrap-break-word">{message}</p>

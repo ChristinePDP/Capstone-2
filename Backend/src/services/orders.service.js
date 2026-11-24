@@ -347,13 +347,30 @@ const OrdersService = {
       err.status = 404;
       throw err;
     }
-    if (order.status !== 'Pending Verification' || !getStoredPaymentProofPath(order)) {
+    if (order.status !== 'Pending Verification') {
       return null;
     }
-    // The database locks the order and transitions its reservation in the
-    // same transaction, so racing accept/reject actions cannot split state.
-    const changed = await CheckoutReservationModel.verifyPayment(id, accepted, adminId);
-    if (!changed) return null;
+    // Update the payment record first. Stock reservation cleanup is
+    // secondary and must never prevent payment verification from completing.
+    const directOrder = await OrdersModel.updatePaymentVerification(
+      id,
+      accepted ? 'Accepted' : 'Rejected',
+      adminId
+    );
+    if (!directOrder) return null;
+
+    if (order.checkout_reservation_id) {
+      try {
+        await (accepted
+          ? CheckoutReservationModel.commit(order.checkout_reservation_id)
+          : CheckoutReservationModel.release(order.checkout_reservation_id));
+      } catch (reservationError) {
+        console.warn(
+          '[PAYMENT VERIFY] Payment updated but reservation cleanup failed:',
+          reservationError?.message || reservationError
+        );
+      }
+    }
     const updated = await OrdersModel.findById(id);
     emitRealtimeChange({ table: 'orders', event: 'UPDATE', recordId: id });
     return updated;

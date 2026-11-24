@@ -72,7 +72,7 @@ const OrdersController = {
 
   async acceptPayment(req, res, next) {
     try {
-      const order = await OrdersService.verifyPayment(req.params.id, true, req.user?.id);
+      const order = await OrdersService.verifyPayment(req.params.id, true, req.admin?.id);
       if (!order) return res.status(409).json({ success: false, message: 'Order is no longer pending verification.' });
       return res.json({ success: true, data: order });
     } catch (err) { next(err); }
@@ -80,7 +80,7 @@ const OrdersController = {
 
   async rejectPayment(req, res, next) {
     try {
-      const order = await OrdersService.verifyPayment(req.params.id, false, req.user?.id);
+      const order = await OrdersService.verifyPayment(req.params.id, false, req.admin?.id);
       if (!order) return res.status(409).json({ success: false, message: 'Order is no longer pending verification.' });
       return res.json({ success: true, data: order });
     } catch (err) { next(err); }

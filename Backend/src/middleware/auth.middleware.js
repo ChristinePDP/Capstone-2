@@ -37,4 +37,17 @@ function requireRole(requiredRole) {
   };
 }
 
-export { authMiddlewareJwt, requireRole };
+function requireAnyRole(requiredRoles) {
+  return (req, res, next) => {
+    const accountRoles = normalizeRoles(req.admin?.role);
+    if (!requiredRoles.some(requiredRole => accountRoles.includes(requiredRole))) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Required role: ${requiredRoles.join(' or ')}.`,
+      });
+    }
+    return next();
+  };
+}
+
+export { authMiddlewareJwt, requireRole, requireAnyRole };

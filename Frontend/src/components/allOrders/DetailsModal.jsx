@@ -921,11 +921,7 @@ function DetailsModalContent({ order, isOpen, onClose, onStatusChange, onPayment
         isOpen={Boolean(paymentAction)}
         onClose={() => setPaymentAction(null)}
         onConfirm={async () => {
-          try {
-            await onPaymentVerification(order.id, paymentAction === 'accept');
-          } catch {
-            // Parent handles the error toast.
-          }
+          await onPaymentVerification(order.id, paymentAction === 'accept');
         }}
         title={paymentAction === 'accept' ? 'Accept Payment' : 'Reject Payment'}
         message={paymentAction === 'accept'

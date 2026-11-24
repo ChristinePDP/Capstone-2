@@ -1,12 +1,12 @@
 // backend/routes/orders.routes.js
 import { Router } from 'express';
 import { OrdersController } from '../controller/orders.controller.js';
-import { authMiddlewareJwt, requireRole } from '../middleware/auth.middleware.js';
+import { authMiddlewareJwt, requireAnyRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
 router.use(authMiddlewareJwt);
-router.use(requireRole('admin'));
+router.use(requireAnyRole(['admin', 'cashier']));
 
 // GET  /api/inventory/orders          -> lahat ng orders
 router.get('/', OrdersController.getAllOrders);

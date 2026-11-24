@@ -93,6 +93,7 @@ const [selectedOrder, setSelectedOrder] = useState(() => loadSaved(location.key)
       showToast(`Order status updated to ${status}.`);
     } catch (err) {
       showToast(err.message || 'Failed to update status.', 'error');
+      throw err;
     }
   };
 

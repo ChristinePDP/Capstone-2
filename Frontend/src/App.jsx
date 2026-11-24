@@ -16,6 +16,8 @@ import SettingsPage from './pages/settingsPage.jsx'; // <-- ADDED
 import { ToastProvider, ErrorState } from './components/ui/index.jsx';
 import { Layout } from './components/Sidebar.jsx';
 import { AppProvider, useApp } from './context/AppContext.jsx'; // <-- useApp ADDED
+import { Menu as MenuIcon, X, ShoppingCart, ClipboardCheck, LogOut } from 'lucide-react';
+import brandLogo from './assets/427bffe9-d983-4566-9ec9-de6c2b1bdaa2-removebg-preview.png';
 
 function normalizeRoles(role) {
   const roles = String(role || 'admin')
@@ -39,27 +41,115 @@ function hasStoredRole(role) {
   return getStoredAdminRoles().includes(role);
 }
 
-function PosStandaloneLayout({ children, onLogout }) {
+function PosStandaloneLayout({ children, onLogout, activeTab, onTabChange }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const chooseTab = (tab) => {
+    onTabChange(tab);
+    setMobileMenuOpen(false);
+  };
+
   return (
     <div className="h-[100dvh] w-full overflow-hidden bg-brand-50 flex flex-col">
       <header className="h-14 shrink-0 bg-white border-b border-brand-200 px-3 md:px-5 flex items-center justify-between gap-3">
         <div className="flex items-center min-w-0 gap-2">
-          <div className="w-8 h-8 rounded-lg bg-brand-800 text-white flex items-center justify-center font-serif font-bold text-sm shrink-0">
-            A
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm md:text-base font-bold text-brand-800 leading-tight truncate">Aileen Cake Max</p>
-            <p className="text-[9px] md:text-[10px] uppercase tracking-[0.18em] text-brand-400 font-semibold">Point of Sale</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="md:hidden w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-brand-700 hover:bg-brand-50"
+            aria-label="Open navigation menu"
+          >
+            <MenuIcon size={20} strokeWidth={2.2} />
+          </button>
+          <img src={brandLogo} alt="Aileen Cake Max" className="hidden md:block h-9 w-9 object-contain shrink-0" />
+          <h1 className="text-[16px] md:text-[20px] font-bold text-brand-800 tracking-wide truncate">
+            {activeTab === 'pos' ? 'Point of Sale' : 'All Orders'}
+          </h1>
         </div>
+        <nav className="hidden md:flex min-w-0 items-center gap-5" aria-label="Point of Sale sections">
+          <button
+            type="button"
+            onClick={() => onTabChange('pos')}
+            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'pos' ? 'text-brand-800' : 'text-brand-400 hover:text-brand-700'}`}
+          >
+            Point of Sale
+            {activeTab === 'pos' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-brand-800" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('orders')}
+            className={`relative h-14 px-1 text-sm font-bold tracking-wide transition-colors ${activeTab === 'orders' ? 'text-brand-800' : 'text-brand-400 hover:text-brand-700'}`}
+          >
+            All Orders
+            {activeTab === 'orders' && <span className="absolute bottom-0 left-0 right-0 h-[3px] rounded-full bg-brand-800" />}
+          </button>
+        </nav>
         <button
           type="button"
           onClick={onLogout}
-          className="px-3 py-2 rounded-lg bg-brand-800 text-white text-xs md:text-sm font-semibold hover:bg-brand-900 transition-colors"
+          className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-brand-700 hover:bg-brand-50 transition-colors"
         >
-          Logout
+          <LogOut size={18} />
+          <span>Log out</span>
         </button>
       </header>
+
+      {mobileMenuOpen && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-[2500] bg-brand-900/40 backdrop-blur-[2px]"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-label="Close navigation menu"
+          />
+          <aside className="fixed inset-y-0 left-0 z-[2600] w-[220px] max-w-[82vw] bg-[#3B1F0A] border-r border-white/10 shadow-2xl flex flex-col overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(false)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10"
+              aria-label="Close navigation menu"
+            >
+              <X size={18} />
+            </button>
+            <div className="flex flex-col items-center px-4 pt-7 pb-4 border-b border-white/10 shrink-0">
+              <img src={brandLogo} alt="Aileen Cake Max" className="w-[72px] aspect-square object-contain" />
+              <h2 className="font-serif text-[16px] font-bold text-white tracking-wide text-center leading-tight mt-1">
+                Aileen Cake Max
+              </h2>
+              <p className="text-[9px] text-white/80 uppercase tracking-[0.2em] mt-0.5 font-medium text-center">Bake Shop</p>
+            </div>
+            <nav className="flex-1 p-3 overflow-y-auto" aria-label="Mobile Point of Sale sections">
+              <p className="text-[10px] font-bold text-white/50 tracking-wider mb-1 px-2">OPERATIONS</p>
+              <button
+                type="button"
+                onClick={() => chooseTab('pos')}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-semibold ${activeTab === 'pos' ? 'bg-white/20 text-white shadow-sm' : 'text-white/90 hover:bg-white/10 hover:text-white'}`}
+              >
+                <ShoppingCart size={18} /> <span>Point of Sale</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => chooseTab('orders')}
+                className={`mt-0.5 w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-semibold ${activeTab === 'orders' ? 'bg-white/20 text-white shadow-sm' : 'text-white/90 hover:bg-white/10 hover:text-white'}`}
+              >
+                <ClipboardCheck size={18} /> <span>All Orders</span>
+              </button>
+            </nav>
+            <div className="p-3 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onLogout();
+                }}
+                className="w-full flex items-center justify-center gap-3 px-3 py-2 rounded-lg text-[13px] font-semibold text-red-300 hover:bg-red-500/15 hover:text-red-200"
+              >
+                <LogOut size={20} /> <span>Log out</span>
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
       <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
     </div>
   );
@@ -70,6 +160,14 @@ function ProtectedPosRoute() {
   const location = useLocation();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [activeTab, setActiveTab] = useState(() =>
+    localStorage.getItem('pos_active_tab') === 'orders' ? 'orders' : 'pos'
+  );
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    localStorage.setItem('pos_active_tab', tab);
+  };
 
   if (!authReady) return null;
 
@@ -106,6 +204,7 @@ function ProtectedPosRoute() {
       localStorage.removeItem('pos_discountName');
       localStorage.removeItem('pos_discountPercentage');
       localStorage.removeItem('pos_paymentMode');
+      localStorage.removeItem('pos_active_tab');
       sessionStorage.removeItem('aileen_cake_max_pos_checkout_reservation_id');
       window.location.replace('/login');
     }
@@ -113,8 +212,18 @@ function ProtectedPosRoute() {
 
   return (
     <>
-      <PosStandaloneLayout onLogout={() => setShowLogoutConfirm(true)}>
-        <PosPage standalone />
+      <PosStandaloneLayout
+        onLogout={() => setShowLogoutConfirm(true)}
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+      >
+        {activeTab === 'pos' ? (
+          <PosPage standalone />
+        ) : (
+          <div className="h-full overflow-y-auto bg-brand-50 px-3 py-4 sm:px-5 lg:px-6">
+            <AllOrdersPage />
+          </div>
+        )}
       </PosStandaloneLayout>
 
       {showLogoutConfirm && (
