@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LineChart, Monitor, ClipboardCheck,
+  LineChart, ClipboardCheck,
   Package, Warehouse, X, Settings, LogOut,
   PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
@@ -13,7 +13,6 @@ const NAV = [
   {
     section: 'OPERATIONS',
     items: [
-      { label: 'Point Of Sale', icon: Monitor, to: '/pos' },
       { label: 'Orders', icon: ClipboardCheck, to: '/orders' },
       { label: 'Product & Event', icon: Package, to: '/productAndEvent' },
     ],

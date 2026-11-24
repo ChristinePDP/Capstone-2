@@ -57,7 +57,7 @@ async function fetchPosProducts(force = false) {
 // LOCAL na toast bar (walang hiwalay/bagong file, walang backdrop/
 // overlay — hindi ito modal, isa lamang maliit na banner na
 // nawawala mag-isa) dito mismo sa loob ng component.
-export default function PosPage() {
+export default function PosPage({ standalone = false }) {
   const [toast, setToast] = useState(null); // { message, type }
   const toastTimerRef = useRef(null);
 
@@ -328,7 +328,7 @@ export default function PosPage() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)] overflow-x-hidden lg:overflow-hidden w-full max-w-full text-[#3B1F0A] bg-transparent p-3 sm:p-4">
+    <div className={`flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-x-hidden lg:overflow-hidden w-full max-w-full text-[#3B1F0A] bg-transparent p-3 sm:p-4 ${standalone ? 'h-full' : 'min-h-[calc(100vh-80px)] lg:h-[calc(100vh-80px)]'}`}>
       {/* Binigyan ng pb-24 (padding-bottom) para hindi matakpan ng FAB ang ilalim sa mobile view */}
       <div className="flex-1 flex flex-col min-w-0 h-auto lg:h-full pb-24 lg:pb-0">
          {loading ? (

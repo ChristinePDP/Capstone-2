@@ -304,10 +304,15 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const navigate = useNavigate();
   const isPaymentStep = paymentOnly;
 
-  const hasPreOrder = cart.some(item => item.order_type === 'Pre-order');
-  const hasPickUpToday = cart.some(item => item.order_type === 'Pick-up Today');
+  const getCartOrderType = item => item.selected_order_type
+    || (item.order_type === 'Pre-order' ? 'Pre-Order' : 'Buy Now');
+  const hasPreOrder = cart.some(item => getCartOrderType(item) === 'Pre-Order');
+  const hasPickUpToday = cart.some(item => getCartOrderType(item) === 'Buy Now');
+  const isMixedCheckout = hasPreOrder && hasPickUpToday;
 
-  const pickupType = hasPreOrder
+  const pickupType = isMixedCheckout
+    ? 'later'
+    : hasPreOrder
     ? 'later'
     : hasPickUpToday
       ? 'now'
@@ -379,6 +384,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   useEffect(() => {
     if (!isPaymentStep) return undefined;
     const attempt = ++paymentReservationAttemptRef.current;
+    if (isMixedCheckout) {
+      setPaymentReservationState('ready');
+      setPaymentReservationMessage('');
+      setValidatedReservationCart(currentReservationCartSignature);
+      return undefined;
+    }
     const reservationId = sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '';
     const storedExpiry = sessionStorage.getItem(CHECKOUT_RESERVATION_EXPIRY_KEY) || '';
     if (!reservationId) {
@@ -445,7 +456,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     return () => {
       if (paymentReservationAttemptRef.current === attempt) paymentReservationAttemptRef.current += 1;
     };
-  }, [isPaymentStep, currentReservationCartSignature]);
+  }, [isPaymentStep, isMixedCheckout, currentReservationCartSignature]);
   const [errors, setErrors] = useState({});
   const proofHydratedRef = useRef(false);
 
@@ -827,6 +838,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       return;
     }
 
+    if (isMixedCheckout) {
+      navigate('/onlineOrdering/payment');
+      return;
+    }
+
     setErrors({});
     setSummaryDetailsOpen(true);
     setShowSummaryModal(true);
@@ -898,11 +914,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   };
 
   const handlePlaceOrder = async () => {
-    if (paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature) {
+    if (!isMixedCheckout && (paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature)) {
       setToastMessage('We have not confirmed that the items currently shown are reserved for you. Do not pay yet. Return to order details and check availability again.');
       return;
     }
-    if (reservationExpired) {
+    if (!isMixedCheckout && reservationExpired) {
       setToastMessage('Your stock reservation has expired. Please check availability again before continuing to payment.');
       sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
       sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
@@ -1012,9 +1028,26 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
+    const payloadItems = updatedCart.map(item => ({
+      productId: item.id ?? null,
+      name: item.name,
+      category: item.category,
+      quantity: item.qty,
+      unitPrice: item.price,
+      subtotal: item.price * item.qty,
+      orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
+      selectedPriceOptions: item.selected_price_options || null,
+      inspirationUrl: item.inspiration_url || null,
+      inspirationUrls: item.inspiration_urls || null,
+      type: item.type || (item.category === 'Package' ? 'package' : null),
+      bundleId: item.bundleId || null,
+      packageId: (item.type === 'package' || item.category === 'Package')
+        ? (item.packageId || item.id || null)
+        : null,
+    }));
     const orderPayload = {
         checkoutReservationId,
-        orderType: pickupType === 'now' ? 'Buy Now' : 'Pre-Order',
+        orderType: isMixedCheckout ? 'Pre-Order' : (pickupType === 'now' ? 'Buy Now' : 'Pre-Order'),
         customer: {
           name: form.name,
           contactNumber: form.phone,
@@ -1028,23 +1061,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
           timeLabel: selectedSlot?.label || '',
         },
         specialInstructions: form.instructions || null,
-        items: updatedCart.map(item => ({
-          productId: item.id ?? null,
-          name: item.name,
-          category: item.category,
-          quantity: item.qty,
-          unitPrice: item.price,
-          subtotal: item.price * item.qty,
-          orderSlip: pruneEmptySlipAnswers(item.order_slip_details) || {},
-          selectedPriceOptions: item.selected_price_options || null, 
-          inspirationUrl: item.inspiration_url || null,
-          inspirationUrls: item.inspiration_urls || null,
-          type: item.type || (item.category === 'Package' ? 'package' : null),
-          bundleId: item.bundleId || null,
-          packageId: (item.type === 'package' || item.category === 'Package')
-            ? (item.packageId || item.id || null)
-            : null,
-        })),
+        items: payloadItems,
         payment: {
           type: paymentType === 'half' ? 'deposit' : 'full',
           amountDueNow: paymentType === 'half' ? halfAmount : paymentTotal,
@@ -1053,6 +1070,30 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         },
         createdAt: new Date().toISOString(),
       };
+
+    if (isMixedCheckout) {
+      const makeGroupedPayload = (orderType, items, date) => {
+        const total = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
+        const deposit = paymentType === 'half' ? Math.round(total * 0.5 * 100) / 100 : total;
+        return {
+          ...orderPayload,
+          checkoutReservationId: null,
+          orderType,
+          pickup: { ...orderPayload.pickup, date },
+          items,
+          payment: {
+            type: paymentType === 'half' ? 'deposit' : 'full',
+            amountDueNow: deposit,
+            balanceAtPickup: Math.max(0, total - deposit),
+            grandTotal: total,
+          },
+        };
+      };
+      orderPayload.orderPayloads = [
+        makeGroupedPayload('Buy Now', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Buy Now'), getLiveNow().dateStr),
+        makeGroupedPayload('Pre-Order', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Pre-Order'), form.pickupDate),
+      ].filter(group => group.items.length > 0);
+    }
 
     sessionStorage.setItem('tempOrderData', JSON.stringify({
       form,

@@ -9,11 +9,14 @@ const AuthController = {
     try {
       const body   = LoginSchema.parse(req.body);
       const result = await AuthService.login(body.email, body.password);
+      const isLocalRequest =
+        !process.env.NODE_ENV || process.env.NODE_ENV !== 'production';
 
       res.cookie('token', result.token, {
         httpOnly: true,
-        secure: true,           
-        sameSite: 'none',      
+        secure: isLocalRequest ? false : true,
+        sameSite: isLocalRequest ? 'lax' : 'none',
+        path: '/',
         maxAge: 8 * 60 * 60 * 1000
       });
 
@@ -40,8 +43,15 @@ const AuthController = {
   logout: (_req, res) => {
     res.clearCookie('token', {
       httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      path: '/',
+    });
+    res.clearCookie('token', {
+      httpOnly: true,
       secure: true,
       sameSite: 'none',
+      path: '/',
     });
     ok(res, null, 'Logged out');
   },

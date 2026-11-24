@@ -365,6 +365,9 @@ export default function LoginPage({ onLogin }) {
   const [showPw, setShowPw] = useState(false);
   const [loginErrors, setLoginErrors] = useState({});
   const [loginPending, setLoginPending] = useState(false);
+  const [workspace, setWorkspace] = useState(() =>
+    localStorage.getItem('login_workspace') === 'pos' ? 'pos' : 'admin'
+  );
 
   // ── Forgot-password state ──
   const [forgotErrors, setForgotErrors] = useState({});
@@ -442,7 +445,8 @@ export default function LoginPage({ onLogin }) {
     setLoginPending(true);
     try {
       const result = await authService.login(email, password);
-      onLogin(result.admin);
+      localStorage.setItem('login_workspace', workspace);
+      onLogin(result.admin, workspace);
     } catch (err) {
       setLoginErrors({ password: err.message || 'Invalid email or password.' });
     } finally {
@@ -580,7 +584,7 @@ export default function LoginPage({ onLogin }) {
 
   // ── Copy per view ──
   const titles = {
-    login:  { title: 'Welcome back', sub: 'Sign in to your admin account to continue.' },
+    login:  { title: 'Welcome back', sub: 'Choose a workspace, then sign in to continue.' },
     forgot: { title: 'Forgot password?', sub: "Enter your email and we'll send you an 8-digit code to reset your password." },
     'verify-otp': { title: 'Enter reset code', sub: `Check ${resetEmail} for the 8-digit code we sent.` },
     'set-password': { title: 'Set new password', sub: 'Create a new, secure password for your account.' },
@@ -686,6 +690,63 @@ export default function LoginPage({ onLogin }) {
             {/* ── LOGIN VIEW ── */}
             {view === 'login' && (
               <>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: 7,
+                    color: '#475569',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                  }}>
+                    Continue as
+                  </label>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 8,
+                    padding: 4,
+                    borderRadius: 12,
+                    background: '#F1F5F9',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setWorkspace('admin')}
+                      style={{
+                        border: workspace === 'admin' ? '1px solid #3B1F0A' : '1px solid transparent',
+                        borderRadius: 9,
+                        padding: '10px 12px',
+                        background: workspace === 'admin' ? '#3B1F0A' : 'transparent',
+                        color: workspace === 'admin' ? '#FFFFFF' : '#64748B',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      Admin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWorkspace('pos')}
+                      style={{
+                        border: workspace === 'pos' ? '1px solid #3B1F0A' : '1px solid transparent',
+                        borderRadius: 9,
+                        padding: '10px 12px',
+                        background: workspace === 'pos' ? '#3B1F0A' : 'transparent',
+                        color: workspace === 'pos' ? '#FFFFFF' : '#64748B',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      POS
+                    </button>
+                  </div>
+                </div>
+
                 <Field label="Email Address" error={loginErrors.email}>
                   <InputField
                     icon={IconMail}

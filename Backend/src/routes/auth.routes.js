@@ -11,7 +11,7 @@ import {
 const router = Router();
 
 router.post('/login', loginRateLimiter, AuthController.login);
-router.post('/logout', authMiddlewareJwt, AuthController.logout);
+router.post('/logout', AuthController.logout);
 router.get('/me', authMiddlewareJwt, AuthController.me);
 
 // Require the existing login session before allowing a password change.

@@ -112,7 +112,10 @@ const getErrMsg = (err, fallback) =>
 
 export function AppProvider({ children }) {
   const location = useLocation();
-  const isAdminRoute = /^\/(inventory|orders|pos|analytics|productAndEvent|settings)(\/|$)/.test(location.pathname);
+  const isAuthenticatedRoute =
+    /^\/(inventory|orders|pos|analytics|productAndEvent|settings)(\/|$)/.test(location.pathname);
+  const isAdminRoute =
+    /^\/(inventory|orders|analytics|productAndEvent|settings)(\/|$)/.test(location.pathname);
 
   // ── Auth state ──
   // FIX: dating one-time localStorage.getItem() check lang ito sa loob ng
@@ -139,7 +142,7 @@ export function AppProvider({ children }) {
 
     // Public customer pages do not need an admin session check. Probing /me
     // there creates a misleading 401 in the browser console for every guest.
-    if (!isAdminRoute && location.pathname !== '/login') {
+    if (!isAuthenticatedRoute && location.pathname !== '/login') {
       return () => {
         active = false;
       };
@@ -179,7 +182,7 @@ export function AppProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [isAdminRoute, location.pathname]);
+  }, [isAuthenticatedRoute, location.pathname]);
 
   // ── State ──
   const [ingredients,    setIngredients]    = useState([]);

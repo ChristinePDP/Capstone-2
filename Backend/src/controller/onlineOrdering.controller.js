@@ -1,4 +1,5 @@
 // backend/src/controllers/onlineOrdering.controller.js
+import { randomUUID } from 'crypto';
 import { fetchMenuProducts, getPreOrderDateAvailability, uploadImageToBucket, createDatabaseOrder,
   completeOrderAndDeductStock, createProduct, 
   getStorageBaseUrl, 
@@ -184,6 +185,18 @@ export const placeManualPaymentOrder = async (req, res) => {
     if (!proofPath || !proofPath.startsWith('proof_of_transaction/')) {
       throw new Error('Failed to determine the uploaded payment proof path.');
     }
+    if (Array.isArray(orderPayload.orderPayloads) && orderPayload.orderPayloads.length > 0) {
+      const savedOrders = [];
+      for (const groupedPayload of orderPayload.orderPayloads) {
+        const payload = {
+          ...groupedPayload,
+          checkoutReservationId: groupedPayload.checkoutReservationId || randomUUID(),
+        };
+        savedOrders.push(await createDatabaseOrder(payload, { url: proofUrl, path: proofPath }));
+      }
+      return res.status(201).json({ success: true, order: savedOrders });
+    }
+
     const savedOrder = await createDatabaseOrder(orderPayload, { url: proofUrl, path: proofPath });
     return res.status(201).json({ success: true, order: savedOrder });
   } catch (error) {

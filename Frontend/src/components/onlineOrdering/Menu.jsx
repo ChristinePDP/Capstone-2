@@ -1,7 +1,7 @@
 // src/components/onlineOrdering/Menu.jsx
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
+import { Plus, Minus, X, ShoppingBag, ShoppingCart, ChevronDown, ChevronUp, Expand, ArrowUp, Package, ChevronRight, Search, LayoutGrid, Tag, Cake, Croissant, PartyPopper, Trash2, Pencil } from 'lucide-react';
 import { ProductGridSkeleton, EmptyState, ErrorState } from '../ui';
 import Footer from '../onlineOrdering/Footer';
 import MultiImageField from '../shared/MultiImageField';
@@ -320,29 +320,38 @@ function CartItemRow({
 
   const content = (
     <div className="bg-white">
-      <button type="button" onClick={() => onToggleExpand(index)} className="w-full flex items-center gap-3 text-left">
-        {imageSrc ? (
-          <img
-            src={imageSrc}
-            alt=""
-            onClick={(e) => { e.stopPropagation(); onPreviewImage(imageSrc); }}
-            className={`${isMobile ? 'w-12 h-12' : 'w-10 h-10'} rounded-lg object-cover shrink-0 border border-[#EAE4E0] cursor-zoom-in`}
-          />
-        ) : (
-          <div className={`${isMobile ? 'w-12 h-12' : 'w-10 h-10'} rounded-lg bg-[#F5EFEB] border border-[#EAE4E0] shrink-0 flex items-center justify-center`}>
-            <Package size={16} className="text-[#DED4CC]" />
+      <div className="flex justify-between items-start gap-3 pb-1">
+        <div className="flex-1 min-w-0">
+          <button type="button" onClick={() => onToggleExpand(index)} className="w-full flex items-center gap-2 text-left">
+            <span className="font-semibold text-sm text-[#3B1F0A] truncate">{item.name}</span>
+            {expanded ? <ChevronUp size={15} className="text-[#8A7264] shrink-0" /> : <ChevronDown size={15} className="text-[#8A7264] shrink-0" />}
+          </button>
+          <span className={`inline-flex mt-1 rounded-full px-2 py-0.5 text-[9px] font-bold ${
+            item.selected_order_type === 'Pre-Order'
+              ? 'bg-purple-100 text-purple-700'
+              : 'bg-emerald-100 text-emerald-700'
+          }`}>
+            {item.selected_order_type === 'Pre-Order' ? 'PRE-ORDER' : 'BUY NOW'}
+          </span>
+          <div className="flex items-center gap-2 mt-2">
+            <button type="button" onClick={() => changeQty(index, -1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Minus size={qtyIconSize} /></button>
+            <span className={`font-mono ${isMobile ? 'text-sm w-6' : 'text-xs w-4'} text-center`}>{formatCount(item.qty)}</span>
+            <button type="button" onClick={() => changeQty(index, 1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Plus size={qtyIconSize} /></button>
           </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="font-bold text-sm text-[#3B1F0A] truncate">{item.name}</p>
-          {!expanded && <p className="text-[11px] text-[#8A7264] mt-0.5">Qty {formatCount(item.qty)}</p>}
         </div>
-        <span className="font-bold text-sm text-[#5A453C] shrink-0">{formatPeso(item.price * item.qty)}</span>
-        <ChevronDown size={16} className={`text-[#B7A99F] shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-      </button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="font-semibold text-sm text-[#5A453C]">{formatPeso(item.price * item.qty)}</span>
+          <button type="button" onClick={() => onRemove(index)} aria-label="Remove item" title="Remove item" className="w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
 
       {expanded && (
         <div className="mt-2.5 pl-0">
+          <p className="text-[11px] font-semibold text-[#8A7264] mt-0.5">
+            {item.selected_order_type === 'Pre-Order' ? 'Pre-Order' : 'Buy Now · Pick-up Today'}
+          </p>
           {optionLines.map(d => (
             <p key={d.key} className="text-[11px] text-[#B7A99F] mt-0.5 leading-snug">{d.label}: {d.value}</p>
           ))}
@@ -359,22 +368,6 @@ function CartItemRow({
             <button type="button" onClick={() => setEditingSlip(true)} className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#DED4CC] px-3 py-1.5 text-[11px] font-semibold text-[#5A453C] hover:bg-[#F5EFEB]"><Pencil size={12}/>Edit order slip</button>
           )}
 
-          <div className="flex items-center justify-between mt-2.5">
-            <div className="flex items-center gap-2">
-              <button onClick={() => changeQty(index, -1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Minus size={qtyIconSize} /></button>
-              <span className={`font-mono ${isMobile ? 'text-sm w-6' : 'text-xs w-4'} text-center`}>{formatCount(item.qty)}</span>
-              <button onClick={() => changeQty(index, 1)} className={`${qtyBtnSize} rounded-full border border-[#DED4CC] flex items-center justify-center text-[#5A453C] hover:bg-[#EAE4E0]`}><Plus size={qtyIconSize} /></button>
-            </div>
-            <button
-              type="button"
-              onClick={() => onRemove(index)}
-              aria-label="Remove item"
-              title="Remove item"
-              className="w-7 h-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
         </div>
       )}
       {editingSlip && <CartOrderSlipEditor item={item} onClose={() => setEditingSlip(false)} onSave={(slip, inspiration) => onUpdateSlip(index, slip, inspiration)} />}
@@ -488,7 +481,7 @@ function BundleModal({ bundle, onClose, onAddToCart }) {
         selected_price_options: null, 
         order_slip_details: pruneEmptySlipAnswers(bundleAnswers), 
         inspiration_image: hasAnyImage ? bundleImages : null 
-      });
+      }, bundle.requestedOrderType);
       onClose();
     }
   };
@@ -739,7 +732,7 @@ function PackageModal({ pkg, onClose, onAddToCart }) {
         selected_price_options: null,
         order_slip_details: pruneEmptySlipAnswers(packageAnswers),
         inspiration_image: hasAnyImage ? packageImages : null
-      });
+      }, pkg.requestedOrderType);
       onClose();
     }
   };
@@ -1019,7 +1012,7 @@ function ProductModal({ product, onClose, onAddToCart }) {
       selected_price_options: isVariable ? selectedPriceOptions : null,
       order_slip_details: hasFields ? pruneEmptySlipAnswers(slipAnswers) : null,
       inspiration_image: imageFile 
-    });
+    }, product.requestedOrderType);
     onClose();
   };
 
@@ -1347,6 +1340,15 @@ function isPickUpOnlyType(item) {
   return (t.includes('pickup') || t.includes('buynow')) && !t.includes('preorder') && t !== 'both';
 }
 
+function getAvailableOrderTypes(item) {
+  if (isPreOrderOnlyType(item)) return canPreOrder(item) ? ['Pre-Order'] : [];
+  if (isPickUpOnlyType(item)) return canPickUpToday(item) ? ['Buy Now'] : [];
+  return [
+    ...(canPickUpToday(item) ? ['Buy Now'] : []),
+    ...(canPreOrder(item) ? ['Pre-Order'] : []),
+  ];
+}
+
 function isPreOrderOnlyType(item) {
   const t = normalizeOrderTypeToken(item?.order_type);
   return t.includes('preorder') && !t.includes('pickup') && !t.includes('buynow') && t !== 'both';
@@ -1397,8 +1399,8 @@ function readStoredOrderType() {
 // Pick-up Today item (at walang Pre-order), Pick-up Today. Kapag puro "Both",
 // null = malaya ang customer na pumili.
 function getForcedOrderType(cartItems = []) {
-  if (cartItems.some(i => i.order_type === 'Pre-order')) return 'Pre-Order';
-  if (cartItems.some(i => i.order_type === 'Pick-up Today')) return 'Buy Now';
+  if (cartItems.some(isPreOrderOnlyType)) return 'Pre-Order';
+  if (cartItems.some(isPickUpOnlyType)) return 'Buy Now';
   return null;
 }
 
@@ -1406,17 +1408,23 @@ function getForcedOrderType(cartItems = []) {
 // product id, kasama ang lahat ng cart lines nito). `onlyId` = isa lang ang ichecheck.
 function findStockIssue(cartItems = [], orderType, onlyId) {
   const qtyById = {};
-  cartItems.forEach(i => { qtyById[i.id] = (qtyById[i.id] || 0) + (Number(i.qty) || 0); });
+  cartItems.forEach(i => {
+    const type = i.selected_order_type || orderType;
+    const key = `${i.id}|${type}`;
+    qtyById[key] = (qtyById[key] || 0) + (Number(i.qty) || 0);
+  });
   const seen = new Set();
   for (const item of cartItems) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
+    const itemType = item.selected_order_type || orderType;
+    const key = `${item.id}|${itemType}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (onlyId !== undefined && item.id !== onlyId) continue;
     if (!isQuantityTracked(item)) continue;
-    const limit = Number(getQuantityLimit(item, orderType));
+    const limit = Number(getQuantityLimit(item, itemType));
     if (Number.isNaN(limit)) continue;
-    if (qtyById[item.id] > limit) {
-      return { name: item.name, limit, qty: qtyById[item.id] };
+    if (qtyById[key] > limit) {
+      return { name: item.name, limit, qty: qtyById[key], orderType: itemType };
     }
   }
   return null;
@@ -1641,8 +1649,9 @@ export default function Menu({ cart, setCart }) {
 
   // --- ORDER TYPE (Pick-up Today / Pre-Order) SWITCH NG CART ---
   const [selectedOrderType, setSelectedOrderType] = useState(readStoredOrderType);
-  const forcedOrderType = getForcedOrderType(cart);
-  const effectiveOrderType = forcedOrderType ?? selectedOrderType;
+  // Gaya ng POS, ang selector ay default order type para sa susunod na
+  // item na idaragdag. Ang existing cart lines ay may sariling type.
+  const effectiveOrderType = selectedOrderType;
 
   // Kung alin sa dalawang order type ang hindi kaya ng kasalukuyang cart (stock / pre-order limit)
   const orderTypeBlockedReasons = useMemo(() => {
@@ -1668,9 +1677,8 @@ export default function Menu({ cart, setCart }) {
   // Kapag may forced type, sundan ito (para hindi bumalik sa lumang piniling type
   // pagka-alis ng forced item); kapag walang laman ang cart, balik sa Pick-up Today.
   useEffect(() => {
-    if (forcedOrderType) setSelectedOrderType(forcedOrderType);
-    else if (cart.length === 0) setSelectedOrderType('Buy Now');
-  }, [forcedOrderType, cart.length]);
+    if (cart.length === 0) setSelectedOrderType('Buy Now');
+  }, [cart.length]);
 
   // I-save para mabasa ng Checkout (wala nang switch doon).
   useEffect(() => {
@@ -1684,12 +1692,7 @@ export default function Menu({ cart, setCart }) {
   // GUARD: hindi puwedeng lumipat ng order type kung hindi kaya ng stock/limit
   // ng kasalukuyang cart sa bagong type.
   const handleOrderTypeChange = (nextType) => {
-    if (forcedOrderType || nextType === effectiveOrderType) return;
-    const issue = findStockIssue(cart, nextType);
-    if (issue) {
-      showToast(`Can't switch to ${ORDER_TYPE_LABELS[nextType]}. ${stockIssueMessage(issue, nextType)}`);
-      return;
-    }
+    if (nextType === effectiveOrderType) return;
     setSelectedOrderType(nextType);
   };
 
@@ -1894,15 +1897,17 @@ export default function Menu({ cart, setCart }) {
       };
     }).filter(Boolean);
 
-    const currentType = getForcedOrderType(refreshedCart) ?? selectedOrderType;
     const remainingById = new Map();
     let changedQty = false;
     const reconciledCart = refreshedCart.map(item => {
       if (!isQuantityTracked(item)) return item;
       const id = String(item.id);
+      const itemType = item.selected_order_type
+        || getForcedOrderType([item])
+        || selectedOrderType;
       const remaining = remainingById.has(id)
         ? remainingById.get(id)
-        : Math.max(0, Math.floor(Number(getQuantityLimit(item, currentType)) || 0));
+        : Math.max(0, Math.floor(Number(getQuantityLimit(item, itemType)) || 0));
       const keptQty = Math.min(Math.max(0, Number(item.qty) || 0), remaining);
       remainingById.set(id, Math.max(0, remaining - keptQty));
       if (keptQty !== item.qty) changedQty = true;
@@ -1933,57 +1938,47 @@ export default function Menu({ cart, setCart }) {
     return hasActiveBundles ? ['Promo Bundle', ...base] : base;
   }, [rawBundles]);
 
-  const addToCart = (item) => {
+  const addToCart = (item, requestedOrderType = null) => {
+    const availableTypes = getAvailableOrderTypes(item);
+    const orderType = requestedOrderType && availableTypes.includes(requestedOrderType)
+      ? requestedOrderType
+      : (availableTypes.includes(selectedOrderType) ? selectedOrderType : availableTypes[0]);
+    if (!orderType) {
+      showToast(`${item.name} is not available for ordering right now.`);
+      return;
+    }
+    const cartItem = { ...item, selected_order_type: orderType };
     pendingFlyRef.current = { el: flySourceElRef.current, expectedCount: cartCount + Number(item.qty || 0) };
 
     setCart(prev => {
-      const currentSlipStr = slipSignature(item.order_slip_details);
-      const currentOptionsStr = JSON.stringify(item.selected_price_options);
+      const currentSlipStr = slipSignature(cartItem.order_slip_details);
+      const currentOptionsStr = JSON.stringify(cartItem.selected_price_options);
       
       const idx = prev.findIndex(i => 
-        i.id === item.id && 
+        i.id === cartItem.id &&
+        (i.selected_order_type || selectedOrderType) === orderType &&
         slipSignature(i.order_slip_details) === currentSlipStr &&
         JSON.stringify(i.selected_price_options) === currentOptionsStr
       );
 
-      // Stock guard ayon sa order type NA MAGIGING epektibo pagkatapos idagdag
-      // ang item (puwedeng ma-force sa Pre-Order ng bagong item). Kapag nagbago
-      // ang effective type, lahat ng lines ang ine-check; kung hindi, ang item lang.
+      // Ang stock guard ay para lamang sa fulfillment type ng bagong line.
+      // Hindi dapat maapektuhan ang mga existing line na may ibang type.
       const nextCart = idx >= 0
-        ? prev.map((c, n) => (n === idx ? { ...c, qty: c.qty + item.qty } : c))
-        : [...prev, item];
-      const prevType = getForcedOrderType(prev) ?? selectedOrderType;
-      const forcedNextType = getForcedOrderType(nextCart);
-      let nextType = forcedNextType ?? selectedOrderType;
-      let issue = findStockIssue(nextCart, nextType, nextType === prevType ? item.id : undefined);
-
-      // "Both" na item na hindi puwede sa napiling order type pero puwede sa isa pa:
-      //   • walang stock -> Pre-Order (kung may pre-order limit)
-      //   • walang pre-order limit -> Pick-up Today lang
-      // Lilipat ang order sa isa pang type kung kaya ng BUONG cart.
-      if (issue && !forcedNextType && isBothType(item)) {
-        const altType = nextType === 'Buy Now' ? 'Pre-Order' : 'Buy Now';
-        const itemFitsAlt = altType === 'Pre-Order' ? canPreOrder(item) : canPickUpToday(item);
-        const itemFitsCurrent = nextType === 'Buy Now' ? canPickUpToday(item) : canPreOrder(item);
-        if (!itemFitsCurrent && itemFitsAlt && !findStockIssue(nextCart, altType)) {
-          nextType = altType;
-          issue = null;
-          setSelectedOrderType(altType);
-          showToast(`${item.name} is not available for ${ORDER_TYPE_LABELS[altType === 'Buy Now' ? 'Pre-Order' : 'Buy Now']}, so your order is now ${ORDER_TYPE_LABELS[altType]}.`);
-        }
-      }
+        ? prev.map((c, n) => (n === idx ? { ...c, qty: c.qty + cartItem.qty } : c))
+        : [...prev, cartItem];
+      const issue = findStockIssue(nextCart, orderType, item.id);
 
       if (issue) {
-        showToast(`Sorry, ${stockIssueMessage(issue, nextType)}`);
+        showToast(`Sorry, ${stockIssueMessage(issue, orderType)}`);
         return prev;
       }
 
       if (idx >= 0) {
         const next = [...prev];
-        next[idx] = { ...next[idx], qty: next[idx].qty + item.qty, inspiration_image: item.inspiration_image || next[idx].inspiration_image };
+        next[idx] = { ...next[idx], qty: next[idx].qty + cartItem.qty, inspiration_image: cartItem.inspiration_image || next[idx].inspiration_image };
         return next;
       }
-      return [...prev, item];
+      return [...prev, cartItem];
     });
   };
 
@@ -2277,17 +2272,18 @@ export default function Menu({ cart, setCart }) {
                     </p>
 
                     <button
+                      type="button"
                       onClick={(e) => {
                         if (isSoldOut) return;
                         flySourceElRef.current = e.currentTarget.closest('[data-menu-product-id]')?.querySelector('[data-fly-source]') || null;
                         const needsModal = p.type === 'bundle' || p.type === 'package' || (p.order_slip_fields && p.order_slip_fields.length > 0) || p.allow_file_upload;
-                        
-                        needsModal ? setModal(p) : addToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
+                        const item = { ...p, qty: 1, order_slip_details: null, selected_price_options: null };
+                        needsModal ? setModal(p) : addToCart(item);
                       }}
                       disabled={isSoldOut}
                       className={`w-full py-2 sm:py-2.5 lg:py-2 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
-                        isSoldOut 
-                          ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed' 
+                        isSoldOut
+                          ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed'
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
                       }`}
                     >
@@ -2444,15 +2440,16 @@ export default function Menu({ cart, setCart }) {
             {cartCount > 0 && <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#8A7264] bg-[#F5EFEB] px-2.5 py-1 rounded-full">{cartCount} item{cartCount > 1 ? 's' : ''}</span>}
           </div>
 
+          <div className="px-6 pt-4 shrink-0">
+            <OrderTypeSwitch value={effectiveOrderType} forcedType={null} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
+          </div>
+
           {cart.length === 0 ? (
             <div className="p-6 overflow-y-auto">
               <p className="text-sm text-[#B7A99F]">Your cart is empty. Add something from the menu to get started.</p>
             </div>
           ) : (
             <>
-              <div className="px-6 pt-4 shrink-0">
-                <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
-              </div>
               <div className="px-6 py-4 flex-1 overflow-y-auto flex flex-col gap-4">
                 {cart.map((item, i) => (
                   <CartItemRow
@@ -2512,7 +2509,7 @@ export default function Menu({ cart, setCart }) {
             </div>
 
             <div className="px-5 pt-4 shrink-0">
-              <OrderTypeSwitch value={effectiveOrderType} forcedType={forcedOrderType} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
+              <OrderTypeSwitch value={effectiveOrderType} forcedType={null} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 flex flex-col gap-4">

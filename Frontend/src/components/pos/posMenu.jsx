@@ -1346,7 +1346,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
             <span className="text-[11px] text-[#B7A99F]">{catProducts.length} items</span>
           </div>
           
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-2 sm:gap-3">
             {sortedCatProducts.map(p => {
               const isBundle = p.type === 'bundle';
               const inclusionText = !isBundle ? (p.inclusion || '') : '';
@@ -1369,8 +1369,8 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                 && (!isQuantityTracked(p, otherType) || getQuantityLimit(p, otherType) > 0);
 
               return (
-                <div key={p.id} className="bg-white rounded-2xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative">
-                  <div className="relative aspect-[4/3] overflow-hidden bg-[#F5EFEB] shrink-0">
+                <div key={p.id} className="bg-white rounded-xl border border-[#EAE4E0] overflow-hidden flex flex-col group shadow-sm relative min-w-0">
+                  <div className="relative aspect-[16/10] overflow-hidden bg-[#F5EFEB] shrink-0">
                     {isBundle || p.type === 'package' ? (
                       <BundleMenuImage products={isBundle ? p.products : p.package_components} customImageUrl={p.custom_image_url} />
                     ) : (
@@ -1401,9 +1401,9 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                       </div>
                     )}
                   </div>
-                  <div className="relative p-3 sm:p-4 lg:p-4 flex flex-col flex-1">
+                  <div className="relative p-2.5 sm:p-3 flex flex-col flex-1">
                     <span className="font-mono text-[8px] sm:text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{p.category}</span>
-                    <div className="flex-1 mb-1.5 lg:mb-2 min-h-[2rem] sm:min-h-[2.5rem] lg:min-h-[2.5rem]">
+                    <div className="flex-1 mb-1 min-h-[1.75rem] sm:min-h-[2rem]">
                       <h3 className={`font-bold text-xs sm:text-sm lg:text-sm text-[#3B1F0A] leading-snug ${isBundle ? 'line-clamp-1' : 'line-clamp-2'}`}>{p.name}</h3>
                       {isBundle && (
                         <ClampedDescription
@@ -1441,7 +1441,7 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
                         onAddToCart({ ...p, qty: 1, order_slip_details: null, selected_price_options: null });
                       }}
                       disabled={isSoldOut || isMismatchedType}
-                      className={`w-full py-2 sm:py-2.5 lg:py-2.5 rounded-full text-[11px] sm:text-xs font-semibold transition-colors ${
+                      className={`w-full py-1.5 sm:py-2 rounded-full text-[10px] sm:text-xs font-semibold transition-colors ${
                         (isSoldOut || isMismatchedType)
                           ? 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed'
                           : 'bg-[#3B1F0A] text-white hover:bg-[#2A1608]'
