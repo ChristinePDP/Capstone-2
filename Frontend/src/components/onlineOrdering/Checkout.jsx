@@ -245,6 +245,10 @@ const PAYMENT_PROOF_AMOUNT_KEY = 'aileen_cake_max_payment_proof_amount';
 const PAYMENT_PROOF_NAMESPACE = 'online-order-payment-proof';
 const CHECKOUT_RESERVATION_ID_KEY = 'aileen_cake_max_checkout_reservation_id';
 const CHECKOUT_RESERVATION_EXPIRY_KEY = 'aileen_cake_max_checkout_reservation_expiry';
+const MIXED_BUY_NOW_RESERVATION_ID_KEY = 'aileen_cake_max_mixed_buynow_reservation_id';
+const MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY = 'aileen_cake_max_mixed_buynow_reservation_expiry';
+const MIXED_PREORDER_RESERVATION_ID_KEY = 'aileen_cake_max_mixed_preorder_reservation_id';
+const MIXED_PREORDER_RESERVATION_EXPIRY_KEY = 'aileen_cake_max_mixed_preorder_reservation_expiry';
 
 const buildCheckoutReservationPayload = (cart, reservationId, orderType, pickupDate) => ({
   reservationId,
@@ -339,6 +343,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       instructions: '',
     };
   });
+  const [mixedBuyNowTime, setMixedBuyNowTime] = useState(() => draft?.mixedBuyNowTime || '');
 
   const [paymentType, setPaymentType] = useState(() => draft?.paymentType ?? 'half');
   const [paymentQrUrl, setPaymentQrUrl] = useState(null);
@@ -357,6 +362,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   const [isReserving, setIsReserving] = useState(false);
   const [checkoutReservationId, setCheckoutReservationId] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '');
   const [reservationExpiresAt, setReservationExpiresAt] = useState(() => sessionStorage.getItem(CHECKOUT_RESERVATION_EXPIRY_KEY) || '');
+  const [mixedBuyNowReservationId, setMixedBuyNowReservationId] = useState(() => sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_ID_KEY) || '');
+  const [mixedBuyNowReservationExpiry, setMixedBuyNowReservationExpiry] = useState(() => sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY) || '');
+  const [mixedPreOrderReservationId, setMixedPreOrderReservationId] = useState(() => sessionStorage.getItem(MIXED_PREORDER_RESERVATION_ID_KEY) || '');
+  const [mixedPreOrderReservationExpiry, setMixedPreOrderReservationExpiry] = useState(() => sessionStorage.getItem(MIXED_PREORDER_RESERVATION_EXPIRY_KEY) || '');
   const [paymentReservationState, setPaymentReservationState] = useState(() => paymentOnly ? 'checking' : 'idle');
   const [paymentReservationMessage, setPaymentReservationMessage] = useState('');
   const [validatedReservationCart, setValidatedReservationCart] = useState('');
@@ -385,9 +394,78 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     if (!isPaymentStep) return undefined;
     const attempt = ++paymentReservationAttemptRef.current;
     if (isMixedCheckout) {
-      setPaymentReservationState('ready');
+      const buyNowId = sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_ID_KEY) || mixedBuyNowReservationId;
+      const buyNowExpiry = sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY) || mixedBuyNowReservationExpiry;
+      const preOrderId = sessionStorage.getItem(MIXED_PREORDER_RESERVATION_ID_KEY) || mixedPreOrderReservationId;
+      const preOrderExpiry = sessionStorage.getItem(MIXED_PREORDER_RESERVATION_EXPIRY_KEY) || mixedPreOrderReservationExpiry;
+      const expiries = [buyNowExpiry, preOrderExpiry].map(Date.parse).filter(Number.isFinite);
+      if (!buyNowId || !preOrderId || expiries.length !== 2 || expiries.some(expiry => expiry <= Date.now())) {
+        setPaymentReservationState('expired');
+        setPaymentReservationMessage('One or both stock holds have expired. Return to details and continue to payment again to create fresh reservations.');
+        setValidatedReservationCart('');
+        return undefined;
+      }
+
+      setPaymentReservationState('checking');
       setPaymentReservationMessage('');
-      setValidatedReservationCart(currentReservationCartSignature);
+      setValidatedReservationCart('');
+      const buyNowCart = cart.filter(item => getCartOrderType(item) === 'Buy Now');
+      const preOrderCart = cart.filter(item => getCartOrderType(item) === 'Pre-Order');
+      Promise.all([
+        fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildCheckoutReservationPayload(
+            buyNowCart,
+            buyNowId,
+            'Buy Now',
+            getLiveNow().dateStr
+          )),
+        }).then(async response => ({ response, data: await response.json() })),
+        fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildCheckoutReservationPayload(
+            preOrderCart,
+            preOrderId,
+            'Pre-Order',
+            form.pickupDate
+          )),
+        }).then(async response => ({ response, data: await response.json() })),
+      ])
+        .then(results => {
+          if (paymentReservationAttemptRef.current !== attempt) return;
+          const failed = results.find(({ response, data }) => !response.ok || !data.success);
+          if (failed) {
+            setPaymentReservationState('unavailable');
+            setPaymentReservationMessage(failed.data?.message || 'We could not confirm both stock holds. Return to order details and try again.');
+            setValidatedReservationCart('');
+            return;
+          }
+          const earliestExpiry = results
+            .map(({ data }) => Date.parse(data.data?.expiresAt))
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b)[0];
+          if (!earliestExpiry || earliestExpiry <= Date.now()) {
+            setPaymentReservationState('expired');
+            setPaymentReservationMessage('One or both stock holds have expired. Return to details and create fresh reservations.');
+            return;
+          }
+          const expiryIso = new Date(earliestExpiry).toISOString();
+          setMixedBuyNowReservationExpiry(buyNowExpiry);
+          setMixedPreOrderReservationExpiry(preOrderExpiry);
+          setReservationExpiresAt(expiryIso);
+          sessionStorage.setItem(CHECKOUT_RESERVATION_EXPIRY_KEY, expiryIso);
+          setValidatedReservationCart(currentReservationCartSignature);
+          setPaymentReservationState('ready');
+        })
+        .catch(error => {
+          if (paymentReservationAttemptRef.current !== attempt) return;
+          console.error('Mixed payment reservation verification failed:', error);
+          setPaymentReservationState('unavailable');
+          setPaymentReservationMessage('We could not verify both stock holds. Check your connection and return to order details.');
+          setValidatedReservationCart('');
+        });
       return undefined;
     }
     const reservationId = sessionStorage.getItem(CHECKOUT_RESERVATION_ID_KEY) || '';
@@ -635,14 +713,23 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   }, [showSummaryModal]);
 
   const totalAmount = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  const paymentTotal = paymentType === 'half' ? Math.round(totalAmount) : totalAmount;
+  const buyNowTotal = cart
+    .filter(item => getCartOrderType(item) === 'Buy Now')
+    .reduce((sum, item) => sum + item.price * item.qty, 0);
+  const preOrderTotal = cart
+    .filter(item => getCartOrderType(item) === 'Pre-Order')
+    .reduce((sum, item) => sum + item.price * item.qty, 0);
+  const mixedPreOrderDeposit = Math.ceil(preOrderTotal / 2);
+  const paymentTotal = isMixedCheckout
+    ? buyNowTotal + (paymentType === 'half' ? mixedPreOrderDeposit : preOrderTotal)
+    : (paymentType === 'half' ? Math.round(totalAmount) : totalAmount);
   const reservationMsRemaining = Date.parse(reservationExpiresAt) - Date.now();
   const reservationExpired = !checkoutReservationId || !Number.isFinite(reservationMsRemaining) || reservationMsRemaining <= 0;
   const reservationSecondsRemaining = Math.max(0, Math.ceil(reservationMsRemaining / 1000));
   const reservationIsUrgent = !reservationExpired && reservationSecondsRemaining <= 5 * 60;
   // Whole-peso deposit, rounded up so it is never below 50%; balance stays whole too.
-  const halfAmount = Math.ceil(paymentTotal / 2);
-  const balanceAtPickup = paymentTotal - halfAmount;
+  const halfAmount = isMixedCheckout ? buyNowTotal + mixedPreOrderDeposit : Math.ceil(paymentTotal / 2);
+  const balanceAtPickup = isMixedCheckout ? preOrderTotal - mixedPreOrderDeposit : paymentTotal - halfAmount;
 
   function getLiveNow() {
     const now = new Date();
@@ -666,11 +753,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify({ form, pickupType, paymentType }));
+      localStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify({ form, pickupType, paymentType, mixedBuyNowTime }));
     } catch (err) {
       console.error('Failed to save checkout draft to storage:', err);
     }
-  }, [form, pickupType, paymentType]);
+  }, [form, pickupType, paymentType, mixedBuyNowTime]);
 
   const stockIssues = useMemo(() => {
     // Pre-order capacity is per pickup date, so it is validated against the
@@ -784,6 +871,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     const { timeStr } = getLiveNow();
     return slot.end <= timeStr;
   };
+  const isMixedBuyNowSlotDisabled = (slot) => {
+    if (isShopClosedToday()) return true;
+    const { timeStr } = getLiveNow();
+    return slot.end <= timeStr;
+  };
 
   const handleProceedToOrder = () => {
     if (isShopClosedToday()) {
@@ -826,6 +918,9 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     if (!form.pickupTime) {
       newErrors.pickupTime = 'Please select a pickup time.';
     }
+    if (isMixedCheckout && !mixedBuyNowTime) {
+      newErrors.buyNowTime = 'Please select a pickup time for Pick-up Today.';
+    }
     if (paymentConfigLoading || !paymentQrUrl) {
       newErrors.payment = 'Payment QR code is currently unavailable. Please try again later.';
     }
@@ -866,6 +961,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       newErrors.pickupDate = `Please choose a date on or after ${formatDateLong(minPreOrderDate)}.`;
     }
     if (!form.pickupTime) newErrors.pickupTime = 'Please select a pickup time.';
+    if (isMixedCheckout && !mixedBuyNowTime) newErrors.buyNowTime = 'Please select a pickup time for Pick-up Today.';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -874,10 +970,95 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
     setErrors({});
     const now = Date.now();
+    if (isMixedCheckout) {
+      setIsReserving(true);
+      const buyNowCart = cart.filter(item => getCartOrderType(item) === 'Buy Now');
+      const preOrderCart = cart.filter(item => getCartOrderType(item) === 'Pre-Order');
+      const buyNowExpiry = Date.parse(mixedBuyNowReservationExpiry);
+      const preOrderExpiry = Date.parse(mixedPreOrderReservationExpiry);
+      const canReuseBuyNow = Boolean(mixedBuyNowReservationId) && Number.isFinite(buyNowExpiry) && buyNowExpiry > now;
+      const canReusePreOrder = Boolean(mixedPreOrderReservationId) && Number.isFinite(preOrderExpiry) && preOrderExpiry > now;
+      const buyNowId = canReuseBuyNow ? mixedBuyNowReservationId : crypto.randomUUID();
+      const preOrderId = canReusePreOrder ? mixedPreOrderReservationId : crypto.randomUUID();
+
+      try {
+        const [buyNowResult, preOrderResult] = await Promise.all([
+          fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildCheckoutReservationPayload(
+              buyNowCart, buyNowId, 'Buy Now', getLiveNow().dateStr
+            )),
+          }).then(async response => ({ response, data: await response.json() })),
+          fetch(`${import.meta.env.VITE_API_URL}/online-ordering/reserve-checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildCheckoutReservationPayload(
+              preOrderCart, preOrderId, 'Pre-Order', form.pickupDate
+            )),
+          }).then(async response => ({ response, data: await response.json() })),
+        ]);
+
+        const failed = [buyNowResult, preOrderResult].find(({ response, data }) => !response.ok || !data.success);
+        if (failed) {
+          setToastMessage(failed.data?.message || 'One of the mixed checkout items is no longer available.');
+          return;
+        }
+
+        const buyNowExpiryIso = buyNowResult.data.data?.expiresAt || '';
+        const preOrderExpiryIso = preOrderResult.data.data?.expiresAt || '';
+        const expiries = [buyNowExpiryIso, preOrderExpiryIso].map(Date.parse).filter(Number.isFinite);
+        if (expiries.length !== 2) {
+          setToastMessage('We could not confirm the mixed checkout reservations. Please try again.');
+          return;
+        }
+        const earliestExpiry = new Date(Math.min(...expiries)).toISOString();
+
+        setMixedBuyNowReservationId(buyNowId);
+        setMixedBuyNowReservationExpiry(buyNowExpiryIso);
+        setMixedPreOrderReservationId(preOrderId);
+        setMixedPreOrderReservationExpiry(preOrderExpiryIso);
+        setCheckoutReservationId(buyNowId);
+        setReservationExpiresAt(earliestExpiry);
+        sessionStorage.setItem(MIXED_BUY_NOW_RESERVATION_ID_KEY, buyNowId);
+        sessionStorage.setItem(MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY, buyNowExpiryIso);
+        sessionStorage.setItem(MIXED_PREORDER_RESERVATION_ID_KEY, preOrderId);
+        sessionStorage.setItem(MIXED_PREORDER_RESERVATION_EXPIRY_KEY, preOrderExpiryIso);
+        sessionStorage.setItem(CHECKOUT_RESERVATION_ID_KEY, buyNowId);
+        sessionStorage.setItem(CHECKOUT_RESERVATION_EXPIRY_KEY, earliestExpiry);
+        setPaymentReservationState('ready');
+        setValidatedReservationCart(currentReservationCartSignature);
+        navigate('/onlineOrdering/payment');
+      } catch (error) {
+        console.error('Mixed checkout reservation failed:', error);
+        setToastMessage('Could not reserve the mixed checkout items. Please try again.');
+      } finally {
+        setIsReserving(false);
+      }
+      return;
+    }
+
     const knownExpiry = Date.parse(reservationExpiresAt);
-    const requestId = checkoutReservationId && (!Number.isFinite(knownExpiry) || knownExpiry > now)
-      ? checkoutReservationId
-      : crypto.randomUUID();
+    const hasExpiredReservation = Boolean(checkoutReservationId)
+      && Number.isFinite(knownExpiry)
+      && knownExpiry <= now;
+    if (hasExpiredReservation) {
+      sessionStorage.removeItem(CHECKOUT_RESERVATION_ID_KEY);
+      sessionStorage.removeItem(CHECKOUT_RESERVATION_EXPIRY_KEY);
+      sessionStorage.removeItem(MIXED_BUY_NOW_RESERVATION_ID_KEY);
+      sessionStorage.removeItem(MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY);
+      sessionStorage.removeItem(MIXED_PREORDER_RESERVATION_ID_KEY);
+      sessionStorage.removeItem(MIXED_PREORDER_RESERVATION_EXPIRY_KEY);
+      setCheckoutReservationId('');
+      setReservationExpiresAt('');
+      setPaymentReservationState(isMixedCheckout ? 'ready' : 'checking');
+      setValidatedReservationCart('');
+    }
+    const canReuseReservation = Boolean(checkoutReservationId)
+      && !hasExpiredReservation
+      && Number.isFinite(knownExpiry)
+      && knownExpiry > now;
+    const requestId = canReuseReservation ? checkoutReservationId : crypto.randomUUID();
     setIsReserving(true);
     setCheckoutReservationId(requestId);
     sessionStorage.setItem(CHECKOUT_RESERVATION_ID_KEY, requestId);
@@ -914,6 +1095,25 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   };
 
   const handlePlaceOrder = async () => {
+    if (isMixedCheckout) {
+      const buyNowId = mixedBuyNowReservationId || sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_ID_KEY) || '';
+      const preOrderId = mixedPreOrderReservationId || sessionStorage.getItem(MIXED_PREORDER_RESERVATION_ID_KEY) || '';
+      const buyNowExpiry = Date.parse(mixedBuyNowReservationExpiry || sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_EXPIRY_KEY) || '');
+      const preOrderExpiry = Date.parse(mixedPreOrderReservationExpiry || sessionStorage.getItem(MIXED_PREORDER_RESERVATION_EXPIRY_KEY) || '');
+      if (
+        paymentReservationState !== 'ready'
+        || validatedReservationCart !== currentReservationCartSignature
+        || !buyNowId
+        || !preOrderId
+        || !Number.isFinite(buyNowExpiry)
+        || !Number.isFinite(preOrderExpiry)
+        || buyNowExpiry <= Date.now()
+        || preOrderExpiry <= Date.now()
+      ) {
+        setToastMessage('Your mixed checkout stock holds are no longer valid. Return to order details and continue to payment again to refresh both reservations.');
+        return;
+      }
+    }
     if (!isMixedCheckout && (paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature)) {
       setToastMessage('We have not confirmed that the items currently shown are reserved for you. Do not pay yet. Return to order details and check availability again.');
       return;
@@ -1028,6 +1228,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
     if (totalUploads > 0) setUploadProgress({ phase: 'saving' });
 
     const selectedSlot = TIME_SLOTS.find(s => s.value === form.pickupTime);
+    const buyNowSlot = TIME_SLOTS.find(s => s.value === mixedBuyNowTime);
     const payloadItems = updatedCart.map(item => ({
       productId: item.id ?? null,
       name: item.name,
@@ -1072,17 +1273,28 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
       };
 
     if (isMixedCheckout) {
-      const makeGroupedPayload = (orderType, items, date) => {
+      const makeGroupedPayload = (orderType, items, date, slot) => {
         const total = items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0);
-        const deposit = paymentType === 'half' ? Math.round(total * 0.5 * 100) / 100 : total;
+        const deposit = orderType === 'Buy Now'
+          ? total
+          : (paymentType === 'half' ? Math.ceil(total / 2) : total);
         return {
           ...orderPayload,
-          checkoutReservationId: null,
+          checkoutReservationId: orderType === 'Buy Now'
+            ? (mixedBuyNowReservationId || sessionStorage.getItem(MIXED_BUY_NOW_RESERVATION_ID_KEY) || null)
+            : (mixedPreOrderReservationId || sessionStorage.getItem(MIXED_PREORDER_RESERVATION_ID_KEY) || null),
           orderType,
-          pickup: { ...orderPayload.pickup, date },
+          pickup: {
+            ...orderPayload.pickup,
+            date,
+            time: slot?.start || '',
+            timeEnd: slot?.end || '',
+            timeSlot: slot?.value || '',
+            timeLabel: slot?.label || '',
+          },
           items,
           payment: {
-            type: paymentType === 'half' ? 'deposit' : 'full',
+            type: orderType === 'Buy Now' || paymentType === 'full' ? 'full' : 'deposit',
             amountDueNow: deposit,
             balanceAtPickup: Math.max(0, total - deposit),
             grandTotal: total,
@@ -1090,8 +1302,8 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         };
       };
       orderPayload.orderPayloads = [
-        makeGroupedPayload('Buy Now', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Buy Now'), getLiveNow().dateStr),
-        makeGroupedPayload('Pre-Order', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Pre-Order'), form.pickupDate),
+        makeGroupedPayload('Buy Now', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Buy Now'), getLiveNow().dateStr, buyNowSlot),
+        makeGroupedPayload('Pre-Order', payloadItems.filter((_, index) => getCartOrderType(updatedCart[index]) === 'Pre-Order'), form.pickupDate, selectedSlot),
       ].filter(group => group.items.length > 0);
     }
 
@@ -1272,7 +1484,65 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <span>Pick-up Schedule</span>
                               <span className="flex-1 h-px bg-[#EAE4E0]"></span>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-5">
+                            {isMixedCheckout && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-5 mb-4">
+                                <div className="rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264]">Pick-up Today</span>
+                                    <span className="rounded-full bg-[#DDF7EA] px-2 py-1 text-[9px] font-bold text-[#147A4B]">BUY NOW</span>
+                                  </div>
+                                  <div className="rounded-lg border border-[#EAE4E0] bg-[#F5EFEB] px-3 py-2.5 text-xs text-[#3B1F0A]">
+                                    {formatDateLong(getLiveNow().dateStr)} (Today)
+                                  </div>
+                                  <select
+                                    value={mixedBuyNowTime}
+                                    onChange={e => {
+                                      setMixedBuyNowTime(e.target.value);
+                                      setErrors(prev => ({ ...prev, buyNowTime: false }));
+                                    }}
+                                    className={`mt-2 w-full rounded-lg border px-3 py-2.5 text-xs outline-none ${errors.buyNowTime ? 'border-red-500' : 'border-[#EAE4E0]'}`}
+                                  >
+                                    <option value="">Select pickup time</option>
+                                    {TIME_SLOTS.map(slot => (
+                                      <option key={slot.value} value={slot.value} disabled={isMixedBuyNowSlotDisabled(slot)}>
+                                        {slot.label}{isMixedBuyNowSlotDisabled(slot) ? ' (Past)' : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {errors.buyNowTime && <p className="mt-1 text-[10px] text-red-500">{errors.buyNowTime}</p>}
+                                </div>
+                                <div className="rounded-xl border border-[#EAE4E0] bg-[#FCFAF9] p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#8A7264]">Pre-Order</span>
+                                    <span className="rounded-full bg-[#F1E5FF] px-2 py-1 text-[9px] font-bold text-[#7C3AED]">PRE-ORDER</span>
+                                  </div>
+                                  <input
+                                    type="date"
+                                    min={minPreOrderDate}
+                                    value={form.pickupDate}
+                                    onChange={e => {
+                                      setForm(f => ({ ...f, pickupDate: e.target.value }));
+                                      setErrors(prev => ({ ...prev, pickupDate: false }));
+                                    }}
+                                    className={`w-full rounded-lg border bg-white px-3 py-2.5 text-xs outline-none ${errors.pickupDate ? 'border-red-500' : 'border-[#EAE4E0]'}`}
+                                  />
+                                  <select
+                                    value={form.pickupTime}
+                                    onChange={e => {
+                                      setForm(f => ({ ...f, pickupTime: e.target.value }));
+                                      setErrors(prev => ({ ...prev, pickupTime: false }));
+                                    }}
+                                    className={`mt-2 w-full rounded-lg border bg-white px-3 py-2.5 text-xs outline-none ${errors.pickupTime ? 'border-red-500' : 'border-[#EAE4E0]'}`}
+                                  >
+                                    <option value="">Select pickup time</option>
+                                    {TIME_SLOTS.map(slot => <option key={slot.value} value={slot.value}>{slot.label}</option>)}
+                                  </select>
+                                  {errors.pickupDate && <p className="mt-1 text-[10px] text-red-500">{errors.pickupDate}</p>}
+                                  {errors.pickupTime && <p className="mt-1 text-[10px] text-red-500">{errors.pickupTime}</p>}
+                                </div>
+                              </div>
+                            )}
+                            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-5 ${isMixedCheckout ? 'hidden' : ''}`}>
                           <div className="relative" ref={calendarWrapRef}>
                               <label className={`text-[10px] font-bold mb-1.5 block uppercase tracking-wider ${errors.pickupDate ? 'text-red-500' : 'text-[#8A7264]'}`}>Pickup Date <span className="text-red-500">*</span></label>
 
@@ -1441,7 +1711,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
         </div>
 
         {/* RIGHT COLUMN: Step 2 (Payment) */}
-        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[780px] lg:max-w-[780px] lg:mx-auto lg:min-h-[calc(100vh-112px)] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 overflow-hidden flex-col`}>
+        <div className={`${isPaymentStep ? 'flex' : 'hidden'} lg:flex-col w-full lg:w-[1100px] lg:max-w-[1100px] lg:mx-auto lg:min-h-[calc(100vh-112px)] bg-white rounded-3xl border border-[#EAE4E0] shadow-sm shrink-0 overflow-hidden flex-col`}>
 
           <div className="flex-1 min-h-0 px-5 lg:px-7 py-4 flex flex-col gap-5 overflow-y-auto scrollbar-thin">
               <div className="flex flex-col shrink-0 lg:flex-1 lg:min-h-0">
@@ -1487,16 +1757,55 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <AlertCircle size={13} /> Before you pay
                     </p>
                     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] leading-snug text-[#5A453C] list-disc pl-4 marker:text-[#D4A87A]">
-                      <li>Send the exact amount of the option you selected (50% deposit or full payment).</li>
+                      <li>{isMixedCheckout ? 'Pick-up Today is always paid in full. Only the Pre-Order portion can use the 50% deposit option.' : 'Send the exact amount of the option you selected (50% deposit or full payment).'}</li>
                       <li>Your items are held only until the timer above ends. If it runs out, you'll need to check availability again before paying.</li>
                       <li>If you change your order after uploading a screenshot (add or remove items), the total changes and your uploaded proof is removed. You'll need to upload a new one.</li>
                       <li>Already paid but want to change your order? Please contact the shop first and don't pay a second time.</li>
                       <li>Your screenshot is saved on this device only, so refreshing keeps it, but it won't appear on another phone, browser or device.</li>
                     </ul>
                   </div>
+                  {isMixedCheckout && (
+                    <div className="mb-4 shrink-0 rounded-2xl border border-[#EAE4E0] bg-white p-4 shadow-sm">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <h4 className="text-sm font-bold text-[#3B1F0A]">Mixed Checkout Payment Summary</h4>
+                          <p className="mt-1 text-[11px] text-[#8A7264]">One payment proof, two order records, and one shared transaction.</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-[#F5EFEB] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#4A3B36]">Reference</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-[#D7EBDD] bg-[#F3FBF5] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[#147A4B]">Pick-up Today / Buy Now</span>
+                            <span className="text-[10px] font-bold text-[#147A4B]">FULL</span>
+                          </div>
+                          <p className="mt-2 text-xl font-serif text-[#3B1F0A]">{formatPeso(buyNowTotal)}</p>
+                          <p className="mt-1 text-[10px] text-[#5A453C]">This portion must be paid in full.</p>
+                        </div>
+                        <div className="rounded-xl border border-[#E7D9F7] bg-[#FBF7FF] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-[#7C3AED]">Pre-Order</span>
+                            <span className="text-[10px] font-bold text-[#7C3AED]">{paymentType === 'half' ? '50% DEPOSIT' : 'FULL'}</span>
+                          </div>
+                          <p className="mt-2 text-xl font-serif text-[#3B1F0A]">{formatPeso(paymentType === 'half' ? mixedPreOrderDeposit : preOrderTotal)}</p>
+                          <p className="mt-1 text-[10px] text-[#5A453C]">
+                            {paymentType === 'half' ? `Balance at pickup: ${formatPeso(preOrderTotal - mixedPreOrderDeposit)}` : 'No balance at pickup.'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between border-t border-[#F1EBE6] pt-3 text-xs">
+                        <span className="font-semibold text-[#5A453C]">Amount to pay now</span>
+                        <span className="text-lg font-serif text-[#3B1F0A]">{formatPeso(paymentTotal)}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="lg:grid lg:grid-cols-2 lg:grid-rows-1 lg:gap-6 lg:items-stretch lg:flex-1 lg:min-h-0">
                   <div className="min-w-0 flex flex-col">
-                  <p className="text-[11px] text-[#8A7264] mb-3.5 shrink-0">We require at least a 50% deposit to process your order.</p>
+                  <p className="text-[11px] text-[#8A7264] mb-3.5 shrink-0">
+                    {isMixedCheckout
+                      ? 'Pick-up Today must be paid in full. You may pay 50% now for the Pre-Order portion.'
+                      : 'We require at least a 50% deposit to process your order.'}
+                  </p>
 
                   <div className="grid grid-cols-1 gap-3 shrink-0 lg:flex-1 lg:grid-rows-2">
                       <div
@@ -1507,9 +1816,11 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${paymentType === 'half' ? 'border-[#4A3B36]' : 'border-[#B7A99F]'}`}>
                                   {paymentType === 'half' && <div className="w-1.5 h-1.5 rounded-full bg-[#4A3B36]"></div>}
                               </div>
-                              <span className="text-xs lg:text-sm font-bold text-[#3B1F0A]">50% Deposit</span>
+                              <span className="text-xs lg:text-sm font-bold text-[#3B1F0A]">{isMixedCheckout ? '50% Pre-Order Deposit' : '50% Deposit'}</span>
                           </div>
-                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">Pay half now, balance upon pick-up.</p>
+                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">
+                            {isMixedCheckout ? 'Pay Buy Now in full and half of the Pre-Order.' : 'Pay half now, balance upon pick-up.'}
+                          </p>
                           <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs lg:font-serif lg:font-normal lg:text-3xl lg:leading-none">{formatPeso(halfAmount)}</div>
                           <p className="hidden lg:block pl-[22px] mt-2 text-[11px] text-[#8A7264]">Balance of {formatPeso(balanceAtPickup)} due at pick-up · Total {formatPeso(paymentTotal)}</p>
                       </div>
@@ -1524,8 +1835,10 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                               </div>
                               <span className="text-xs lg:text-sm font-bold text-[#3B1F0A]">Full Payment</span>
                           </div>
-                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">Pay in full for hassle-free pick-up.</p>
-                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs lg:font-serif lg:font-normal lg:text-3xl lg:leading-none">{formatPeso(paymentTotal)}</div>
+                          <p className="text-[10px] lg:text-xs text-[#8A7264] pl-[22px] leading-snug mb-1 lg:mb-3 opacity-90">
+                            {isMixedCheckout ? 'Pay both Pick-up Today and Pre-Order in full.' : 'Pay in full for hassle-free pick-up.'}
+                          </p>
+                          <div className="pl-[22px] font-bold text-[#3B1F0A] text-xs lg:font-serif lg:font-normal lg:text-3xl lg:leading-none">{formatPeso(totalAmount)}</div>
                           <p className="hidden lg:block pl-[22px] mt-2 text-[11px] text-[#8A7264]">No balance at pick-up</p>
                       </div>
                       </div>
@@ -1662,7 +1975,7 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
             </div>
             <div className="min-w-0 lg:w-full lg:max-w-sm">
             <button
-              onClick={handleProceedToOrder}
+              onClick={isPaymentStep ? handlePlaceOrder : handleProceedToOrder}
               disabled={shopClosedNow || isProcessing || paymentReservationState !== 'ready' || validatedReservationCart !== currentReservationCartSignature || reservationExpired || !proofOfPayment || paymentConfigLoading || !paymentQrUrl}
               className="w-full bg-[#3B1F0A] text-white py-2.5 rounded-full text-xs font-semibold hover:bg-[#2A1608] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -1765,14 +2078,37 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
 
                   {/* Pick-up */}
                   <div className="bg-white border border-[#EAE4E0] rounded-xl p-3 flex flex-col gap-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold">Pick-up</span>
-                      <span className="text-[10px] font-bold uppercase tracking-wide bg-[#F5EFEB] text-[#4A3B36] px-2.5 py-1 rounded-full">
-                        {pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}
-                      </span>
-                    </div>
-                    <SummaryRow icon={CalendarIcon} label="Date">{formatDateLong(form.pickupDate) || '—'}</SummaryRow>
-                    <SummaryRow icon={Clock} label="Time">{getSlotLabel(form.pickupTime) || '—'}</SummaryRow>
+                    {isMixedCheckout ? (
+                      <>
+                        <div className="border-b border-[#F1EBE6] pb-2">
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold">Pick-up Today</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-[#DDF7EA] text-[#147A4B] px-2.5 py-1 rounded-full">BUY NOW</span>
+                          </div>
+                          <SummaryRow icon={CalendarIcon} label="Date">{formatDateLong(getLiveNow().dateStr)}</SummaryRow>
+                          <SummaryRow icon={Clock} label="Time">{getSlotLabel(mixedBuyNowTime) || '—'}</SummaryRow>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold">Pre-Order</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wide bg-[#F1E5FF] text-[#7C3AED] px-2.5 py-1 rounded-full">PRE-ORDER</span>
+                          </div>
+                          <SummaryRow icon={CalendarIcon} label="Date">{formatDateLong(form.pickupDate) || '—'}</SummaryRow>
+                          <SummaryRow icon={Clock} label="Time">{getSlotLabel(form.pickupTime) || '—'}</SummaryRow>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] uppercase tracking-wider text-[#B7A99F] font-semibold">Pick-up</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wide bg-[#F5EFEB] text-[#4A3B36] px-2.5 py-1 rounded-full">
+                            {pickupType === 'now' ? 'Pick-up Today' : 'Pre-Order'}
+                          </span>
+                        </div>
+                        <SummaryRow icon={CalendarIcon} label="Date">{formatDateLong(form.pickupDate) || '—'}</SummaryRow>
+                        <SummaryRow icon={Clock} label="Time">{getSlotLabel(form.pickupTime) || '—'}</SummaryRow>
+                      </>
+                    )}
                   </div>
 
                   {form.instructions && (

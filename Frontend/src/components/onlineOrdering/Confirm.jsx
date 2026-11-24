@@ -22,17 +22,37 @@ export default function Confirm({ orderId }) {
   const state = location.state || storedData || {};
 
   const manualOrder = JSON.parse(sessionStorage.getItem('manualOrderResult') || 'null');
-  const id = manualOrder?.order_number || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
   const cart = state.cart && state.cart.length ? state.cart : DUMMY_CART;
+  const savedOrders = Array.isArray(manualOrder)
+    ? manualOrder
+    : (manualOrder?.orders || (manualOrder ? [manualOrder] : []));
+  const isMixedOrder = savedOrders.length > 1;
+  const transactionId = manualOrder?.transactionId || manualOrder?.transactionGroupId || null;
+  const id = manualOrder?.order_number || savedOrders[0]?.order_number || orderId || `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+  const orderGroups = savedOrders.length
+    ? savedOrders.map((order) => {
+        const orderType = order.order_type || order.orderType || 'Buy Now';
+        const items = isMixedOrder
+          ? cart.filter((item) => (item.selected_order_type || item.orderType) === orderType)
+          : cart;
+        return {
+          ...order,
+          orderType,
+          items,
+          total: Number(order.grand_total ?? order.grandTotal ?? items.reduce((sum, item) => sum + (item.price ?? 0) * (item.qty ?? 1), 0)),
+        };
+      })
+    : [{ order_number: id, orderType: state.orderType || 'Buy Now', items: cart, total: 0 }];
   
   const totalAmount =
+    manualOrder?.grandTotal ??
     state.totalAmount ??
-    cart.reduce((sum, item) => sum + (item.price ?? 0) * (item.qty ?? 1), 0);
+    orderGroups.reduce((sum, group) => sum + group.total, 0);
     
   const paymentType = state.paymentType || 'full';
   const halfAmount = totalAmount / 2;
-  const amountPaid = paymentType === 'half' ? halfAmount : totalAmount;
-  const balance = paymentType === 'half' ? halfAmount : 0;
+  const amountPaid = manualOrder?.amountPaid ?? (paymentType === 'half' ? halfAmount : totalAmount);
+  const balance = manualOrder?.balance ?? (paymentType === 'half' ? halfAmount : 0);
 
   const orderDate = state.orderDate
     ? new Date(state.orderDate)
@@ -52,6 +72,14 @@ export default function Confirm({ orderId }) {
 
   const formatPeso = (n) =>
     `₱${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatPickupDate = (date) => {
+    if (!date) return '—';
+    return new Date(`${date}T00:00:00`).toLocaleDateString('en-PH', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
 
   const handleSaveAsImage = async () => {
     if (!mobileReceiptRef.current) return;
@@ -98,7 +126,7 @@ export default function Confirm({ orderId }) {
             </p>
           </div>
 
-          <div className="bg-white rounded-3xl border border-[#EAE4E0] shadow-sm overflow-hidden flex flex-col w-full max-w-[340px] md:flex-row md:max-w-[650px] shrink-0">
+          <div className={`bg-white rounded-3xl border border-[#EAE4E0] shadow-sm overflow-hidden flex flex-col w-full md:flex-row shrink-0 ${isMixedOrder ? 'max-w-[760px]' : 'max-w-[340px] md:max-w-[650px]'}`}>
 
             <div className="flex-1 p-3 sm:p-4 flex flex-col min-h-0">
               <div className="text-center mb-1">
@@ -112,8 +140,8 @@ export default function Confirm({ orderId }) {
 
               <div className="grid grid-cols-2 gap-3 mb-1.5 shrink-0">
                 <div>
-                  <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Order No.</p>
-                  <p className="text-[11px] sm:text-xs font-semibold text-[#3B1F0A]">{id}</p>
+                  <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{isMixedOrder ? 'Transaction' : 'Order No.'}</p>
+                  <p className="text-[11px] sm:text-xs font-semibold text-[#3B1F0A]">{isMixedOrder ? (transactionId || id) : id}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Date</p>
@@ -123,15 +151,26 @@ export default function Confirm({ orderId }) {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[80px] lg:max-h-[12vh] scrollbar-thin pr-1">
-                {cart.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-start text-[11px] sm:text-xs text-[#5A453C]">
-                    <span className="pr-2 leading-snug">
-                      {item.qty}x {item.name}
-                    </span>
-                    <span className="font-medium text-[#3B1F0A] shrink-0">
-                      {formatPeso((item.price ?? 0) * (item.qty ?? 1))}
-                    </span>
+              <div className={`flex flex-col gap-2 flex-1 pr-1 ${isMixedOrder ? '' : 'overflow-y-auto max-h-[150px] lg:max-h-[18vh] scrollbar-thin'}`}>
+                {orderGroups.map((group, groupIndex) => (
+                  <div key={group.id || groupIndex} className="rounded-lg border border-[#EAE4E0] px-2.5 py-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#3B1F0A]">{group.orderType}</span>
+                      <span className="text-[9px] text-[#8A7264]">{group.order_number || id}</span>
+                    </div>
+                    <div className="mb-1.5 text-[9px] text-[#8A7264]">
+                      {formatPickupDate(group.pickup_date)}{group.pickup_time ? ` · ${group.pickup_time}` : ''}
+                    </div>
+                    {group.items.map((item, idx) => (
+                      <div key={`${group.id || groupIndex}-${idx}`} className="flex justify-between items-start text-[11px] sm:text-xs text-[#5A453C]">
+                        <span className="pr-2 leading-snug">{item.qty}x {item.name}</span>
+                        <span className="font-medium text-[#3B1F0A] shrink-0">{formatPeso((item.price ?? 0) * (item.qty ?? 1))}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between mt-1.5 pt-1 border-t border-[#F1EBE6] text-[10px] font-semibold text-[#5A453C]">
+                      <span>Order total</span>
+                      <span>{formatPeso(group.total)}</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -182,7 +221,7 @@ export default function Confirm({ orderId }) {
           >
             <div
               ref={mobileReceiptRef}
-              className="bg-white rounded-3xl border border-[#EAE4E0] flex flex-col w-[340px]"
+              className={`bg-white rounded-3xl border border-[#EAE4E0] flex flex-col ${isMixedOrder ? 'w-[520px]' : 'w-[340px]'}`}
             >
               <div className="p-6 flex flex-col">
                 <div className="text-center mb-2">
@@ -196,8 +235,8 @@ export default function Confirm({ orderId }) {
 
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Order No.</p>
-                    <p className="text-xs font-semibold text-[#3B1F0A]" style={{ lineHeight: 1.6 }}>{id}</p>
+                    <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">{isMixedOrder ? 'Transaction' : 'Order No.'}</p>
+                    <p className="text-xs font-semibold text-[#3B1F0A]" style={{ lineHeight: 1.6 }}>{isMixedOrder ? (transactionId || id) : id}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-[9px] uppercase tracking-[0.15em] text-[#B7A99F] mb-1">Date</p>
@@ -208,25 +247,34 @@ export default function Confirm({ orderId }) {
                 </div>
 
                 <div>
-                  {cart.map((item, idx) => (
-                    <table key={idx} width="100%" style={{ borderCollapse: 'collapse', marginBottom: 8 }}>
-                      <tbody>
-                        <tr>
-                          <td
-                            className="text-xs text-[#5A453C]"
-                            style={{ lineHeight: 1.6, padding: 0, textAlign: 'left' }}
-                          >
-                            {item.qty}x {item.name}
-                          </td>
-                          <td
-                            className="text-xs font-medium text-[#3B1F0A]"
-                            style={{ lineHeight: 1.6, padding: 0, textAlign: 'right', whiteSpace: 'nowrap' }}
-                          >
-                            {formatPeso((item.price ?? 0) * (item.qty ?? 1))}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
+                  {orderGroups.map((group, groupIndex) => (
+                    <div key={group.id || groupIndex} style={{ border: '1px solid #EAE4E0', borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#3B1F0A' }}>{group.orderType}</span>
+                        <span style={{ fontSize: 9, color: '#8A7264' }}>{group.order_number || id}</span>
+                      </div>
+                      <div style={{ fontSize: 9, color: '#8A7264', marginBottom: 6 }}>
+                        {formatPickupDate(group.pickup_date)}{group.pickup_time ? ` · ${group.pickup_time}` : ''}
+                      </div>
+                      {group.items.map((item, idx) => (
+                        <table key={`${group.id || groupIndex}-${idx}`} width="100%" style={{ borderCollapse: 'collapse', marginBottom: 5 }}>
+                          <tbody>
+                            <tr>
+                              <td className="text-xs text-[#5A453C]" style={{ lineHeight: 1.5, padding: 0, textAlign: 'left' }}>
+                                {item.qty}x {item.name}
+                              </td>
+                              <td className="text-xs font-medium text-[#3B1F0A]" style={{ lineHeight: 1.5, padding: 0, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {formatPeso((item.price ?? 0) * (item.qty ?? 1))}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      ))}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #F1EBE6', marginTop: 6, paddingTop: 6, fontSize: 10, fontWeight: 700, color: '#5A453C' }}>
+                        <span>Order total</span>
+                        <span>{formatPeso(group.total)}</span>
+                      </div>
+                    </div>
                   ))}
                 </div>
 
@@ -266,7 +314,7 @@ export default function Confirm({ orderId }) {
             </div>
           </div>
 
-          <div className="w-full max-w-[340px] flex flex-col mt-5 sm:mt-6 shrink-0">
+          <div className={`w-full flex flex-col mt-5 sm:mt-6 shrink-0 ${isMixedOrder ? 'max-w-[760px]' : 'max-w-[340px]'}`}>
             <button
               onClick={() => {
                 sessionStorage.removeItem('tempOrderData');

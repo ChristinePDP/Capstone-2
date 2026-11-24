@@ -700,7 +700,7 @@ export default function LoginPage({ onLogin }) {
                     letterSpacing: '0.04em',
                     textTransform: 'uppercase',
                   }}>
-                    Continue as
+                    Continue in
                   </label>
                   <div style={{
                     display: 'grid',
@@ -725,7 +725,7 @@ export default function LoginPage({ onLogin }) {
                         transition: 'all 150ms ease',
                       }}
                     >
-                      Admin
+                      Admin Dashboard
                     </button>
                     <button
                       type="button"
@@ -742,7 +742,7 @@ export default function LoginPage({ onLogin }) {
                         transition: 'all 150ms ease',
                       }}
                     >
-                      POS
+                      Point of Sale
                     </button>
                   </div>
                 </div>

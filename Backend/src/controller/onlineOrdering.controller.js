@@ -187,14 +187,30 @@ export const placeManualPaymentOrder = async (req, res) => {
     }
     if (Array.isArray(orderPayload.orderPayloads) && orderPayload.orderPayloads.length > 0) {
       const savedOrders = [];
+      const transactionGroupId = randomUUID();
       for (const groupedPayload of orderPayload.orderPayloads) {
         const payload = {
           ...groupedPayload,
           checkoutReservationId: groupedPayload.checkoutReservationId || randomUUID(),
+          transactionGroupId,
         };
         savedOrders.push(await createDatabaseOrder(payload, { url: proofUrl, path: proofPath }));
       }
-      return res.status(201).json({ success: true, order: savedOrders });
+      return res.status(201).json({
+        success: true,
+        order: {
+          transactionGroupId,
+          transactionId: transactionGroupId,
+          orderType: 'Mixed',
+          paymentType: 'mixed',
+          orders: savedOrders,
+          grandTotal: savedOrders.reduce((sum, order) => sum + Number(order.grand_total || 0), 0),
+          amountPaid: savedOrders.reduce((sum, order) => sum + Number(order.amount_paid || 0), 0),
+          balance: savedOrders.reduce((sum, order) => sum + Number(order.balance || 0), 0),
+          id: savedOrders[0]?.id,
+          order_number: savedOrders[0]?.order_number,
+        },
+      });
     }
 
     const savedOrder = await createDatabaseOrder(orderPayload, { url: proofUrl, path: proofPath });

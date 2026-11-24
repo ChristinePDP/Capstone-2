@@ -866,6 +866,14 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
     throw createOrderError('customer', custError);
   }
 
+  const paymentData = payload.orderType === 'Buy Now'
+    ? {
+        ...payload.payment,
+        type: 'full',
+        amountDueNow: payload.payment.grandTotal,
+        balanceAtPickup: 0,
+      }
+    : payload.payment;
   const orderToInsert = {
     order_number: payload.orderNumber || `ORD-${Date.now().toString().slice(-4)}`,
     customer_id: customerData.id,
@@ -877,12 +885,13 @@ export const createDatabaseOrder = async (payload, manualPayment = null) => {
     status: manualPayment ? 'Pending Verification' : 'Confirmed',
     subtotal: payload.payment.grandTotal,
     grand_total: payload.payment.grandTotal,
-    payment_type: payload.payment.type,
-    amount_paid: payload.payment.amountDueNow,
-    balance: payload.payment.balanceAtPickup,
+    payment_type: paymentData.type,
+    amount_paid: paymentData.amountDueNow,
+    balance: paymentData.balanceAtPickup,
     pickup_date: payload.pickup.date,
     pickup_time: payload.pickup.time,
     pickup_time_end: payload.pickup.timeEnd || null,
+    transaction_group_id: payload.transactionGroupId || null,
     checkout_reservation_id: checkoutReservationId,
     ...(manualPayment ? {
       payment_verification_status: 'Pending',
