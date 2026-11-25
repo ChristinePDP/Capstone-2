@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { runDailyAnalyticsJob } from '../jobs/dailyAnalyticsJob.js';
 
-// ISANG cron lang. Sunud-sunod sa loob ng job: Forecasts -> 5 min -> Insights.
+// ISANG cron lang. Sa loob ng job: Expired waste -> Actionable Recommendations lang. Walang forecast, walang Performance Summary.
 let running = false;
 
 export const setupAnalyticsCron = (scheduler = cron) => {

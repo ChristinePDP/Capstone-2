@@ -1139,6 +1139,8 @@ async function getForecastAvailability() {
 
   return {
     anyReady,
+    sales30Ready,
+    product30Ready,
     productForecastGeneratedAt: productThirty?.generatedAt ?? null,
     thirtyDay: anyReady
       ? {
