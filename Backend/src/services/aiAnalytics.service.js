@@ -330,7 +330,10 @@ const PRODUCT_LIST_MAX = 5;
 // lumampas sa 0.5x–2.0x ng statistical baseline ng produktong iyon (parehong
 // band na gamit ng Sales Forecast para sa total). Dati may upper bound lang,
 // kaya nakalabas ang sobrang baba (hal. 370 -> 105). Clamp, hindi reject.
-const PF_BASELINE_BAND = { min: 0.5, max: 2.0 };
+const PF_BASELINE_BAND = { min: 0.6, max: 1.6 };
+// (0.5–2.0 -> 0.6–1.6: parehong log-symmetric, pero mas masikip. Hindi ito
+// tinune sa isang test window; judgment call lang. Ang pangunahing ayos ay
+// ang weekly na input sa AI — tingnan ang buildProductForecastPrompt.)
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -358,6 +361,50 @@ function formatForecastLabel(key) {
 
 function buildFutureDateKeys(todayKey, count) {
   return Array.from({ length: count }, (_, i) => addDaysToKey(todayKey, i));
+}
+
+// ==========================================
+// WEEKLY BUCKETING (SALES + PRODUCT FORECAST)
+// ==========================================
+// Ang forecast ay sa LINGGO na, hindi sa araw. Pinagsasama ang daily series
+// sa 7-araw na bucket, bilang MULA SA HULING ARAW ng history paatras. Kaya:
+//   - bawat bucket ay may eksaktong isang beses ng bawat weekday (kaya hindi
+//     na kailangang hulaan ng AI kung aling weekday ang mataas), at
+//   - kapareho ang hugis ng mga bucket ng forecast, na nagsisimula sa araw
+//     pagkatapos ng huling araw ng history.
+// Ang natirang araw sa UMPISA ng history (< 7) ay hindi isinasama para walang
+// partial bucket sa training data.
+const WEEK_DAYS = 7;
+
+function toWeeklyBuckets(series) {
+  const fullWeeks = Math.floor(series.length / WEEK_DAYS);
+  const offset = series.length - fullWeeks * WEEK_DAYS;
+  const weeks = [];
+  for (let w = 0; w < fullWeeks; w++) {
+    const chunk = series.slice(offset + w * WEEK_DAYS, offset + (w + 1) * WEEK_DAYS);
+    weeks.push({
+      start: chunk[0].date,
+      end: chunk[chunk.length - 1].date,
+      value: chunk.reduce((a, p) => a + p.value, 0),
+    });
+  }
+  return weeks;
+}
+
+// Mga bucket ng forecast: buong 7-araw na linggo mula sa unang araw ng
+// forecast. Ang sobrang araw (30 = 4 x 7 + 2) ay ang "tail" na partial week.
+function buildForecastWeeks(futureDates) {
+  const weeks = [];
+  for (let i = 0; i < futureDates.length; i += WEEK_DAYS) {
+    const chunk = futureDates.slice(i, i + WEEK_DAYS);
+    weeks.push({
+      start: chunk[0],
+      end: chunk[chunk.length - 1],
+      days: chunk.length,
+      partial: chunk.length < WEEK_DAYS,
+    });
+  }
+  return weeks;
 }
 
 // Kumpletong mga araw lang ang gagamitin sa training: mula `days` araw
@@ -1078,7 +1125,7 @@ async function getForecastAvailability() {
     productForecastGeneratedAt: productThirty?.generatedAt ?? null,
     thirtyDay: anyReady
       ? {
-          salesForecastSnippet: sales30.chartData.slice(0, 14),
+          salesForecastSnippet: sales30.chartData.slice(0, 5), // weekly rows (hanggang 5)
           productForecast: { growth: productThirty.growth || [], risk: productThirty.risk || [] },
         }
       : null,
@@ -2058,46 +2105,47 @@ function logProductEligibility(scoped, eligibleCount, horizonKey) {
   }
 }
 
-// Prompt para kay Gemini. Ang series ay outlier-capped na (winsorizeByWeekday).
+// Prompt para kay Gemini. WEEKLY units na ang ipinapadala (hindi daily).
+// Dahilan: ang daily units ng isang produkto ay halos puro 0 (kalat-kalat),
+// kaya kapag daily ang forecast na may "floor sa 0", bumabagsak ang level
+// papunta sa 0 at lumalabas na sobrang baba ang total (hal. 370 -> 105). Sa
+// 7-araw na bucket, mas tuloy-tuloy ang series at mas tama ang level.
 function buildProductForecastPrompt(products, { todayKey }) {
   const systemPrompt = [
     "You are a product-demand analyst for a small food business.",
-    "Your forecasting method is FIXED: Holt-Winters triple exponential smoothing (level + trend + seasonality), applied separately to each product. Do not substitute any other method (no moving average, no regression, no guessing).",
-    "Settings for every product: seasonal period = 7 (weekly, aligned to the weekday of that product's first date), additive trend, additive seasonality (many products have zero-sale days, so multiplicative seasonality is not valid).",
-    "For each product: fit the model on its whole dailyUnits series (initialise level, trend and the 7 seasonal indices from its first 14 days; choose alpha, beta, gamma in (0,1) that minimise one-step-ahead squared error), forecast each of the next 30 days, floor each daily value at 0, then add the 30 daily values to get next30Units.",
-    "The data is already aggregated by the system: units sold per calendar day (Asia/Manila), cancelled orders excluded, outlier days already capped. Each product series starts on its first sale date and every day without a sale after that is a real 0. Do not re-aggregate, drop or interpolate days.",
+    "For each product you get its WEEKLY units sold: every value is the number of units sold over 7 consecutive calendar days (Asia/Manila), oldest first, the last value is the most recent week.",
+    "Estimate the TOTAL units each product will sell in the next 30 days (about 4.3 weeks). Base it on the recent level of the weekly units: give the latest weeks more weight than old ones, follow a steady rise or fall gently, and do not extrapolate one unusually large or small week.",
+    "Many products sell only a few units, so answer in whole numbers. Do not forecast 0 unless the recent weeks are also (almost) 0. last30DaysUnits is the actual total of the most recent 30 days, given only so you know the scale; do not simply copy it.",
+    "The data is already aggregated by the system: units per calendar day (cancelled orders excluded) summed into 7-day weeks, days without a sale count as 0 inside their week, and extreme weeks are already capped. Do not re-aggregate or re-interpret the data.",
     "Use ONLY the data provided. Do not invent events, holidays or promotions.",
     "Return ONLY one JSON object. No markdown, no commentary.",
   ].join(" ");
 
   const userPrompt = JSON.stringify({
-    task: `Apply Holt-Winters to every product's daily units and return the TOTAL units it will sell in the next 30 days, counting from ${todayKey} (today, inclusive).`,
-    method: {
-      algorithm: HOLT_WINTERS_SPEC.algorithm,
-      seasonalPeriod: HOLT_WINTERS_SPEC.seasonalPeriod,
-      trend: HOLT_WINTERS_SPEC.trend,
-      seasonality: HOLT_WINTERS_SPEC.seasonality,
-    },
+    task: `Return the TOTAL units each product will sell in the next 30 days, counting from ${todayKey} (today, inclusive).`,
     aggregation: {
-      granularity: "daily",
+      granularity: "weekly",
+      weekLengthDays: WEEK_DAYS,
       timezone: MANILA_TZ,
-      metric: "units sold per calendar day per product (cancelled orders excluded)",
-      missingDaysFilledWithZero: true,
-      historyScope: "full history of each product, from its firstSaleDate to historyEndDate",
+      metric: "units sold per 7-day week per product (cancelled orders excluded)",
+      historyScope: "full history of each product (complete 7-day weeks, ending on historyEndDate)",
       minHistoryDays: FORECAST_HISTORY_DAYS["30d"],
     },
     historyEndDate: addDaysToKey(todayKey, -1),
     forecastStartDate: todayKey,
-    forecastStartWeekday: WEEKDAY_NAMES[weekdayOfKey(todayKey)],
-    products: products.map((p) => ({
-      id: p.id,
-      name: p.productName,
-      category: p.category,
-      firstSaleDate: p.series[0].date,
-      firstSaleWeekday: WEEKDAY_NAMES[weekdayOfKey(p.series[0].date)],
-      days: p.series.length,
-      dailyUnits: winsorizeByWeekday(p.series).adjusted.join(","),
-    })),
+    products: products.map((p) => {
+      const weekly = toWeeklyBuckets(p.series);
+      const { adjusted } = winsorizeSeries(weekly.map((w) => w.value));
+      return {
+        id: p.id,
+        name: p.productName,
+        category: p.category,
+        firstSaleDate: p.series[0].date,
+        weeks: weekly.length,
+        weeklyUnits: adjusted.join(","),
+        last30DaysUnits: sumOf(p.series.slice(-30).map((x) => x.value)),
+      };
+    }),
     outputFormat: `Return {"products":[{"id":"<same id>","next30Units":<whole number>}]} with one entry per product id. Whole numbers >= 0 only.`,
   });
   const rowProps = { id: { type: "STRING" }, next30Units: { type: "INTEGER" } };
@@ -2294,8 +2342,9 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     // sa method.baselineAccuracy ay ng NON-AI na statistical baseline (reference lang).
     accuracy: null,
     method: {
-      type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI per product over the full daily history (first sale date to yesterday; at least 90 days required) aggregated by the system (missing days = 0; eligibility rules + outlier cap); statistical baseline kept only as a reference",
-      model: HOLT_WINTERS_SPEC,
+      type: "30-day units per product forecast by Gemini AI from weekly (7-day) unit totals over the full history (first sale date to yesterday; at least 90 days required; days without a sale = 0; eligibility rules + outlier cap); clamped to a band around the statistical baseline; statistical baseline kept only as a reference",
+      model: null,
+      granularity: "weekly",
       historyDays: scoped.reduce((m, p) => Math.max(m, p.series.length), 0),
       backtestLastDay: FORECAST_BACKTEST_LAST_DAY,
       minHistoryDays: FORECAST_HISTORY_DAYS[horizonKey],
@@ -2408,7 +2457,7 @@ const ProductForecastService = {
 // ==========================================
 // 3. SALES FORECAST SERVICE (GEMINI AI OVER SYSTEM-FILTERED DATA)
 // ==========================================
-// Si Gemini ang nag-aanalyze ng daily sales history at nagbibigay ng forecast.
+// Si Gemini ang nag-aanalyze ng WEEKLY sales history (7-araw na bucket) at nagbibigay ng weekly forecast.
 // Ang system ang nag-fi-filter bago ipadala (sufficiency gate, active-days gate,
 // outlier cap, buong history na may minimum na 90 araw) at nagva-validate ng sagot (shape, per-day cap,
 // total vs statistical baseline). Ang resulta ay isinusulat sa AI cache.
@@ -2502,266 +2551,133 @@ function insufficientSalesPayload(message) {
   };
 }
 
-const SF_DAILY_CAP_MULTIPLIER = 1.5;    // forecast ng isang araw <= 1.5x ng pinakamataas na (capped) araw
-const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // total ng AI vs statistical baseline
+const SF_WEEKLY_CAP_MULTIPLIER = 1.5; // forecast ng isang linggo <= 1.5x ng pinakamataas na (capped) linggo sa history
+const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // 30-day total ng AI vs statistical baseline
+const SF_RANGE_WEEKS = 12;                            // "typical range" = P10–P90 ng huling 12 linggo
+const SF_RANGE_QUANTILES = { low: 0.1, high: 0.9 };
+const SF_MIN_WEEKS_FOR_RANGE = 6;
 
-// v2 GUARD (sales): sinusuri ang HUGIS ng daily forecast (weekday pattern),
-// hindi lang ang total. Ang AI ay minsang nag-shift ng weekday (peak sa Biyernes
-// kahit Sabado/Linggo ang totoong peak). Kapag mababa ang correlation ng AI sa
-// statistical baseline (na tama ang weekday index), ang baseline ang gagamitin.
-// Gumagamit lang ng data bago ang cutoff — hindi nakadepende sa test window.
-const SF_MIN_SHAPE_CORR = 0.3;
-
-function pearsonCorrelation(a, b) {
-  const n = Math.min(a.length, b.length);
-  if (n < 2) return 0;
-  const ma = meanOf(a.slice(0, n));
-  const mb = meanOf(b.slice(0, n));
-  let num = 0, da = 0, db = 0;
-  for (let i = 0; i < n; i++) {
-    num += (a[i] - ma) * (b[i] - mb);
-    da += (a[i] - ma) ** 2;
-    db += (b[i] - mb) ** 2;
-  }
-  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
+// SALES FORECAST = WEEKLY. Ang AI (Gemini) ay nagfo-forecast ng TOTAL kada
+// 7-araw na linggo; hindi na daily. Dahilan: halos isang order lang ang
+// laman ng bawat araw (₱325 hanggang ₱14,900), kaya ang daily forecast ay
+// halos hindi mahulaan at nagkakamali pa sa weekday. Sa linggo, bawat
+// bucket ay may isa ng bawat weekday, kaya wala nang weekday shape na
+// pwedeng ma-shift. Ang natirang 2 araw (30 = 4 x 7 + 2) ay "tail":
+// proporsyon ng average na forecast na linggo (simpleng pro-rata, hindi AI).
+function estimateTailTotal(weeklyForecast, tailDays) {
+  if (!tailDays || !weeklyForecast.length) return 0;
+  return Math.round(meanOf(weeklyForecast) * (tailDays / WEEK_DAYS));
 }
 
-function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon }) {
-  const horizonDays = futureDates.length;
-  const horizonKey = `${horizonDays}d`;
-  const baselineTotal = Number(referenceByHorizon[horizonKey]?.baselineTotal || 0);
-  const recent30DayActual = sumOf(filteredHistory.slice(-30).map((point) => point.value));
-  const forecastTotalRanges = Object.fromEntries(
-    Object.entries(referenceByHorizon).map(([key, reference]) => {
-      const total = Number(reference.baselineTotal || 0);
-      return [key, {
-        baselineTotal: Math.round(total),
-        minimum: Math.round(total * SF_TOTAL_SANITY_BAND.min),
-        maximum: Math.round(total * SF_TOTAL_SANITY_BAND.max),
-      }];
-    })
-  );
+// "Typical range": P10–P90 ng AKTWAL na weekly totals ng huling 12 linggo.
+// Hindi ito prediction interval ni Gemini (47% lang ang pumasok sa dating
+// 80% band) — ito ay ang tunay na karaniwang laki ng linggo ng shop.
+function computeTypicalWeekRange(weeklyValues) {
+  const recent = weeklyValues.slice(-SF_RANGE_WEEKS);
+  if (recent.length < SF_MIN_WEEKS_FOR_RANGE) return null;
+  const sorted = [...recent].sort((a, b) => a - b);
+  return {
+    low: computePercentile(sorted, SF_RANGE_QUANTILES.low),
+    high: computePercentile(sorted, SF_RANGE_QUANTILES.high),
+  };
+}
+
+function buildSalesForecastPrompt({ weeklyHistory, forecastWeeks, recent30DayActual }) {
+  const weekCount = forecastWeeks.length;
+  const values = weeklyHistory.map((w) => Math.round(w.value));
+  const last12 = values.slice(-SF_RANGE_WEEKS);
+
   const scaleReference = {
     currency: "PHP",
     recent30DayActualTotal: Math.round(recent30DayActual),
-    recent30DayAveragePerCalendarDay: Math.round(recent30DayActual / 30),
-    statisticalForecastTotalsByHorizon: forecastTotalRanges,
+    recent4WeekAverage: Math.round(meanOf(values.slice(-4))),
+    recent12WeekLowest: Math.min(...last12),
+    recent12WeekHighest: Math.max(...last12),
   };
-  const historyDays = filteredHistory.length;
-  const zeroDays = filteredHistory.filter((p) => p.value === 0).length;
-  const startDate = filteredHistory[0].date;
 
   const systemPrompt = [
     "You are a demand-forecasting analyst for a small food business.",
-    "Your forecasting method is FIXED: Holt-Winters triple exponential smoothing (level + trend + seasonality). Do not substitute any other method (no moving average, no regression, no guessing).",
-    "Settings: seasonal period = 7 (weekly, aligned to the weekday of the first history date), additive trend, additive seasonality (the series contains zero-sales days, so multiplicative seasonality is not valid).",
-    "Fit the model on the whole dailySales history: initialise level, trend and the 7 seasonal indices from the first 14 days, choose alpha, beta, gamma in (0,1) that minimise one-step-ahead squared error, then forecast each date in forecastDates as level + h * trend + the seasonal index of that date's weekday. Floor every forecast at 0.",
-    "lower and upper form an approximately 80% prediction interval: forecast -/+ 1.28 x the standard deviation of the in-sample one-step residuals (lower floored at 0).",
-    "The history is already aggregated by the system: one value per calendar day (Asia/Manila), PHP amount actually paid, cancelled orders excluded, days without sales are 0, outlier days already capped. Treat every 0 as a real zero-sales day. Do not re-aggregate, drop or interpolate days.",
-    "Forecast revenue amounts in PHP only, not product units, order counts, or thousands of PHP.",
-    "scaleReference is only a sanity range. Do NOT copy it as the forecast; your forecast must come from the Holt-Winters fit, and the 30-day total must fall within the 30d minimum and maximum range in scaleReference.",
+    "You forecast WEEKLY sales totals in PHP. Every history value is the total amount paid over 7 consecutive calendar days (Asia/Manila). The list is oldest first and the last value is the most recent week.",
+    "Sales come from a small number of orders (many are large pre-orders), so single weeks swing a lot. Base each forecast on the recent level of the weekly totals: give the latest weeks more weight than old ones, follow a steady rise or fall gently, and do not extrapolate one unusually large or small week.",
+    "The history is already aggregated by the system: cancelled orders are excluded, days without sales count as 0 inside their week, and extreme weeks are already capped. Do not re-aggregate or re-interpret the data.",
+    "scaleReference only describes the usual size of a week. Do NOT copy it; build the forecast from the weekly history.",
+    "Forecast revenue amounts in PHP only (whole numbers), not product units, order counts or thousands of PHP.",
     "Use ONLY the data provided. Do not invent events, holidays or promotions.",
     "Return ONLY one JSON object. No markdown, no commentary.",
   ].join(" ");
 
   const userPrompt = JSON.stringify({
-    task: `Apply Holt-Winters (additive trend, additive weekly seasonality, period 7) to the full daily sales history from ${startDate} to ${filteredHistory[historyDays - 1].date} and forecast daily sales (PHP, actual amount paid) for the next ${horizonDays} days.`,
-    method: {
-      algorithm: HOLT_WINTERS_SPEC.algorithm,
-      seasonalPeriod: HOLT_WINTERS_SPEC.seasonalPeriod,
-      trend: HOLT_WINTERS_SPEC.trend,
-      seasonality: HOLT_WINTERS_SPEC.seasonality,
-    },
-    aggregation: {
-      granularity: "daily",
-      timezone: MANILA_TZ,
-      metric: "sum of amount_paid per calendar day (cancelled orders excluded)",
-      missingDaysFilledWithZero: true,
-      days: historyDays,
-      minHistoryDays: FORECAST_HISTORY_DAYS["30d"],
-      zeroSalesDays: zeroDays,
-    },
+    task: `Forecast the total sales (PHP, actual amount paid) of each of the next ${weekCount} weeks.`,
     history: {
-      startDate,
-      startWeekday: WEEKDAY_NAMES[weekdayOfKey(startDate)],
-      endDate: filteredHistory[historyDays - 1].date,
-      days: historyDays,
-      dailySales: filteredHistory.map((p) => Math.round(p.value)),
+      granularity: "weekly",
+      weekLengthDays: WEEK_DAYS,
+      weeks: values.length,
+      startDate: weeklyHistory[0].start,
+      endDate: weeklyHistory[weeklyHistory.length - 1].end,
+      weeklySales: values,
     },
     scaleReference,
-    forecastDates: futureDates,
-    forecastStartWeekday: WEEKDAY_NAMES[weekdayOfKey(futureDates[0])],
-    outputFormat: `Return {"forecast":[...],"lower":[...],"upper":[...]} where each array has exactly ${horizonDays} whole numbers aligned with forecastDates, and 0 <= lower <= forecast <= upper.`,
+    forecastWeeks: forecastWeeks.map((w, i) => ({ week: i + 1, start: w.start, end: w.end })),
+    outputFormat: `Return {"forecast":[...]} with exactly ${weekCount} whole numbers >= 0, one per forecast week, in the same order as forecastWeeks.`,
   });
 
-  const intArray = { type: "ARRAY", items: { type: "INTEGER" } };
   const responseSchema = {
     type: "OBJECT",
-    properties: { forecast: intArray, lower: intArray, upper: intArray },
-    required: ["forecast", "lower", "upper"],
+    properties: { forecast: { type: "ARRAY", items: { type: "INTEGER" } } },
+    required: ["forecast"],
   };
   return { systemPrompt, userPrompt, responseSchema };
 }
 
-// VALIDATOR: shape, per-day cap, at total laban sa statistical baseline.
-// Hindi pumasa = throw (walang retry; cooldown ang hahawak).
-function parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal }) {
-  const forecastRaw = toNumberArray(raw.forecast, horizonDays);
-  if (!forecastRaw) throw new Error(`Invalid "forecast" array (expected ${horizonDays} finite numbers).`);
+// VALIDATOR: tamang bilang ng linggo, per-linggo cap, at 30-day total (kasama
+// ang tail) laban sa statistical baseline. Hindi pumasa = throw (walang retry;
+// cooldown ang hahawak).
+function parseSalesWeeklyAiResult(raw, { weekCount, tailDays, weeklyCap, baselineTotal }) {
+  const forecastRaw = toNumberArray(raw.forecast, weekCount);
+  if (!forecastRaw) throw new Error(`Invalid "forecast" array (expected ${weekCount} finite weekly totals).`);
 
-  const forecast = forecastRaw.map((v) => Math.round(dailyCap > 0 ? Math.min(v, dailyCap) : v));
-  const total = sumOf(forecast);
-  const key = "30d";
+  const forecast = forecastRaw.map((v) => Math.round(weeklyCap > 0 ? Math.min(v, weeklyCap) : v));
+  const total = sumOf(forecast) + estimateTailTotal(forecast, tailDays);
   if (baselineTotal > 0) {
     const ratio = total / baselineTotal;
     if (ratio < SF_TOTAL_SANITY_BAND.min || ratio > SF_TOTAL_SANITY_BAND.max) {
       throw new Error(
-        `AI ${key} forecast total ${total} is ${ratio.toFixed(2)}x the statistical baseline (${Math.round(baselineTotal)}) — outside ${SF_TOTAL_SANITY_BAND.min}-${SF_TOTAL_SANITY_BAND.max}x, rejected.`
+        `AI 30d forecast total ${total} is ${ratio.toFixed(2)}x the statistical baseline (${Math.round(baselineTotal)}) — outside ${SF_TOTAL_SANITY_BAND.min}-${SF_TOTAL_SANITY_BAND.max}x, rejected.`
       );
     }
   }
-
-  const lowerRaw = toNumberArray(raw.lower, horizonDays);
-  const upperRaw = toNumberArray(raw.upper, horizonDays);
-  return {
-    forecast,
-    lower: lowerRaw ? lowerRaw.map((v, i) => Math.round(Math.min(v, forecast[i]))) : null,
-    upper: upperRaw ? upperRaw.map((v, i) => Math.round(Math.max(v, forecast[i]))) : null,
-  };
+  return forecast;
 }
 
-// ---------- Month-position (day-of-month) pattern ----------
-// Gives the 30-day Sales Forecast a payday-style shape across the month
-// instead of four identical copies of the weekly pattern. Computed from the
-// RAW daily series (before winsorizeByWeekday), Manila date keys. Returns
-// null when there is not enough history or no meaningful pattern, in which
-// case the forecast is left exactly as Gemini returned it.
-const MONTH_POSITION_BUCKETS = ["1-5", "6-10", "11-15", "16-20", "21-25", "26-31"];
-const MONTH_POSITION_MIN_COMPLETE_MONTHS = 3;
-const MONTH_POSITION_MIN_DAYS_PER_BUCKET = 10;
-const MONTH_POSITION_SHRINK = 0.5;
-const MONTH_POSITION_CLAMP = { min: 0.75, max: 1.35 };
-const MONTH_POSITION_MIN_SPREAD = 0.10;
-
-function monthPositionBucketOfKey(key) {
-  const day = Number(String(key).slice(8, 10));
-  return Math.min(MONTH_POSITION_BUCKETS.length - 1, Math.floor((day - 1) / 5));
-}
-
-// Calendar months fully inside the series (first day >= first date, last day <= last date).
-function countCompleteCalendarMonths(series) {
-  if (!series.length) return 0;
-  const first = series[0].date;
-  const last = series[series.length - 1].date;
-  let year = Number(first.slice(0, 4));
-  let month = Number(first.slice(5, 7)) - 1; // 0-based
-  const monthStart = (y, m) => new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
-  const monthEnd = (y, m) => new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
-
-  if (monthStart(year, month) < first) {
-    month += 1;
-    if (month > 11) { month = 0; year += 1; }
-  }
-  let count = 0;
-  while (monthEnd(year, month) <= last) {
-    count += 1;
-    month += 1;
-    if (month > 11) { month = 0; year += 1; }
-  }
-  return count;
-}
-
-function computeMonthPositionIndex(series) {
-  if (!Array.isArray(series) || series.length === 0) return null;
-  if (countCompleteCalendarMonths(series) < MONTH_POSITION_MIN_COMPLETE_MONTHS) return null;
-
-  // Weekday index: same logic as runForecastModel, but on the RAW series.
-  const raw = series.map((p) => p.value);
-  const overallRaw = meanOf(raw);
-  if (!(overallRaw > 0)) return null;
-  let weekdayIndex = Array.from({ length: 7 }, (_, w) => {
-    const values = raw.filter((_, i) => weekdayOfKey(series[i].date) === w);
-    return values.length >= FORECAST_MODEL.minWeekdaySamples ? meanOf(values) / overallRaw : 1;
-  });
-  const avgIndex = meanOf(weekdayIndex) || 1;
-  weekdayIndex = weekdayIndex.map((x) => x / avgIndex);
-
-  // Deseasonalize each day, then group by day-of-month bucket. A weekday
-  // with index 0 (e.g. never any sales) cannot be deseasonalized, so those
-  // days are left out.
-  const bucketValues = MONTH_POSITION_BUCKETS.map(() => []);
-  const allValues = [];
-  series.forEach((point, i) => {
-    const wIdx = weekdayIndex[weekdayOfKey(point.date)];
-    if (!(wIdx > 0) || !Number.isFinite(raw[i])) return;
-    const deseasonalized = raw[i] / wIdx;
-    bucketValues[monthPositionBucketOfKey(point.date)].push(deseasonalized);
-    allValues.push(deseasonalized);
-  });
-
-  if (bucketValues.some((v) => v.length < MONTH_POSITION_MIN_DAYS_PER_BUCKET)) return null;
-  const overall = meanOf(allValues);
-  if (!(overall > 0)) return null;
-
-  const indexes = bucketValues.map((values) => {
-    const rawIndex = meanOf(values) / overall;
-    const shrunk = 1 + (rawIndex - 1) * MONTH_POSITION_SHRINK;
-    return Math.min(MONTH_POSITION_CLAMP.max, Math.max(MONTH_POSITION_CLAMP.min, shrunk));
-  });
-
-  if (Math.max(...indexes) - Math.min(...indexes) < MONTH_POSITION_MIN_SPREAD) return null;
-
-  return Object.fromEntries(
-    MONTH_POSITION_BUCKETS.map((name, b) => [name, Math.round(indexes[b] * 1000) / 1000])
-  );
-}
-
-// Reshapes forecast / lower / upper by the month-position index, then
-// rescales all three by ONE factor so the 30-day forecast total stays the
-// same. Whole numbers out; the forecast total is kept exact.
-function applyMonthPositionIndex(ai, futureDates, monthIndex) {
-  if (!monthIndex) return ai;
-  const mult = futureDates.map((d) => monthIndex[MONTH_POSITION_BUCKETS[monthPositionBucketOfKey(d)]] ?? 1);
-
-  const originalTotal = sumOf(ai.forecast);
-  const shapedForecast = ai.forecast.map((v, i) => v * mult[i]);
-  const shapedTotal = sumOf(shapedForecast);
-  if (!(originalTotal > 0) || !(shapedTotal > 0)) return ai;
-  const factor = originalTotal / shapedTotal;
-
-  // Forecast: largest-remainder rounding so the whole-number total equals the original.
-  const scaled = shapedForecast.map((v) => v * factor);
-  const floors = scaled.map(Math.floor);
-  let remainder = Math.round(originalTotal) - sumOf(floors);
-  const order = scaled.map((v, i) => ({ i, frac: v - floors[i] })).sort((a, b) => b.frac - a.frac);
-  const forecast = [...floors];
-  for (let k = 0; k < order.length && remainder > 0; k++, remainder--) forecast[order[k].i] += 1;
-
-  const reshape = (arr) => (arr ? arr.map((v, i) => Math.round(v * mult[i] * factor)) : null);
-  const lower = reshape(ai.lower);
-  const upper = reshape(ai.upper);
-
-  return {
-    forecast,
-    lower: lower ? lower.map((v, i) => Math.min(v, forecast[i])) : null,
-    upper: upper ? upper.map((v, i) => Math.max(v, forecast[i])) : null,
-  };
-}
-
-function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount, monthPositionIndex = null, aiGuard = null }) {
+// Weekly rows para sa chart. Pareho pa rin ang pangalan ng field (chartData,
+// forecastSales, lower, upper) para tugma ang cache/reader code; may dagdag na
+// weekStart, weekEnd, days, partial.
+function buildSalesWeeklyPayload({ history, forecastWeeks, weeklyForecast, typicalRange, horizonKey, baselineMeta, outlierCount }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
+  const tailWeek = forecastWeeks.find((w) => w.partial) || null;
 
-  const chartData = futureDates.slice(0, horizon).map((date, i) => ({
-    date,
-    label: formatForecastLabel(date),
-    isToday: i === 0,
-    forecastSales: ai.forecast[i],
-    lower: ai.lower ? ai.lower[i] : null,
-    upper: ai.upper ? ai.upper[i] : null,
-  }));
+  let fullIdx = 0;
+  const chartData = forecastWeeks.map((w, i) => {
+    const value = w.partial
+      ? estimateTailTotal(weeklyForecast, w.days)
+      : weeklyForecast[fullIdx++];
+    const scale = w.days / WEEK_DAYS;
+    return {
+      date: w.start,
+      weekStart: w.start,
+      weekEnd: w.end,
+      label: w.start === w.end
+        ? formatForecastLabel(w.start)
+        : `${formatForecastLabel(w.start)} – ${formatForecastLabel(w.end)}`,
+      isToday: i === 0,
+      days: w.days,
+      partial: w.partial,
+      forecastSales: value,
+      lower: typicalRange ? Math.min(value, Math.round(typicalRange.low * scale)) : null,
+      upper: typicalRange ? Math.max(value, Math.round(typicalRange.high * scale)) : null,
+    };
+  });
 
-  // Para madaling i-reconcile sa totoong data: actual na benta ng huling N araw
-  // vs forecast ng susunod na N araw.
   const recentTotal = sumOf(history.slice(-horizon).map((p) => p.value));
   const forecastTotal = sumOf(chartData.map((d) => d.forecastSales));
   const totals = {
@@ -2771,16 +2687,16 @@ function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baseli
   };
   console.log(`[SalesForecastService][${horizonKey}] TOTAL sales: last ${horizon}d actual=${totals.recentTotal} -> next ${horizon}d forecast=${totals.forecastTotal} (${totals.pct}%)`);
 
+  // Reference lang (daily statistical baseline) — hindi ito ang forecast.
   const opts = getModelOptions(horizonKey);
   const { pairs, origins } = backtestSeriesModel(history, horizonKey, opts);
 
   return {
     chartData,
+    granularity: "weekly",
     insufficientData: false,
     generatedAt: new Date().toISOString(),
     totals,
-    // Hindi ma-backtest nang mura ang sagot ni Gemini; ang statisticalBaselineAccuracy
-    // ay ng NON-AI baseline (reference lang).
     accuracy: null,
     method: {
       ...describeForecastMethod(horizonKey, history.length, {
@@ -2788,14 +2704,19 @@ function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baseli
         outliersCapped: outlierCount,
         promptHistoryDays: history.length,
       }),
+      type: "Weekly sales totals forecast by Gemini AI from the full history aggregated into 7-day buckets (Asia/Manila; days without sales = 0; extreme weeks capped); the 2-day tail of the 30-day window is pro-rated; statistical baseline kept only as a sanity reference",
+      model: null,
+      granularity: "weekly",
+      weekLengthDays: WEEK_DAYS,
+      forecastWeeks: forecastWeeks.length,
+      tailDays: tailWeek ? tailWeek.days : 0,
+      rangeBasis: `P${SF_RANGE_QUANTILES.low * 100}–P${SF_RANGE_QUANTILES.high * 100} of the last ${SF_RANGE_WEEKS} actual weekly totals`,
       statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
-      monthPositionIndex,
-      aiGuard,
     },
   };
 }
 
-// Cron/refresh entry point. Isang 30-day Gemini call, walang retry.
+// Cron/refresh entry point. Isang 30-day (weekly) Gemini call, walang retry.
 async function runSalesForecastRefresh() {
   const thirtyCheck = await checkForecastDataSufficiency("30d");
 
@@ -2829,75 +2750,58 @@ async function runSalesForecastRefresh() {
     } else {
       const horizonDays = 30;
       const futureDates = buildFutureDateKeys(todayKey, horizonDays);
+      const forecastWeeks = buildForecastWeeks(futureDates);
+      const fullForecastWeeks = forecastWeeks.filter((w) => !w.partial);
+      const tailDays = forecastWeeks.find((w) => w.partial)?.days ?? 0;
 
-      // FILTER: outlier-capped na BUONG history (walang cap sa bilang ng araw).
-      const { adjusted, outlierCount } = winsorizeByWeekday(series);
-      const filteredHistory = series
-        .map((p, i) => ({ date: p.date, value: adjusted[i] }));
-      const dailyCap = Math.max(...filteredHistory.map((p) => p.value)) * SF_DAILY_CAP_MULTIPLIER;
+      // WEEKLY HISTORY: 7-araw na bucket mula sa raw daily series. Ang outlier
+      // cap ay sa WEEKLY totals (IQR fence): ang regular na malaking weekend
+      // order ay hindi na napuputol bilang "daily outlier".
+      const weeklyRaw = toWeeklyBuckets(series);
+      const { adjusted: weeklyAdjusted, outlierCount } = winsorizeSeries(weeklyRaw.map((w) => w.value));
+      const weeklyHistory = weeklyRaw.map((w, i) => ({ start: w.start, end: w.end, value: weeklyAdjusted[i] }));
+      const weeklyCap = Math.max(...weeklyHistory.map((w) => w.value)) * SF_WEEKLY_CAP_MULTIPLIER;
 
-      // Statistical reference (hindi ito ang forecast): ipinapakita kay Gemini
-      // bilang konteksto, at ginagamit ng system pang-sanity check ng sagot.
-      const baselines = { "30d": runForecastModel(series, futureDates, getModelOptions("30d")) };
-
-      const referenceByHorizon = Object.fromEntries(
-        Object.entries(baselines).map(([hk, b]) => [hk, {
-          level: b.meta.level,
-          trendRatio: b.meta.trendRatio,
-          weekdayIndex: b.meta.weekdayIndex,
-          baselineTotal: Math.round(sumOf(b.values)),
-        }])
-      );
-      const baselineTotal = sumOf(baselines["30d"].values);
-      const baseline = baselines["30d"];
+      // Statistical reference (hindi ito ang forecast): pang-sanity check lang
+      // ng 30-day total ng sagot ni Gemini.
+      const baseline = runForecastModel(series, futureDates, getModelOptions("30d"));
+      const baselineTotal = sumOf(baseline.values);
       const recent30dActual = sumOf(series.slice(-30).map((point) => point.value));
       console.log(
-        `[SalesForecastService] Baseline diagnostics: historyDays=${series.length}, recent30dActual=${Math.round(recent30dActual)}, baselineLevel=${baseline.meta.level}, baseline30d=${Math.round(baselineTotal)}`
+        `[SalesForecastService] Weekly diagnostics: historyDays=${series.length}, weeks=${weeklyRaw.length}, weeksCapped=${outlierCount}, recent30dActual=${Math.round(recent30dActual)}, baseline30d=${Math.round(baselineTotal)}`
       );
 
-      const prompts = buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon });
-      const aiRaw = await callGeminiForecastOnce(
+      const prompts = buildSalesForecastPrompt({
+        weeklyHistory,
+        forecastWeeks: fullForecastWeeks,
+        recent30DayActual: recent30dActual,
+      });
+      const weeklyForecast = await callGeminiForecastOnce(
         "SalesForecast",
         prompts,
-        (raw) => parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal })
+        (raw) => parseSalesWeeklyAiResult(raw, {
+          weekCount: fullForecastWeeks.length,
+          tailDays,
+          weeklyCap,
+          baselineTotal,
+        })
       );
 
-      // v2 GUARD: weekday-shape check (tingnan ang SF_MIN_SHAPE_CORR). Ginagawa ito
-      // SA LABAS ng callGeminiForecastOnce para hindi magdulot ng cooldown.
-      const shapeCorr = pearsonCorrelation(aiRaw.forecast, baseline.values);
-      const useBaseline = shapeCorr < SF_MIN_SHAPE_CORR;
-      if (useBaseline) {
-        console.warn(
-          `[SalesForecastService] AI daily shape rejected: correlation with statistical baseline = ${shapeCorr.toFixed(2)} (< ${SF_MIN_SHAPE_CORR}). Using statistical baseline forecast instead.`
-        );
-      }
-      const ai = useBaseline
-        ? { forecast: baseline.values.map((v) => Math.round(v)), lower: null, upper: null }
-        : aiRaw;
-
-      // Month-position shaping (payday etc.) on the validated forecast; the
-      // 30-day total is unchanged. null index = no adjustment.
-      const monthPositionIndex = computeMonthPositionIndex(series);
-      const shapedAi = applyMonthPositionIndex(ai, futureDates, monthPositionIndex);
-      const shapedRawAi = applyMonthPositionIndex(aiRaw, futureDates, monthPositionIndex);
-
-      const aiGuard = {
-        source: useBaseline ? "statistical-baseline-fallback" : "ai",
-        shapeCorrelation: Math.round(shapeCorr * 100) / 100,
-        minShapeCorrelation: SF_MIN_SHAPE_CORR,
-        // Backtest lang: hilaw na sagot ng AI (bago ang guard) para makumpara ang v1 at v2.
-        ...(FORECAST_BACKTEST_LAST_DAY ? { rawAiForecast: shapedRawAi.forecast } : {}),
-      };
-
-      thirtyPayload = buildSalesHorizonPayload({
-        history: series, ai: shapedAi, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount, monthPositionIndex, aiGuard,
+      thirtyPayload = buildSalesWeeklyPayload({
+        history: series,
+        forecastWeeks,
+        weeklyForecast,
+        typicalRange: computeTypicalWeekRange(weeklyRaw.map((w) => w.value)),
+        horizonKey: "30d",
+        baselineMeta: baseline.meta,
+        outlierCount,
       });
 
       if (FORECAST_BACKTEST_LAST_DAY) {
         console.log(
           `[BACKTEST][SalesForecast] historyEnd=${series[series.length - 1].date} historyDays=${series.length} ` +
           `window=${futureDates[0]}..${futureDates[futureDates.length - 1]} generatedAt=${thirtyPayload.generatedAt} ` +
-          `daily=${JSON.stringify(thirtyPayload.chartData.map((d) => [d.date, d.forecastSales]))}`
+          `weekly=${JSON.stringify(thirtyPayload.chartData.map((d) => [d.weekStart, d.weekEnd, d.forecastSales]))}`
         );
       }
     }
@@ -2930,6 +2834,8 @@ async function getSalesForecastRead(timeframe) {
   if (payload && !payload.insufficientData && payload.chartData?.length) {
     return {
       chartData: payload.chartData,
+      granularity: payload.granularity ?? null,
+      totals: payload.totals ?? null,
       insufficientData: false,
       accuracy: payload.accuracy ?? null,
       method: payload.method ?? null,

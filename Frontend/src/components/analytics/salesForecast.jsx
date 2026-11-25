@@ -1,16 +1,23 @@
 import { useMemo } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { LineChart as LucideLineChart } from 'lucide-react';
 import { Skeleton } from '../ui';
 
-// Fixed na 30 days ang forecast
-const TOTAL_POINTS = 30;
-const TICK_STEP = 5;
+// WEEKLY na ang Sales Forecast. Ang backend (SalesForecastService) ay nagbibigay
+// ng isang row kada linggo sa `data` (chartData):
+//   { label, weekStart, weekEnd, days, partial, forecastSales, lower, upper }
+// Ang `lower`/`upper` ay ang karaniwang laki ng linggo (P10–P90 ng huling 12
+// linggo), hindi prediction interval.
+const DAYS_PER_WEEK = 7;
 const Y_TICK_INTERVALS = 4; // ilang puwang sa pagitan ng ₱0 at maximum
 const Y_HEADROOM = 1.15; // 15% extra space sa taas ng pinakamataas na value
 const DEFAULT_Y_MAX = 1000; // fallback kapag walang data o puro zero
 
-const formatCurrency = (val) => `₱${Number(val).toLocaleString('en-PH')}`;
+// Kulay (kapareho ng dating theme)
+const COLOR_WEEK = '#d97706';
+const COLOR_WEEK_PARTIAL = '#f0c48a';
+
+const formatPeso = (val) => `₱${Math.round(Number(val)).toLocaleString('en-PH')}`;
 const formatAxis = (val) => {
   if (val >= 1000) {
     const inK = val / 1000;
@@ -27,7 +34,7 @@ const getNiceStep = (rawStep) => {
   return niceNormalized * magnitude;
 };
 
-// Dynamic na maximum at ticks ng Y-axis base sa pinakamataas na forecast
+// Dynamic na maximum at ticks ng Y-axis base sa pinakamataas na value
 const getYAxisScale = (values) => {
   const validValues = values.filter((v) => typeof v === 'number' && !Number.isNaN(v));
   const dataMax = validValues.length ? Math.max(...validValues) : 0;
@@ -49,196 +56,176 @@ const getYAxisScale = (values) => {
   };
 };
 
-const CustomXAxisTick = ({ x, y, payload, index, tickStep, todayIndex }) => {
-  const isFirst = index === 0;
-  const isSecond = index === 1;
-  const isNth = index % tickStep === 0;
-
-  let show = false;
-  if (isFirst) {
-    show = true; 
-  } else if (tickStep > 1 && isSecond) {
-    show = false; 
-  } else if (isNth) {
-    show = true; 
-  }
-
-  if (!show) return null;
-
-  return (
-    <g transform={`translate(${x},${y})`}>
-      <text 
-        x={0} 
-        y={14} 
-        textAnchor="middle" 
-        fill={isFirst ? '#5C3317' : '#9a8b7a'} 
-        fontSize={11} 
-        fontWeight={isFirst ? 700 : 500}
-      >
-        {payload.value}
-      </text>
-      {index === todayIndex && (
-        <text 
-          x={0} 
-          y={26} 
-          textAnchor="middle" 
-          fill="#d97706" 
-          fontSize={10} 
-          fontWeight="bold"
-        >
-          Today
-        </text>
-      )}
-    </g>
-  );
-};
-
-const CustomTooltip = ({ active, payload, label }) => {
+const WeeklyTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
+  const w = payload[0].payload;
 
   return (
-    <div className="bg-white border border-stone-200 rounded-md shadow-lg p-3 text-sm min-w-[160px] z-50">
-      <p className="font-bold text-stone-800 border-b border-stone-100 pb-2 mb-2">{label}</p>
-      <div className="flex flex-col gap-2">
-        {payload.map((p, i) => (
-          <div key={i} className="flex justify-between items-center gap-4">
-            <span className="flex items-center gap-2 text-stone-500 text-xs">
-              <span className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-              {p.name}:
-            </span>
-            <span className="font-bold text-stone-800">{formatCurrency(p.value)}</span>
-          </div>
-        ))}
+    <div className="bg-white border border-stone-200 rounded-md shadow-lg p-3 text-sm min-w-[190px] z-50">
+      <p className="font-bold text-stone-800 border-b border-stone-100 pb-2 mb-2">{w.label}</p>
+      <div className="flex justify-between items-center gap-4">
+        <span className="text-stone-500 text-xs">Estimated total</span>
+        <span className="font-bold text-stone-800">{formatPeso(w.value)}</span>
       </div>
+      {w.lower !== null && w.upper !== null && (
+        <div className="flex justify-between items-center gap-4 mt-1.5">
+          <span className="text-stone-500 text-xs">Usual range</span>
+          <span className="text-stone-700 text-xs font-medium">
+            {formatPeso(w.lower)} – {formatPeso(w.upper)}
+          </span>
+        </div>
+      )}
+      <p className="text-[11px] text-stone-400 mt-1.5">
+        {w.days} day{w.days === 1 ? '' : 's'}
+        {w.partial ? ' (partial week, pro-rated)' : ''}
+      </p>
     </div>
   );
 };
 
-export default function SalesForecast({ 
-  title = 'Sales Forecast', 
+const Stat = ({ label, value, sub, subClass = 'text-[#9a8b7a]' }) => (
+  <div className="min-w-0">
+    <p className="text-[11px] text-[#9a8b7a]">{label}</p>
+    <p className="text-lg font-bold text-[#3d2410] leading-tight tabular-nums">{value}</p>
+    {sub && <p className={`text-[11px] mt-0.5 ${subClass}`}>{sub}</p>}
+  </div>
+);
+
+export default function SalesForecast({
+  title = 'Sales Forecast',
   data: propData,
+  // Optional: { recentTotal, forecastTotal, pct } galing sa backend payload (totals)
+  totals = null,
   insufficientData = false,
   message = '',
   isLoading = false,
 }) {
   const hasFetchedButEmpty = Array.isArray(propData) && propData.length === 0;
 
-  const chartData = useMemo(() => {
-    // Ginagamit ang date/label na galing sa backend (hindi ang petsa ngayon),
-    // para tama ang axis kahit backtest mode (hal. Oct 24 - Nov 22).
+  // Weekly rows galing sa backend. Ang lumang daily cache (walang `days`) ay
+  // hindi isinasama; lalabas ang "refresh" message sa ibaba hanggang mag-regenerate.
+  const weeks = useMemo(() => {
     const rows = Array.isArray(propData) ? propData : [];
-    const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-    const fmt = (key) =>
-      new Date(`${key}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-    return Array.from({ length: TOTAL_POINTS }, (_, i) => {
-      const p = rows[i];
-
-      let label;
-      if (p?.label) {
-        label = p.label;
-      } else if (p?.date) {
-        label = fmt(p.date);
-      } else {
-        // Fallback lang kapag walang date/label sa data: bilang mula ngayon
-        const d = new Date();
-        d.setDate(d.getDate() + i);
-        label = fmt(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }));
-      }
-
-      return {
-        label,
-        forecastSales: p?.forecastSales !== undefined ? p.forecastSales : null,
-        // "Today" lang kung ang petsa ng punto ay talagang ngayon (live mode)
-        isToday: p?.date ? p.date === todayKey : i === 0,
-      };
-    });
+    return rows
+      .filter((p) => p && typeof p.forecastSales === 'number' && typeof p.days === 'number')
+      .map((p) => ({
+        label: p.label || (p.weekStart === p.weekEnd ? p.weekStart : `${p.weekStart} – ${p.weekEnd}`),
+        value: p.forecastSales,
+        lower: typeof p.lower === 'number' ? p.lower : null,
+        upper: typeof p.upper === 'number' ? p.upper : null,
+        days: p.days,
+        partial: Boolean(p.partial) || p.days < DAYS_PER_WEEK,
+      }));
   }, [propData]);
 
-  // Index ng "Today" sa chart; -1 kapag wala (backtest mode)
-  const todayIndex = useMemo(() => chartData.findIndex((d) => d.isToday), [chartData]);
+  const isLegacyFormat = Array.isArray(propData) && propData.length > 0 && weeks.length === 0;
 
-  // Dynamic na Y-axis: sumusunod sa pinakamataas na forecast para hindi lumiit ang line
-  const yScale = useMemo(
-    () => getYAxisScale(chartData.map((d) => d.forecastSales)),
-    [chartData]
-  );
+  const forecastTotal = totals?.forecastTotal ?? weeks.reduce((sum, w) => sum + w.value, 0);
+  const recentTotal = totals?.recentTotal ?? null;
+  const pct =
+    totals?.pct ?? (recentTotal > 0 ? Math.round(((forecastTotal - recentTotal) / recentTotal) * 100) : null);
+
+  // Strongest week: buong linggo lang ang paghahambingan; ang partial ay kulang sa araw.
+  const strongestWeek = useMemo(() => {
+    const full = weeks.filter((w) => !w.partial);
+    const pool = full.length ? full : weeks;
+    return pool.length ? pool.reduce((best, w) => (w.value > best.value ? w : best), pool[0]) : null;
+  }, [weeks]);
+
+  const yScale = useMemo(() => getYAxisScale(weeks.map((w) => w.value)), [weeks]);
+  const hasPartial = weeks.some((w) => w.partial);
 
   return (
     <div className="w-full p-5 bg-white border border-[#e7ded4] rounded-xl shadow-sm flex flex-col h-full min-h-[350px]">
-      <div className="flex items-center gap-2 mb-6 shrink-0">
-        <LucideLineChart size={20} className="text-[#5C3317]" />
-        <div>
-          <h3 className="text-base font-bold text-[#3d2410]">{title}</h3>
-          <p className="text-xs text-[#9a8b7a]">AI-generated projection of daily sales for the next 30 days, based on your shop’s historical sales records.</p>
+      <div className="flex items-start justify-between gap-3 mb-4 shrink-0">
+        <div className="flex items-center gap-2">
+          <LucideLineChart size={20} className="text-[#5C3317]" />
+          <div>
+            <h3 className="text-base font-bold text-[#3d2410]">{title}</h3>
+            <p className="text-xs text-[#9a8b7a]">
+              AI-generated estimate of weekly sales for the next 30 days. Weeks can swing with large orders, so use the
+              30-day total as your main guide.
+            </p>
+          </div>
         </div>
       </div>
 
-     {isLoading ? (
+      {isLoading ? (
         <div role="status" aria-label="Loading sales forecast" aria-live="polite" className="flex flex-1 min-h-[220px] flex-col justify-between rounded-lg px-2 py-4">
           <div className="flex h-full min-h-[180px] items-end gap-2 border-b border-l border-[#e7ded4] px-3">
-            {[35, 48, 40, 62, 52, 76, 58, 84, 65, 92, 72, 100].map((height, i) => <Skeleton key={i} className="flex-1 rounded-t-sm" h="h-full" style={{ height: `${height}%` }} />)}
+            {[48, 62, 56, 76, 40].map((height, i) => <Skeleton key={i} className="flex-1 rounded-t-sm" h="h-full" style={{ height: `${height}%` }} />)}
           </div>
-          <div className="mt-3 flex justify-between">{[0, 1, 2, 3, 4, 5].map(i => <Skeleton key={i} w="w-8" h="h-2.5" />)}</div>
+          <div className="mt-3 flex justify-between">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} w="w-14" h="h-2.5" />)}</div>
         </div>
       ) : insufficientData ? (
         <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#d97706] font-medium border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[220px] bg-[#fffbf4]">
           {message || 'Insufficient historical data for this forecast.'}
         </div>
-      ) : hasFetchedButEmpty ? (
+      ) : isLegacyFormat ? (
+        <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#9a8b7a] border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[220px]">
+          The forecast format was updated. Refresh the forecast to see the weekly estimates.
+        </div>
+      ) : hasFetchedButEmpty || weeks.length === 0 ? (
         <div role="status" className="flex flex-1 items-center justify-center text-sm text-[#9a8b7a] border border-dashed border-[#e7ded4] rounded-lg text-center px-6 min-h-[220px]">
           No forecast data available. It updates once a day.
         </div>
       ) : (
-        <div className="flex-1 min-h-[220px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 15, right: 20, left: -15, bottom: 15 }}>
-              <defs>
-                <linearGradient id="salesForecastFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#d97706" stopOpacity={0.35} />
-                  <stop offset="55%" stopColor="#d97706" stopOpacity={0.08} />
-                  <stop offset="100%" stopColor="#d97706" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1ece4" vertical={false} />
-              
-              <XAxis 
-                dataKey="label" 
-                interval={0}
-                tick={<CustomXAxisTick tickStep={TICK_STEP} todayIndex={todayIndex} />} 
-                axisLine={{ stroke: '#f1ece4' }} 
-                tickLine={false} 
+        <>
+          {/* Buod: ang 30-day total ang pinakamaaasahang numero */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4 pb-4 border-b border-[#f1ece4] shrink-0">
+            <Stat label="Next 30 days (estimate)" value={formatPeso(forecastTotal)} />
+            {recentTotal !== null && (
+              <Stat
+                label="Last 30 days (actual)"
+                value={formatPeso(recentTotal)}
+                sub={pct !== null ? `${pct >= 0 ? '+' : ''}${pct}% expected` : undefined}
+                subClass={pct !== null && pct < 0 ? 'text-rose-600 font-semibold' : 'text-emerald-600 font-semibold'}
               />
-              
-              <YAxis 
-                tick={{ fontSize: 11, fill: '#9a8b7a', fontWeight: 500 }} 
-                axisLine={false} 
-                tickLine={false} 
-                tickFormatter={formatAxis} 
-                domain={[0, yScale.max]}
-                ticks={yScale.ticks}
-                allowDataOverflow={false}
-              />
+            )}
+            {strongestWeek && (
+              <Stat label="Strongest week" value={formatPeso(strongestWeek.value)} sub={strongestWeek.label} />
+            )}
+          </div>
 
-              <Tooltip content={<CustomTooltip />} cursor={false} />
+          <div className="flex-1 min-h-[220px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weeks} margin={{ top: 10, right: 12, left: -15, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1ece4" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  interval={0}
+                  tick={{ fontSize: 11, fill: '#9a8b7a', fontWeight: 500 }}
+                  axisLine={{ stroke: '#f1ece4' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#9a8b7a', fontWeight: 500 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={formatAxis}
+                  domain={[0, yScale.max]}
+                  ticks={yScale.ticks}
+                />
+                <Tooltip content={<WeeklyTooltip />} cursor={{ fill: '#f6efe6' }} />
+                <Bar dataKey="value" name="Estimated total" radius={[4, 4, 0, 0]} maxBarSize={72}>
+                  {weeks.map((w, i) => (
+                    <Cell key={i} fill={w.partial ? COLOR_WEEK_PARTIAL : COLOR_WEEK} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
 
-              <Area 
-                type="monotone" 
-                dataKey="forecastSales" 
-                name="Forecast" 
-                stroke="#d97706" 
-                strokeWidth={2.5} 
-                fill="url(#salesForecastFill)"
-                dot={false} 
-                activeDot={{ r: 5, fill: '#d97706', stroke: '#fff', strokeWidth: 2 }} 
-                connectNulls 
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#9a8b7a] shrink-0">
+            <span>
+              Each bar is the estimated total for 7 days.
+              {hasPartial ? ' A lighter bar is a partial week, estimated from the average week.' : ''}
+            </span>
+            <span>Hover a bar for the usual range of recent weeks.</span>
+          </div>
+        </>
       )}
-
     </div>
   );
 }
