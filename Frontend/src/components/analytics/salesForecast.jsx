@@ -49,7 +49,7 @@ const getYAxisScale = (values) => {
   };
 };
 
-const CustomXAxisTick = ({ x, y, payload, index, tickStep }) => {
+const CustomXAxisTick = ({ x, y, payload, index, tickStep, todayIndex }) => {
   const isFirst = index === 0;
   const isSecond = index === 1;
   const isNth = index % tickStep === 0;
@@ -77,7 +77,7 @@ const CustomXAxisTick = ({ x, y, payload, index, tickStep }) => {
       >
         {payload.value}
       </text>
-      {isFirst && (
+      {index === todayIndex && (
         <text 
           x={0} 
           y={26} 
@@ -124,22 +124,39 @@ export default function SalesForecast({
   const hasFetchedButEmpty = Array.isArray(propData) && propData.length === 0;
 
   const chartData = useMemo(() => {
-    const today = new Date();
-    const rawForecasts = Array.isArray(propData) ? propData.map(d => d.forecastSales) : [];
+    // Ginagamit ang date/label na galing sa backend (hindi ang petsa ngayon),
+    // para tama ang axis kahit backtest mode (hal. Oct 24 - Nov 22).
+    const rows = Array.isArray(propData) ? propData : [];
+    const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+    const fmt = (key) =>
+      new Date(`${key}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
     return Array.from({ length: TOTAL_POINTS }, (_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+      const p = rows[i];
 
-      const val = rawForecasts[i] !== undefined ? rawForecasts[i] : null;
+      let label;
+      if (p?.label) {
+        label = p.label;
+      } else if (p?.date) {
+        label = fmt(p.date);
+      } else {
+        // Fallback lang kapag walang date/label sa data: bilang mula ngayon
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        label = fmt(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }));
+      }
 
       return {
-        label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        forecastSales: val,
-        isToday: i === 0 
+        label,
+        forecastSales: p?.forecastSales !== undefined ? p.forecastSales : null,
+        // "Today" lang kung ang petsa ng punto ay talagang ngayon (live mode)
+        isToday: p?.date ? p.date === todayKey : i === 0,
       };
     });
   }, [propData]);
+
+  // Index ng "Today" sa chart; -1 kapag wala (backtest mode)
+  const todayIndex = useMemo(() => chartData.findIndex((d) => d.isToday), [chartData]);
 
   // Dynamic na Y-axis: sumusunod sa pinakamataas na forecast para hindi lumiit ang line
   const yScale = useMemo(
@@ -189,7 +206,7 @@ export default function SalesForecast({
               <XAxis 
                 dataKey="label" 
                 interval={0}
-                tick={<CustomXAxisTick tickStep={TICK_STEP} />} 
+                tick={<CustomXAxisTick tickStep={TICK_STEP} todayIndex={todayIndex} />} 
                 axisLine={{ stroke: '#f1ece4' }} 
                 tickLine={false} 
               />

@@ -326,6 +326,12 @@ const PRODUCT_FORECAST_RULES = {
 };
 const PRODUCT_LIST_MAX = 5;
 
+// v2 GUARD (product): ang forecast ng AI bawat produkto ay hindi maaaring
+// lumampas sa 0.5x–2.0x ng statistical baseline ng produktong iyon (parehong
+// band na gamit ng Sales Forecast para sa total). Dati may upper bound lang,
+// kaya nakalabas ang sobrang baba (hal. 370 -> 105). Clamp, hindi reject.
+const PF_BASELINE_BAND = { min: 0.5, max: 2.0 };
+
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // ---------- Date helpers (lahat ay nasa Manila calendar day) ----------
@@ -2139,7 +2145,7 @@ const pickNumber = (row, keys) => {
   return NaN;
 };
 
-function parseProductAiResult(raw, { sentById }) {
+function parseProductAiResult(raw, { sentById, todayKey }) {
   const rows = Array.isArray(raw.products) ? raw.products
     : Array.isArray(raw.forecasts) ? raw.forecasts
     : Array.isArray(raw.data) ? raw.data
@@ -2164,7 +2170,19 @@ function parseProductAiResult(raw, { sentById }) {
     if (!ok30) tally.bad30 += 1;
     if (!ok30) continue;
 
-    byId.set(src.id, { f30: Math.round(f30) });
+    // v2 GUARD: clamp sa 0.5x–2.0x ng statistical baseline ng produkto.
+    const f30Raw = Math.round(f30);
+    let f30Final = f30Raw;
+    const baseline30 = forecastOneProduct(src.series, "30d", buildFutureDateKeys(todayKey, 30)).forecast;
+    if (baseline30 > 0) {
+      const lo = Math.floor(baseline30 * PF_BASELINE_BAND.min);
+      const hi = Math.ceil(baseline30 * PF_BASELINE_BAND.max);
+      f30Final = Math.min(hi, Math.max(lo, f30Raw));
+      if (f30Final !== f30Raw) {
+        console.warn(`[ProductForecastService] Guard: ${src.productName} AI=${f30Raw} outside ${lo}-${hi} (baseline ${baseline30}) -> clamped to ${f30Final}`);
+      }
+    }
+    byId.set(src.id, { f30: f30Final, f30Raw });
   }
 
   const minValid = Math.ceil(sentById.size * 0.5);
@@ -2202,7 +2220,7 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     const forecast = ai[aiKey];
     const diff = forecast - recentQty;
     const pct = recentQty > 0 ? Math.round((diff / recentQty) * 100) : null;
-    results.push({ name: p.productName, forecast, recentQty, diff, pct });
+    results.push({ name: p.productName, forecast, rawAiForecast: ai.f30Raw ?? forecast, recentQty, diff, pct });
   }
 
   if (results.length === 0) {
@@ -2270,7 +2288,7 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     // Backtest lang: forecast ng bawat produkto (hindi lang top 5 growth/risk)
     // para maikumpara sa actual units ng parehong 30 araw.
     ...(FORECAST_BACKTEST_LAST_DAY
-      ? { backtestForecasts: results.map((r) => ({ name: r.name, forecast: r.forecast })) }
+      ? { backtestForecasts: results.map((r) => ({ name: r.name, forecast: r.forecast, rawAiForecast: r.rawAiForecast })) }
       : {}),
     // Hindi ma-backtest nang mura ang sagot ni Gemini; ang accuracy na ipinapakita
     // sa method.baselineAccuracy ay ng NON-AI na statistical baseline (reference lang).
@@ -2284,6 +2302,7 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
       rules,
       comparison: `AI forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
       baselineAccuracy: backtestProductHorizon(scoped, horizonKey, false),
+      aiGuard: { perProductBaselineBand: PF_BASELINE_BAND },
     },
   };
 }
@@ -2325,7 +2344,7 @@ async function runProductForecastRefresh() {
         aiById = await callGeminiForecastOnce(
           "ProductForecast",
           prompts,
-          (raw) => parseProductAiResult(raw, { sentById })
+          (raw) => parseProductAiResult(raw, { sentById, todayKey })
         );
       }
 
@@ -2485,6 +2504,27 @@ function insufficientSalesPayload(message) {
 
 const SF_DAILY_CAP_MULTIPLIER = 1.5;    // forecast ng isang araw <= 1.5x ng pinakamataas na (capped) araw
 const SF_TOTAL_SANITY_BAND = { min: 0.5, max: 2.0 }; // total ng AI vs statistical baseline
+
+// v2 GUARD (sales): sinusuri ang HUGIS ng daily forecast (weekday pattern),
+// hindi lang ang total. Ang AI ay minsang nag-shift ng weekday (peak sa Biyernes
+// kahit Sabado/Linggo ang totoong peak). Kapag mababa ang correlation ng AI sa
+// statistical baseline (na tama ang weekday index), ang baseline ang gagamitin.
+// Gumagamit lang ng data bago ang cutoff — hindi nakadepende sa test window.
+const SF_MIN_SHAPE_CORR = 0.3;
+
+function pearsonCorrelation(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 2) return 0;
+  const ma = meanOf(a.slice(0, n));
+  const mb = meanOf(b.slice(0, n));
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
+}
 
 function buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon }) {
   const horizonDays = futureDates.length;
@@ -2708,7 +2748,7 @@ function applyMonthPositionIndex(ai, futureDates, monthIndex) {
   };
 }
 
-function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount, monthPositionIndex = null }) {
+function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baselineMeta, outlierCount, monthPositionIndex = null, aiGuard = null }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
 
   const chartData = futureDates.slice(0, horizon).map((date, i) => ({
@@ -2750,6 +2790,7 @@ function buildSalesHorizonPayload({ history, ai, futureDates, horizonKey, baseli
       }),
       statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
       monthPositionIndex,
+      aiGuard,
     },
   };
 }
@@ -2815,19 +2856,41 @@ async function runSalesForecastRefresh() {
       );
 
       const prompts = buildSalesForecastPrompt({ filteredHistory, futureDates, referenceByHorizon });
-      const ai = await callGeminiForecastOnce(
+      const aiRaw = await callGeminiForecastOnce(
         "SalesForecast",
         prompts,
         (raw) => parseSalesAiResult(raw, { horizonDays, dailyCap, baselineTotal })
       );
 
+      // v2 GUARD: weekday-shape check (tingnan ang SF_MIN_SHAPE_CORR). Ginagawa ito
+      // SA LABAS ng callGeminiForecastOnce para hindi magdulot ng cooldown.
+      const shapeCorr = pearsonCorrelation(aiRaw.forecast, baseline.values);
+      const useBaseline = shapeCorr < SF_MIN_SHAPE_CORR;
+      if (useBaseline) {
+        console.warn(
+          `[SalesForecastService] AI daily shape rejected: correlation with statistical baseline = ${shapeCorr.toFixed(2)} (< ${SF_MIN_SHAPE_CORR}). Using statistical baseline forecast instead.`
+        );
+      }
+      const ai = useBaseline
+        ? { forecast: baseline.values.map((v) => Math.round(v)), lower: null, upper: null }
+        : aiRaw;
+
       // Month-position shaping (payday etc.) on the validated forecast; the
       // 30-day total is unchanged. null index = no adjustment.
       const monthPositionIndex = computeMonthPositionIndex(series);
       const shapedAi = applyMonthPositionIndex(ai, futureDates, monthPositionIndex);
+      const shapedRawAi = applyMonthPositionIndex(aiRaw, futureDates, monthPositionIndex);
+
+      const aiGuard = {
+        source: useBaseline ? "statistical-baseline-fallback" : "ai",
+        shapeCorrelation: Math.round(shapeCorr * 100) / 100,
+        minShapeCorrelation: SF_MIN_SHAPE_CORR,
+        // Backtest lang: hilaw na sagot ng AI (bago ang guard) para makumpara ang v1 at v2.
+        ...(FORECAST_BACKTEST_LAST_DAY ? { rawAiForecast: shapedRawAi.forecast } : {}),
+      };
 
       thirtyPayload = buildSalesHorizonPayload({
-        history: series, ai: shapedAi, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount, monthPositionIndex,
+        history: series, ai: shapedAi, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount, monthPositionIndex, aiGuard,
       });
 
       if (FORECAST_BACKTEST_LAST_DAY) {
