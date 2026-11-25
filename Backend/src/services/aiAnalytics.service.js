@@ -331,6 +331,23 @@ const PRODUCT_LIST_MAX = 5;
 // band na gamit ng Sales Forecast para sa total). Dati may upper bound lang,
 // kaya nakalabas ang sobrang baba (hal. 370 -> 105). Clamp, hindi reject.
 const PF_BASELINE_BAND = { min: 0.6, max: 1.6 };
+
+// v3 STABILIZER (product): 
+//  - LOW-VOLUME (recent 30d < lowVolumeUnits30d): ingay lang ang AI sa 2–8 units
+//    (Poisson), kaya simpleng rate: average units/linggo ng huling `lowVolumeWeeks`
+//    x 30/7.
+//  - Iba pa: hinahalo ang sagot ni Gemini (aiWeight) sa mas mahabang average
+//    (huling `longRunWeeks`) para hindi masundan ang isang peak na 30 days
+//    (hal. Balloons 370 -> 260, 2-Tier 102 -> 51 sa sumunod na window).
+// Hindi pa na-tune ang numbers — judgment call; i-backtest bago i-trust.
+const PF_BLEND = {
+  aiWeight: 0.6,
+  longRunWeight: 0.4,
+  longRunWeeks: 12,
+  lowVolumeUnits30d: 10,
+  lowVolumeWeeks: 8,
+  minWeeksForBlend: 4,
+};
 // (0.5–2.0 -> 0.6–1.6: parehong log-symmetric, pero mas masikip. Hindi ito
 // tinune sa isang test window; judgment call lang. Ang pangunahing ayos ay
 // ang weekly na input sa AI — tingnan ang buildProductForecastPrompt.)
@@ -649,7 +666,7 @@ const AI_FORECAST_GUARD = {
   maxPromptTokens: 20000, // estimate (chars / 3) — sinadyang konserbatibo
   timeoutMs: 60 * 1000,
   maxOutputTokens: 4096, // forecast output ay maliit; cap para hindi kumain ng quota
-  temperature: 0.2,
+  temperature: 0, // 0.2 -> 0: pare-pareho ang sagot kada refresh (mas madaling i-backtest)
   cooldownMs: { normal: 15 * 60 * 1000, rateLimited: 60 * 60 * 1000, max: 3 * 60 * 60 * 1000 },
   minProductsInPrompt: 10,
   shrinkFactor: 0.75,
@@ -2110,6 +2127,28 @@ function logProductEligibility(scoped, eligibleCount, horizonKey) {
 // kaya kapag daily ang forecast na may "floor sa 0", bumabagsak ang level
 // papunta sa 0 at lumalabas na sobrang baba ang total (hal. 370 -> 105). Sa
 // 7-araw na bucket, mas tuloy-tuloy ang series at mas tama ang level.
+// Average units kada 30 araw mula sa huling `weeksBack` na (outlier-capped) linggo.
+function weeklyRatePer30Days(series, weeksBack) {
+  const weekly = toWeeklyBuckets(series);
+  if (weekly.length < PF_BLEND.minWeeksForBlend) return null;
+  const { adjusted } = winsorizeSeries(weekly.map((w) => w.value));
+  const recent = adjusted.slice(-Math.min(weeksBack, adjusted.length));
+  return meanOf(recent) * (30 / WEEK_DAYS);
+}
+
+function applyProductStabilizer(f30Raw, series, recent30) {
+  if (recent30 < PF_BLEND.lowVolumeUnits30d) {
+    const rate = weeklyRatePer30Days(series, PF_BLEND.lowVolumeWeeks);
+    return rate === null ? { value: f30Raw, mode: "ai" } : { value: Math.round(rate), mode: "low-volume-rate" };
+  }
+  const longRate = weeklyRatePer30Days(series, PF_BLEND.longRunWeeks);
+  if (longRate === null) return { value: f30Raw, mode: "ai" };
+  return {
+    value: Math.round(PF_BLEND.aiWeight * f30Raw + PF_BLEND.longRunWeight * longRate),
+    mode: "blend",
+  };
+}
+
 function buildProductForecastPrompt(products, { todayKey }) {
   const systemPrompt = [
     "You are a product-demand analyst for a small food business.",
@@ -2220,14 +2259,16 @@ function parseProductAiResult(raw, { sentById, todayKey }) {
 
     // v2 GUARD: clamp sa 0.5x–2.0x ng statistical baseline ng produkto.
     const f30Raw = Math.round(f30);
-    let f30Final = f30Raw;
+    const stabilized = applyProductStabilizer(f30Raw, src.series, recent30);
+    let f30Final = stabilized.value;
     const baseline30 = forecastOneProduct(src.series, "30d", buildFutureDateKeys(todayKey, 30)).forecast;
     if (baseline30 > 0) {
       const lo = Math.floor(baseline30 * PF_BASELINE_BAND.min);
       const hi = Math.ceil(baseline30 * PF_BASELINE_BAND.max);
-      f30Final = Math.min(hi, Math.max(lo, f30Raw));
-      if (f30Final !== f30Raw) {
-        console.warn(`[ProductForecastService] Guard: ${src.productName} AI=${f30Raw} outside ${lo}-${hi} (baseline ${baseline30}) -> clamped to ${f30Final}`);
+      const beforeClamp = f30Final;
+      f30Final = Math.min(hi, Math.max(lo, beforeClamp));
+      if (f30Final !== beforeClamp) {
+        console.warn(`[ProductForecastService] Guard: ${src.productName} AI=${f30Raw} (${stabilized.mode}=${beforeClamp}) outside ${lo}-${hi} (baseline ${baseline30}) -> clamped to ${f30Final}`);
       }
     }
     byId.set(src.id, { f30: f30Final, f30Raw });
@@ -2564,9 +2605,102 @@ const SF_MIN_WEEKS_FOR_RANGE = 6;
 // bucket ay may isa ng bawat weekday, kaya wala nang weekday shape na
 // pwedeng ma-shift. Ang natirang 2 araw (30 = 4 x 7 + 2) ay "tail":
 // proporsyon ng average na forecast na linggo (simpleng pro-rata, hindi AI).
-function estimateTailTotal(weeklyForecast, tailDays) {
+//
+// FIX (v3): dati, ang tail ay (tailDays / 7) ng average na linggo — kaya ang 2
+// araw ay laging 28.6%. Pero kung ang tail ay Sabado + Linggo (weekday index
+// ~2.95 + ~2.04), ~71% ng benta ng isang linggo ang nasa dalawang araw na iyon.
+// Ngayon, ang share ng tail ay = sum(weekdayIndex ng tail dates) / sum(weekdayIndex).
+// Kapag walang tailDates/weekdayIndex, bumabalik sa lumang pro-rata.
+function estimateTailTotal(weeklyForecast, tailDays, tailDates = null, weekdayIndex = null) {
   if (!tailDays || !weeklyForecast.length) return 0;
-  return Math.round(meanOf(weeklyForecast) * (tailDays / WEEK_DAYS));
+  let share = tailDays / WEEK_DAYS;
+  if (
+    Array.isArray(tailDates) && tailDates.length === tailDays &&
+    Array.isArray(weekdayIndex) && weekdayIndex.length === 7
+  ) {
+    const totalIndex = sumOf(weekdayIndex);
+    if (totalIndex > 0) share = sumOf(tailDates.map((d) => weekdayIndex[weekdayOfKey(d)])) / totalIndex;
+  }
+  return Math.round(meanOf(weeklyForecast) * share);
+}
+
+// weekdayIndex galing sa runForecastModel meta ay object by name -> array[7] (Sun=0).
+function weekdayIndexToArray(indexByName) {
+  return WEEKDAY_NAMES.map((name) => {
+    const v = Number(indexByName?.[name]);
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  });
+}
+
+// Mga petsa ng isang forecast week: [start, start+1, ... start+days-1].
+function datesOfWeek(week) {
+  return Array.from({ length: week.days }, (_, i) => addDaysToKey(week.start, i));
+}
+
+// ---------- Weekly deterministic baseline + blend (v3) ----------
+// Bakit: 3–10 orders lang kada linggo, kaya halos flat na average ang kaya ng AI.
+// Para sa MAE (abs error), ang MEDIAN ang pinakamababa ang inaasahang error sa
+// skewed/lumpy na data (malalaking pre-order), kaya hinahalo ang median ng
+// huling 8 linggo at average ng huling 4. Hinahalo ito sa sagot ni Gemini.
+// aiWeight: 0 = baseline lang (hindi na tatawag kay Gemini), 1 = AI lang.
+// PAALALA: hindi pa na-tune ang 0.5 — gamitin ang weeklyBacktest sa payload para pumili.
+const SF_BLEND = { aiWeight: 0.5, medianWeeks: 8, meanWeeks: 4 };
+
+function computeWeeklyBaseline(weeklyValues, { medianWeeks, meanWeeks } = SF_BLEND) {
+  if (!weeklyValues.length) return 0;
+  const recent = (n) => weeklyValues.slice(-Math.min(n, weeklyValues.length));
+  const med = computePercentile([...recent(medianWeeks)].sort((a, b) => a - b), 0.5);
+  return 0.5 * med + 0.5 * meanOf(recent(meanWeeks));
+}
+
+function blendWeeklyForecast(aiForecast, baselineLevel, aiWeight = SF_BLEND.aiWeight) {
+  const w = Math.min(1, Math.max(0, aiWeight));
+  return aiForecast.map((v) => Math.max(0, Math.round(w * v + (1 - w) * baselineLevel)));
+}
+
+// ---------- Weekly rolling-origin backtest (v3) ----------
+// Sinusukat ang MGA DETERMINISTIC na candidate sa totoong weekly totals (walang
+// tawag kay Gemini; hindi kasi mababalikan ang lumang AI forecast). Gamitin ito
+// para pumili ng aiWeight / baseline BAGO i-trust ang bagong settings.
+function backtestWeeklySales(weeklyValues, { horizonWeeks = 4, maxOrigins = 6, minTrainWeeks = 8 } = {}) {
+  const medianOf = (a) => computePercentile([...a].sort((x, y) => x - y), 0.5);
+  const candidates = {
+    lastWeekNaive: (t) => t[t.length - 1],
+    mean4: (t) => meanOf(t.slice(-4)),
+    median8: (t) => medianOf(t.slice(-8)),
+    blendBaseline: (t) => computeWeeklyBaseline(t),
+  };
+  const tally = Object.fromEntries(Object.keys(candidates).map((k) => [k, { abs: 0, n: 0 }]));
+  let totalActual = 0;
+  let origins = 0;
+
+  for (let j = 0; j < maxOrigins; j++) {
+    const originEnd = weeklyValues.length - horizonWeeks - j;
+    if (originEnd < minTrainWeeks) break;
+    const train = weeklyValues.slice(0, originEnd);
+    const test = weeklyValues.slice(originEnd, originEnd + horizonWeeks);
+    for (const [name, fn] of Object.entries(candidates)) {
+      const f = fn(train);
+      for (const actual of test) {
+        tally[name].abs += Math.abs(actual - f);
+        tally[name].n += 1;
+      }
+    }
+    totalActual += sumOf(test);
+    origins += 1;
+  }
+  if (!origins || totalActual <= 0) return null;
+
+  return {
+    origins,
+    horizonWeeks,
+    results: Object.fromEntries(
+      Object.entries(tally).map(([name, t]) => [
+        name,
+        { maeWeekly: Math.round(t.abs / t.n), wapePct: round1((t.abs / totalActual) * 100) },
+      ])
+    ),
+  };
 }
 
 // "Typical range": P10–P90 ng AKTWAL na weekly totals ng huling 12 linggo.
@@ -2632,12 +2766,12 @@ function buildSalesForecastPrompt({ weeklyHistory, forecastWeeks, recent30DayAct
 // VALIDATOR: tamang bilang ng linggo, per-linggo cap, at 30-day total (kasama
 // ang tail) laban sa statistical baseline. Hindi pumasa = throw (walang retry;
 // cooldown ang hahawak).
-function parseSalesWeeklyAiResult(raw, { weekCount, tailDays, weeklyCap, baselineTotal }) {
+function parseSalesWeeklyAiResult(raw, { weekCount, tailDays, tailDates, weekdayIndex, weeklyCap, baselineTotal }) {
   const forecastRaw = toNumberArray(raw.forecast, weekCount);
   if (!forecastRaw) throw new Error(`Invalid "forecast" array (expected ${weekCount} finite weekly totals).`);
 
   const forecast = forecastRaw.map((v) => Math.round(weeklyCap > 0 ? Math.min(v, weeklyCap) : v));
-  const total = sumOf(forecast) + estimateTailTotal(forecast, tailDays);
+  const total = sumOf(forecast) + estimateTailTotal(forecast, tailDays, tailDates, weekdayIndex);
   if (baselineTotal > 0) {
     const ratio = total / baselineTotal;
     if (ratio < SF_TOTAL_SANITY_BAND.min || ratio > SF_TOTAL_SANITY_BAND.max) {
@@ -2652,14 +2786,14 @@ function parseSalesWeeklyAiResult(raw, { weekCount, tailDays, weeklyCap, baselin
 // Weekly rows para sa chart. Pareho pa rin ang pangalan ng field (chartData,
 // forecastSales, lower, upper) para tugma ang cache/reader code; may dagdag na
 // weekStart, weekEnd, days, partial.
-function buildSalesWeeklyPayload({ history, forecastWeeks, weeklyForecast, typicalRange, horizonKey, baselineMeta, outlierCount }) {
+function buildSalesWeeklyPayload({ history, forecastWeeks, weeklyForecast, typicalRange, horizonKey, baselineMeta, outlierCount, weekdayIndex, weeklyBacktest, blendInfo }) {
   const horizon = TIMEFRAME_DAYS[horizonKey];
   const tailWeek = forecastWeeks.find((w) => w.partial) || null;
 
   let fullIdx = 0;
   const chartData = forecastWeeks.map((w, i) => {
     const value = w.partial
-      ? estimateTailTotal(weeklyForecast, w.days)
+      ? estimateTailTotal(weeklyForecast, w.days, datesOfWeek(w), weekdayIndex)
       : weeklyForecast[fullIdx++];
     const scale = w.days / WEEK_DAYS;
     return {
@@ -2710,6 +2844,9 @@ function buildSalesWeeklyPayload({ history, forecastWeeks, weeklyForecast, typic
       weekLengthDays: WEEK_DAYS,
       forecastWeeks: forecastWeeks.length,
       tailDays: tailWeek ? tailWeek.days : 0,
+      tailMethod: "weekday-weighted share of the average forecast week (sum of weekdayIndex of the tail dates / sum of all 7)",
+      blend: blendInfo || null,
+      weeklyBacktest: weeklyBacktest || null,
       rangeBasis: `P${SF_RANGE_QUANTILES.low * 100}–P${SF_RANGE_QUANTILES.high * 100} of the last ${SF_RANGE_WEEKS} actual weekly totals`,
       statisticalBaselineAccuracy: summarizeBacktestPairs(pairs, origins),
     },
@@ -2771,21 +2908,41 @@ async function runSalesForecastRefresh() {
         `[SalesForecastService] Weekly diagnostics: historyDays=${series.length}, weeks=${weeklyRaw.length}, weeksCapped=${outlierCount}, recent30dActual=${Math.round(recent30dActual)}, baseline30d=${Math.round(baselineTotal)}`
       );
 
-      const prompts = buildSalesForecastPrompt({
-        weeklyHistory,
-        forecastWeeks: fullForecastWeeks,
-        recent30DayActual: recent30dActual,
-      });
-      const weeklyForecast = await callGeminiForecastOnce(
-        "SalesForecast",
-        prompts,
-        (raw) => parseSalesWeeklyAiResult(raw, {
-          weekCount: fullForecastWeeks.length,
-          tailDays,
-          weeklyCap,
-          baselineTotal,
-        })
+      // v3: weekday index at tail dates para sa tamang tail (Sab+Lin) forecast.
+      const weekdayIndex = weekdayIndexToArray(baseline.meta.weekdayIndex);
+      const tailWeekObj = forecastWeeks.find((w) => w.partial) || null;
+      const tailDates = tailWeekObj ? datesOfWeek(tailWeekObj) : [];
+
+      // v3: deterministic weekly baseline (median + mean) at backtest nito.
+      const weeklyBaselineLevel = computeWeeklyBaseline(weeklyHistory.map((w) => w.value));
+      const weeklyBacktest = backtestWeeklySales(weeklyRaw.map((w) => w.value));
+      console.log(
+        `[SalesForecastService] Weekly baseline level=${Math.round(weeklyBaselineLevel)} | weekly backtest=${JSON.stringify(weeklyBacktest)}`
       );
+
+      let aiForecast = null;
+      if (SF_BLEND.aiWeight > 0) {
+        const prompts = buildSalesForecastPrompt({
+          weeklyHistory,
+          forecastWeeks: fullForecastWeeks,
+          recent30DayActual: recent30dActual,
+        });
+        aiForecast = await callGeminiForecastOnce(
+          "SalesForecast",
+          prompts,
+          (raw) => parseSalesWeeklyAiResult(raw, {
+            weekCount: fullForecastWeeks.length,
+            tailDays,
+            tailDates,
+            weekdayIndex,
+            weeklyCap,
+            baselineTotal,
+          })
+        );
+      }
+      const weeklyForecast = aiForecast
+        ? blendWeeklyForecast(aiForecast, weeklyBaselineLevel)
+        : fullForecastWeeks.map(() => Math.max(0, Math.round(weeklyBaselineLevel)));
 
       thirtyPayload = buildSalesWeeklyPayload({
         history: series,
@@ -2795,6 +2952,14 @@ async function runSalesForecastRefresh() {
         horizonKey: "30d",
         baselineMeta: baseline.meta,
         outlierCount,
+        weekdayIndex,
+        weeklyBacktest,
+        blendInfo: {
+          aiWeight: SF_BLEND.aiWeight,
+          baselineLevel: Math.round(weeklyBaselineLevel),
+          aiForecastRaw: aiForecast,
+          baselineDefinition: `0.5 x median(last ${SF_BLEND.medianWeeks} weeks) + 0.5 x mean(last ${SF_BLEND.meanWeeks} weeks)`,
+        },
       });
 
       if (FORECAST_BACKTEST_LAST_DAY) {
