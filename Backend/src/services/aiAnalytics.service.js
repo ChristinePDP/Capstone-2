@@ -13,6 +13,67 @@ import { getDateRange } from "../utils/analytics/PerformancetTimeframeHelper.uti
 
 const TIMEFRAME_DAYS = { "30d": 30 };
 
+// ==========================================
+// BACKTEST MODE — HANGGANG ANONG ARAW LANG ANG DATA NG FORECAST
+// ==========================================
+// Para sa Forecast Accuracy Testing: ang Sales Forecast at Product Forecast ay
+// HINDI gagamit ng kahit anong order na mas bago sa FORECAST_BACKTEST_LAST_DAY.
+// Default: "2026-10-23". Ibig sabihin:
+//   - huling araw ng history na ibibigay kay Gemini = Oct 23, 2026 (Manila)
+//   - "ngayon" ng forecast = Oct 24, 2026, kaya ang forecast window ay
+//     Oct 24 hanggang Nov 22, 2026 (30 araw) — ito ang ikukumpara sa actual.
+//
+// Para i-OFF at bumalik sa live forecast (gamit ang kasalukuyang petsa), i-set
+// ang env var FORECAST_BACKTEST_LAST_DAY=off (puwede rin "none" o "live"),
+// o palitan ang default sa baba. Para ibang cutoff: FORECAST_BACKTEST_LAST_DAY=YYYY-MM-DD.
+//
+// BABALA: habang naka-ON, ang forecast na lumalabas sa dashboard at na-se-save
+// sa AI cache ay ang backtest forecast (hindi ang live). Pagkatapos ng testing,
+// i-OFF ito at mag-refresh ng forecast para bumalik sa tama.
+function parseBacktestLastDay(raw) {
+  const value = String(raw ?? "").trim();
+  if (!value || ["off", "none", "live"].includes(value.toLowerCase())) return null;
+
+  let normalized = null;
+  try {
+    normalized = new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10);
+  } catch {
+    normalized = null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || normalized !== value) {
+    throw new Error(
+      `FORECAST_BACKTEST_LAST_DAY="${value}" is invalid. Use YYYY-MM-DD (e.g. 2026-10-23) or "off".`
+    );
+  }
+  return value;
+}
+
+const FORECAST_BACKTEST_LAST_DAY = parseBacktestLastDay(
+  process.env.FORECAST_BACKTEST_LAST_DAY ?? "2026-10-23"
+);
+
+if (FORECAST_BACKTEST_LAST_DAY) {
+  console.warn(
+    `[Forecast] BACKTEST MODE ON — Sales/Product forecast will only use orders up to ${FORECAST_BACKTEST_LAST_DAY} (Asia/Manila). ` +
+    `Set FORECAST_BACKTEST_LAST_DAY=off to return to live forecasting.`
+  );
+}
+
+// "Ngayon" para sa forecast, bilang Manila date key. Sa live mode ito ang totoong
+// ngayon; sa backtest mode ito ang araw PAGKATAPOS ng FORECAST_BACKTEST_LAST_DAY,
+// kaya ang huling araw ng history ay eksaktong FORECAST_BACKTEST_LAST_DAY.
+function getForecastTodayKey() {
+  const realTodayKey = toManilaDateKey(new Date());
+  if (!FORECAST_BACKTEST_LAST_DAY) return realTodayKey;
+
+  if (FORECAST_BACKTEST_LAST_DAY >= realTodayKey) {
+    throw new Error(
+      `FORECAST_BACKTEST_LAST_DAY (${FORECAST_BACKTEST_LAST_DAY}) must be earlier than today (${realTodayKey}).`
+    );
+  }
+  return addDaysToKey(FORECAST_BACKTEST_LAST_DAY, 1);
+}
+
 // Ang laki ng trend/level window ng Sales at Product Forecast ay nasa
 // FORECAST_MODEL (SHARED ENGINE) — iisang config para sa dalawa.
 
@@ -63,9 +124,17 @@ const HOLT_WINTERS_SPEC = {
 };
 
 async function hasSufficientHistory(requiredDays) {
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setDate(cutoff.getDate() - requiredDays);
+  let cutoff;
+  if (FORECAST_BACKTEST_LAST_DAY) {
+    // BACKTEST: bilangin ang requiredDays pabalik mula sa "ngayon" ng forecast
+    // (araw pagkatapos ng FORECAST_BACKTEST_LAST_DAY). Hanggang katapusan ng
+    // araw na iyon (Manila) para tugma sa 90-day length check ng series.
+    cutoff = new Date(`${addDaysToKey(getForecastTodayKey(), -requiredDays)}T23:59:59.999+08:00`);
+  } else {
+    cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - requiredDays);
+  }
 
   // "Since forever" lower bound — we just need to know whether AT LEAST
   // ONE order exists on or before the cutoff date, which proves the
@@ -289,8 +358,11 @@ function buildFutureDateKeys(todayKey, count) {
 // ang nakalipas HANGGANG KAHAPON (Manila). Hindi kasama ang "ngayon"
 // dahil hindi pa tapos ang araw — ang kalahating araw ay magmumukhang
 // biglang pagbaba ng benta.
+// Ginagamit LANG ito ng Sales Forecast at Product Forecast. Sa backtest mode,
+// ang "kahapon" dito ay ang FORECAST_BACKTEST_LAST_DAY, kaya walang order na
+// mas bago doon ang makukuha (parehong query end at date filter).
 function getManilaHistoryWindow(days) {
-  const todayKey = toManilaDateKey(new Date());
+  const todayKey = getForecastTodayKey();
   const endKey = addDaysToKey(todayKey, -1);
   const startKey = addDaysToKey(endKey, -(days - 1));
   return {
@@ -489,6 +561,7 @@ function describeForecastMethod(horizonKey, historyDays, meta) {
     type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI over the full daily history (first sale date to yesterday; at least 90 days required) aggregated by the system (missing days = 0); statistical baseline kept only as a sanity reference",
     model: HOLT_WINTERS_SPEC,
     historyDays,
+    backtestLastDay: FORECAST_BACKTEST_LAST_DAY,
     minHistoryDays: FORECAST_HISTORY_DAYS[horizonKey],
     levelWindowDays: FORECAST_MODEL.levelWindowDays[horizonKey],
     trendWindowDays: FORECAST_MODEL.trendWindowDays[horizonKey],
@@ -2177,6 +2250,12 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
   };
   console.log(`[ProductForecastService][${horizonKey}] TOTAL units (AI-covered products): last ${horizon}d actual=${totals.recentUnits} -> next ${horizon}d forecast=${totals.forecastUnits} (${totals.pct}%)`);
   console.log(`[ProductForecastService][${horizonKey}] growth=${growth.length}, risk=${risk.length}`);
+  if (FORECAST_BACKTEST_LAST_DAY) {
+    console.log(
+      `[BACKTEST][ProductForecast] historyEnd=${FORECAST_BACKTEST_LAST_DAY} products=${results.length} ` +
+      `next30Units=${JSON.stringify(results.map((r) => [r.name, r.forecast]))}`
+    );
+  }
 
   return {
     label: PF_TIMEFRAME_LABELS[horizonKey],
@@ -2188,6 +2267,11 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
     skippedProducts: scoped.length - eligible.length,
     aiCoveredProducts: results.length,
     totals,
+    // Backtest lang: forecast ng bawat produkto (hindi lang top 5 growth/risk)
+    // para maikumpara sa actual units ng parehong 30 araw.
+    ...(FORECAST_BACKTEST_LAST_DAY
+      ? { backtestForecasts: results.map((r) => ({ name: r.name, forecast: r.forecast })) }
+      : {}),
     // Hindi ma-backtest nang mura ang sagot ni Gemini; ang accuracy na ipinapakita
     // sa method.baselineAccuracy ay ng NON-AI na statistical baseline (reference lang).
     accuracy: null,
@@ -2195,6 +2279,7 @@ function buildProductHorizonPayload({ products, aiById, horizonKey }) {
       type: "Holt-Winters (additive trend, additive weekly seasonality, period 7) executed by Gemini AI per product over the full daily history (first sale date to yesterday; at least 90 days required) aggregated by the system (missing days = 0; eligibility rules + outlier cap); statistical baseline kept only as a reference",
       model: HOLT_WINTERS_SPEC,
       historyDays: scoped.reduce((m, p) => Math.max(m, p.series.length), 0),
+      backtestLastDay: FORECAST_BACKTEST_LAST_DAY,
       minHistoryDays: FORECAST_HISTORY_DAYS[horizonKey],
       rules,
       comparison: `AI forecast of next ${horizon} days vs actual units sold in the last ${horizon} days`,
@@ -2744,6 +2829,14 @@ async function runSalesForecastRefresh() {
       thirtyPayload = buildSalesHorizonPayload({
         history: series, ai: shapedAi, futureDates, horizonKey: "30d", baselineMeta: baselines["30d"].meta, outlierCount, monthPositionIndex,
       });
+
+      if (FORECAST_BACKTEST_LAST_DAY) {
+        console.log(
+          `[BACKTEST][SalesForecast] historyEnd=${series[series.length - 1].date} historyDays=${series.length} ` +
+          `window=${futureDates[0]}..${futureDates[futureDates.length - 1]} generatedAt=${thirtyPayload.generatedAt} ` +
+          `daily=${JSON.stringify(thirtyPayload.chartData.map((d) => [d.date, d.forecastSales]))}`
+        );
+      }
     }
   } catch (err) {
     console.error("[SalesForecastService] AI forecast failed — walang retry hanggang sa susunod na cron run:", err.message);
