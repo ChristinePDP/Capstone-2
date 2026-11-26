@@ -220,7 +220,7 @@ export default function IngredientsTab() {
   return (
     <div className="space-y-5">
       <Card>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
+        <div className="grid grid-cols-[1fr_auto] items-start gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between p-4 border-b border-brand-100">
           <div>
             <h3 className="font-bold text-brand-800 flex items-center gap-2">
               Ingredients
@@ -228,9 +228,9 @@ export default function IngredientsTab() {
             </h3>
             <p className="text-xs text-brand-400 mt-0.5">Keep track of the key raw ingredients used to produce your products.</p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="contents sm:flex sm:items-center sm:gap-2 sm:w-auto">
             {!showArchives && (
-              <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="flex-1 sm:flex-none justify-center">
+              <Button variant="dark" onClick={() => { setEditIng(null); setModalOpen(true); }} className="order-last col-span-2 w-full justify-center sm:order-none sm:col-span-1 sm:w-auto">
                 <Plus size={14} /> Add New Ingredient
               </Button>
             )}
@@ -239,7 +239,7 @@ export default function IngredientsTab() {
               count={ingredients.filter(i => i.is_archived).length}
               backLabel="Back to Ingredients"
               onClick={() => { setShowArchives(value => !value); setStatusFilter('all'); setPage(1); }}
-              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+              className={showArchives ? 'col-span-2 w-full sm:col-span-1 sm:w-auto' : ''}
             />
           </div>
         </div>
@@ -378,7 +378,7 @@ export default function IngredientsTab() {
                           <LevelBar stock={ing.stock} min={ing.min} />
                         </div>
                         <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
-                          {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreIngredient(ing)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(ing)}>Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(ing)}><Archive size={13}/> Archive</Button></>}
+                          {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreIngredient(ing)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(ing)}>Delete</Button></> : <><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold text-white bg-brand-800 hover:bg-brand-900 active:scale-[0.98] transition-colors" onClick={() => { setEditIng(ing); setModalOpen(true); }}>Restock / Edit</button><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 active:scale-[0.98] transition-colors" onClick={() => setArchiveTarget(ing)}><Archive size={14}/> Archive</button></>}
                         </div>
                       </div>
                     );

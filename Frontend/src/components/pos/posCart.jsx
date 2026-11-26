@@ -642,8 +642,10 @@ export default function PosCart({ cart, orderType, setOrderType, onUpdateQty, on
           </button>
         </div>
 
-        <div className="p-4 border-b border-[#F1EBE6] shrink-0">
-          <div className="flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
+        {/* Sa mobile, nasa labas na (PosMenu) ang order type switch; dito lang ito sa lg pataas.
+            Lalabas pa rin sa mobile ang stock warning kung meron. */}
+        <div className={`p-4 border-b border-[#F1EBE6] shrink-0 ${currentTypeIssue ? '' : 'hidden lg:block'}`}>
+          <div className="hidden lg:flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
             <button
               onClick={() => {
                 setOrderType('Buy Now');

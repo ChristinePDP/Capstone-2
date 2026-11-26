@@ -1067,7 +1067,7 @@ function PosPackageModal({ pkg, onClose, onAddToCart, checkAndWarnLimit }) {
   );
 }
 
-export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', cart = [], loadError, onRetry }) {
+export default function PosMenu({ products, activeCategory, setActiveCategory, searchQuery, setSearchQuery, onAddToCart, orderType = 'Buy Now', setOrderType, cart = [], loadError, onRetry }) {
   const [modal, setModal] = useState(null);
   const [detailsId, setDetailsId] = useState(null); // product card na naka-open ang See more drawer
   const [bundles, setBundles] = useState([]);
@@ -1478,6 +1478,23 @@ export default function PosMenu({ products, activeCategory, setActiveCategory, s
     <div className="flex-1 flex flex-col min-w-0 h-auto lg:h-full lg:overflow-hidden relative">
       <div className="shrink-0 pb-4">
         <div className="flex flex-col gap-3 mb-4">
+          {/* Mobile/tablet: order type switch nasa labas na ng cart drawer (sa lg pataas, nasa cart sidebar na ito) */}
+          {setOrderType && (
+            <div className="lg:hidden flex bg-[#F5EFEB] rounded-xl p-1 w-full gap-1">
+              {[['Buy Now', 'Buy Now'], ['Pre-Order', 'Pre-Order']].map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setOrderType(type)}
+                  className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
+                    orderType === type ? 'bg-[#3B1F0A] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={`relative w-full rounded-full transition-all ${isSearching ? 'shadow-[0_0_0_3px_rgba(59,31,10,0.08)]' : ''}`}>
             <Search className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${isSearching ? 'text-[#3B1F0A]' : 'text-[#B7A99F]'}`} size={17} />
             <input 

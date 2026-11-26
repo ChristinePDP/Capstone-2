@@ -1372,20 +1372,20 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
   return (
     <div className="bg-[#FCFAF9] min-h-screen flex flex-col relative">
 
-      <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-6 lg:gap-10 px-5 sm:px-8 py-6 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
+      <div className="flex-1 w-full max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-6 lg:gap-10 px-5 sm:px-8 py-3 sm:py-6 lg:py-4 lg:pl-[140px] xl:pl-[160px]">
 
         {/* LEFT COLUMN: Step 1 */}
         <div className={`${isPaymentStep ? 'hidden' : 'flex'} flex-1 flex-col lg:min-h-[calc(100vh-112px)] lg:border-l lg:border-[#EAE4E0] lg:pl-6 lg:pr-2`}>
           <div className="flex flex-col lg:flex-1 lg:bg-white lg:rounded-3xl lg:border lg:border-[#EAE4E0] lg:shadow-sm lg:overflow-hidden">
 
-              <div className="bg-white rounded-2xl border border-[#EAE4E0] p-5 sm:p-6 shadow-sm flex flex-col shrink-0 lg:grow lg:rounded-none lg:border-0 lg:shadow-none">
+              <div className="bg-white rounded-2xl border border-[#EAE4E0] p-4 sm:p-6 shadow-sm flex flex-col shrink-0 lg:grow lg:rounded-none lg:border-0 lg:shadow-none">
                   <div className="flex items-center gap-2.5 mb-3.5 shrink-0">
                     <div className="w-6 h-6 rounded-full bg-[#4A3B36] text-white flex items-center justify-center shrink-0">
                       <ClipboardList size={14} />
                     </div>
                     <h3 className="text-lg font-serif text-[#3B1F0A] leading-none">Pick-up & Customer Details</h3>
                   </div>
-                  <div className="w-full h-px bg-[#EAE4E0] mb-4 lg:mb-5 shrink-0"></div>
+                  <div className="w-full h-px bg-[#EAE4E0] mb-3 sm:mb-4 lg:mb-5 shrink-0"></div>
 
                   {stockIssues.length > 0 && (
                     <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700 shrink-0">
@@ -1672,12 +1672,12 @@ export default function Checkout({ cart, setCart, paymentOnly = false }) {
                       <div className="min-w-0 flex flex-col relative">
                           <label className="text-[10px] font-bold text-[#8A7264] mb-1.5 block uppercase tracking-wider">Suggestions / Special Instructions (Optional)</label>
                           <textarea
-                            rows={5}
+                            rows={2}
                             placeholder="Anything else we should know? (optional)"
                             maxLength={300}
                             value={form.instructions}
                             onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
-                            className="block w-full max-w-full min-w-0 min-h-[110px] max-h-[240px] resize-y lg:flex-1 lg:min-h-0 lg:max-h-none lg:resize-none lg:pb-7 border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-[13px] leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+                            className="block w-full max-w-full min-w-0 min-h-[64px] sm:min-h-[110px] max-h-[240px] resize-y lg:flex-1 lg:min-h-0 lg:max-h-none lg:resize-none lg:pb-7 border border-[#EAE4E0] focus:border-[#5A453C] px-3.5 py-3 text-[13px] leading-relaxed rounded-xl focus:outline-none transition-colors whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                           />
                           <p className="mt-1 text-right text-[10px] text-[#B7A99F] lg:absolute lg:bottom-2 lg:right-3.5 lg:mt-0 lg:pointer-events-none">{(form.instructions || '').length}/300</p>
                       </div>

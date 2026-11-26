@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Edit2, Trash2, Search, Package, Archive, RotateCcw } from 'lucide-react';
+import { Edit2, Trash2, Search, Package, Archive, RotateCcw, LayoutGrid } from 'lucide-react';
 import ProductModal from './Productmodal';
 import { apiClient } from '../../services/apiClient';
 import { BundleCard, BundleFormModal, BUNDLES_API, clearBundlesPageCache, fetchBundlesPageFromApi } from './PromoBundles';
@@ -123,15 +123,18 @@ function CategoryTabs({ options, value, onChange, onPromoBundleClick, trailing }
 // "Product Management | Event Manager" switcher, just smaller.
 function ViewSwitch({ showArchives, archivedCount, onChange }) {
   const item = active =>
-    `flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all ${
+    `sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 sm:px-3.5 sm:py-1.5 text-xs font-bold transition-all ${
       active ? 'bg-white text-[#3B1F0A] shadow-sm' : 'text-[#8A7264] hover:text-[#3B1F0A]'
     }`;
   return (
-    <div className="flex w-full sm:w-auto shrink-0 items-center gap-1 rounded-xl border border-[#EAE4E0] bg-[#F5EFEB] p-1">
-      <button onClick={() => onChange(false)} className={item(!showArchives)}>Active</button>
-      <button onClick={() => onChange(true)} className={item(showArchives)}>
-        <Archive size={13} />
-        Archived
+    <div className="flex shrink-0 items-center gap-1 rounded-xl border border-[#EAE4E0] bg-[#F5EFEB] p-1">
+      <button onClick={() => onChange(false)} className={item(!showArchives)} aria-label="Active products" title="Active">
+        <LayoutGrid size={15} className="sm:hidden" />
+        <span className="hidden sm:inline">Active</span>
+      </button>
+      <button onClick={() => onChange(true)} className={item(showArchives)} aria-label="Archived products" title="Archived">
+        <Archive size={15} className="sm:w-[13px] sm:h-[13px]" />
+        <span className="hidden sm:inline">Archived</span>
         {archivedCount > 0 && (
           <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${showArchives ? 'bg-[#3B1F0A] text-white' : 'bg-[#EAE4E0] text-[#5A453C]'}`}>{archivedCount}</span>
         )}
@@ -661,8 +664,8 @@ export default function ProductManagementPage({ autoOpenAdd = false, onAutoOpenH
       )}
 
       <div className="mb-5 sm:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="w-full sm:w-64" />
+        <div className="flex items-center justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
+          <SearchBar value={search} onChange={setSearch} placeholder="Search product..." className="flex-1 min-w-0 sm:flex-none sm:w-64" />
           <ViewSwitch showArchives={showArchives} archivedCount={archivedCount} onChange={setShowArchives} />
         </div>
         <CategoryTabs

@@ -232,7 +232,6 @@ export default function WasteTab() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filterReason, setFilterReason] = useState('All');
-  const [filterDate, setFilterDate] = useState('All');
 
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showBulkVoidConfirm, setShowBulkVoidConfirm] = useState(false);
@@ -268,39 +267,28 @@ export default function WasteTab() {
   const [formErrors, setFormErrors] = useState({}); // inline field errors ng modal
   const [serverError, setServerError] = useState(null); // save error — ipinapakita sa loob ng modal
 
+  // Lahat ng waste sa nakalipas na 90 araw lang ang ipinapakita (walang date filter).
+  const WASTE_WINDOW_DAYS = 90;
+  const windowLogs = useMemo(() => {
+    const cutoff = Date.now() - WASTE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    return wasteLogs.filter(log => log.dt && new Date(log.dt).getTime() >= cutoff);
+  }, [wasteLogs]);
+
   const reasonOptions = useMemo(
-    () => ['All', ...new Set(wasteLogs.map(log => log.reason).filter(Boolean))],
-    [wasteLogs]
+    () => ['All', ...new Set(windowLogs.map(log => log.reason).filter(Boolean))],
+    [windowLogs]
   );
 
   const filteredLogs = useMemo(() => {
-    return wasteLogs.filter(log => {
-      const matchesSearch = log.item?.toLowerCase().includes(search.toLowerCase()) || 
-                            log.reason?.toLowerCase().includes(search.toLowerCase()) ||
-                            (log.notes && log.notes.toLowerCase().includes(search.toLowerCase()));
+    const q = search.toLowerCase();
+    return windowLogs.filter(log => {
+      const matchesSearch = log.item?.toLowerCase().includes(q) ||
+                            log.reason?.toLowerCase().includes(q) ||
+                            (log.notes && log.notes.toLowerCase().includes(q));
       const matchesReason = filterReason === 'All' || log.reason === filterReason;
-
-      if (!matchesSearch || !matchesReason) return false;
-      if (filterDate === 'All') return true;
-
-      if (!log.dt) return false;
-      const logDate = new Date(log.dt);
-      const now = new Date();
-
-      if (filterDate === 'Today') {
-        return logDate.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' }) ===
-               now.toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' });
-      }
-      if (filterDate === 'This Week') {
-        const diffTime = Math.abs(now - logDate);
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= 7;
-      }
-      if (filterDate === 'This Month') {
-        return logDate.getMonth() === now.getMonth() && logDate.getFullYear() === now.getFullYear();
-      }
-      return true;
+      return matchesSearch && matchesReason;
     });
-  }, [wasteLogs, search, filterReason, filterDate]);
+  }, [windowLogs, search, filterReason]);
 
   const pagedLogs = useMemo(() => {
     const start = (page - 1) * PER_PAGE;
@@ -524,15 +512,15 @@ export default function WasteTab() {
               <AlertTriangle size={18} className="text-amber-600 shrink-0" />
               Waste Log
             </h3>
-            <p className="text-xs text-brand-400 mt-0.5">Log spoiled, expired, or unsold items to deduct from stock.</p>
+            <p className="text-xs text-brand-400 mt-0.5">Log spoiled, expired, or unsold items to deduct from stock. Showing the last 90 days.</p>
           </div>
 
           {/* ACTION BUTTONS (Only Void is RED) */}
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:items-center sm:w-auto">
             <Button
               variant="dark"
               onClick={() => handleOpenLogModal()}
-              className="flex-1 sm:flex-none justify-center"
+              className="w-full sm:w-auto justify-center"
             >
               <Plus size={14} /> Log Waste
             </Button>
@@ -548,41 +536,39 @@ export default function WasteTab() {
 
         {/* SEARCH, FILTER & RESPONSIVE ESTIMATED LOSS */}
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/30">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
-            <div className="relative w-full sm:w-56 lg:w-64">
+          <div className="flex items-center gap-2 flex-1 min-w-0 sm:flex-wrap sm:gap-2.5">
+            <div className="relative flex-1 min-w-0 sm:flex-none sm:w-56 lg:w-64">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input 
-                type="text" 
-                placeholder="Search waste log..." 
-                value={search} 
-                onChange={e => { setSearch(e.target.value); setPage(1); }} 
-                className="w-full pl-8 pr-3 py-1.5 text-xs border border-brand-200 rounded-lg outline-none focus:border-brand-500 bg-white" 
+              <input
+                type="text"
+                placeholder="Search waste log..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(1); }}
+                className="w-full pl-8 pr-3 py-1.5 text-xs border border-brand-200 rounded-lg outline-none focus:border-brand-500 bg-white"
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                <Filter size={14} className="shrink-0 text-gray-400" />
-                {reasonOptions.map(reasonOption => {
-                  const active = filterReason === reasonOption;
-                  return <button key={reasonOption} type="button" onClick={() => { setFilterReason(reasonOption); setPage(1); }} className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${active ? 'border-brand-800 bg-brand-800 text-white' : 'border-brand-200 bg-white text-brand-700 hover:bg-brand-50'}`}>
-                    {reasonOption === 'All' ? 'All Reasons' : reasonOption}
-                  </button>;
-                })}
-              </div>
+            {/* Mobile: isang dropdown na lang para sa reason */}
+            <select
+              value={filterReason}
+              onChange={e => { setFilterReason(e.target.value); setPage(1); }}
+              aria-label="Filter by reason"
+              className="sm:hidden shrink-0 max-w-[45%] text-xs font-semibold bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 outline-none focus:border-brand-500"
+            >
+              {reasonOptions.map(reasonOption => (
+                <option key={reasonOption} value={reasonOption}>{reasonOption === 'All' ? 'All Reasons' : reasonOption}</option>
+              ))}
+            </select>
 
-              <div className="flex-1 sm:flex-none flex items-center gap-1.5 bg-white border border-brand-200 rounded-lg px-2.5 py-1.5 text-xs text-brand-700 min-w-[110px]">
-                <select 
-                  className="bg-transparent text-xs outline-none w-full cursor-pointer font-medium" 
-                  value={filterDate} 
-                  onChange={e => { setFilterDate(e.target.value); setPage(1); }}
-                >
-                  <option value="All">All Time</option>
-                  <option value="Today">Today</option>
-                  <option value="This Week">This Week</option>
-                  <option value="This Month">This Month</option>
-                </select>
-              </div>
+            {/* Tablet/desktop: chips */}
+            <div className="hidden sm:flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <Filter size={14} className="shrink-0 text-gray-400" />
+              {reasonOptions.map(reasonOption => {
+                const active = filterReason === reasonOption;
+                return <button key={reasonOption} type="button" onClick={() => { setFilterReason(reasonOption); setPage(1); }} className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${active ? 'border-brand-800 bg-brand-800 text-white' : 'border-brand-200 bg-white text-brand-700 hover:bg-brand-50'}`}>
+                  {reasonOption === 'All' ? 'All Reasons' : reasonOption}
+                </button>;
+              })}
             </div>
           </div>
 
@@ -709,7 +695,7 @@ export default function WasteTab() {
                   <td colSpan={7} className="text-center text-gray-400 py-10 text-sm">
                     {loadErrors.waste
                       ? <ErrorState description={loadErrors.waste} onRetry={() => fetchAll?.()} />
-                      : <EmptyState title={search || filterDate !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />}
+                      : <EmptyState title={search || filterReason !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />}
                   </td>
                 </tr>
               )}
@@ -755,7 +741,7 @@ export default function WasteTab() {
           {isCompact && !filteredLogs.length && !loading && (
             loadErrors.waste
               ? <ErrorState description={loadErrors.waste} onRetry={() => fetchAll?.()} />
-              : <EmptyState title={search || filterDate !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />
+              : <EmptyState title={search || filterReason !== 'All' ? 'No matching waste records' : 'No waste records yet'} description="Waste logs will appear here when recorded." />
           )}
 
           {!!loading && (

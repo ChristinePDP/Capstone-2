@@ -96,8 +96,8 @@ export default function ProductLogTab() {
         </div>
 
         {/* SEARCH + DATE FILTER */}
-        <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/40">
-          <div className="relative flex-1 min-w-45">
+        <div className="flex flex-nowrap items-center gap-2 sm:flex-wrap sm:gap-3 px-4 py-3 border-b border-brand-100 bg-brand-50/40">
+          <div className="relative flex-1 min-w-0 sm:min-w-45">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-300" />
             <input
               type="text"
@@ -108,8 +108,8 @@ export default function ProductLogTab() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <Filter size={14} className="text-brand-400" />
+          <div className="flex shrink-0 items-center gap-2">
+            <Filter size={14} className="hidden sm:block text-brand-400" />
             <select
               className="text-xs font-semibold bg-white border border-brand-200 rounded-md px-2 py-1.5 outline-none"
               value={filterDate}

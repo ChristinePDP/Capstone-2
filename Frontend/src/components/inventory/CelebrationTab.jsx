@@ -349,7 +349,7 @@ export default function CelebrationTab() {
       )}
 
       <Card>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
+        <div className="grid grid-cols-[1fr_auto] items-start gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between p-4 border-b border-brand-100">
           <div>
             <h3 className="font-bold text-brand-800">Celebration/Product Materials</h3>
             <p className="text-xs text-brand-400 mt-0.5">
@@ -358,9 +358,9 @@ export default function CelebrationTab() {
                 : 'Manage packaging materials used for your products, like boxes.'}
             </p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="contents sm:flex sm:items-center sm:gap-2 sm:w-auto">
             {!showArchives && (
-              <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="flex-1 sm:flex-none justify-center">
+              <Button variant="dark" onClick={() => { setEditMat(null); setModalOpen(true); }} className="order-last col-span-2 w-full justify-center sm:order-none sm:col-span-1 sm:w-auto">
                 <Plus size={14} /> Add New {activeView.label}
               </Button>
             )}
@@ -369,7 +369,7 @@ export default function CelebrationTab() {
               count={ownMaterials.filter(m => m.is_archived).length}
               backLabel="Back to Materials"
               onClick={() => { setShowArchives(value => !value); setStatusFilter('all'); setPage(1); }}
-              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+              className={showArchives ? 'col-span-2 w-full sm:col-span-1 sm:w-auto' : ''}
             />
           </div>
         </div>
@@ -475,7 +475,7 @@ export default function CelebrationTab() {
                         </div>
                         {unset ? (
                           <div className="pt-3 mt-auto border-t border-brand-50">
-                            <Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openSetup(mat)}>Set Up Stock</Button>
+                            <button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold text-white bg-brand-800 hover:bg-brand-900 active:scale-[0.98] transition-colors" onClick={() => openSetup(mat)}>Set Up Stock</button>
                           </div>
                         ) : partner ? (
                           <p className="text-[11px] text-brand-500 pt-3 mt-auto border-t border-brand-50 wrap-break-word">
@@ -487,7 +487,7 @@ export default function CelebrationTab() {
                               <LevelBar stock={mat.stock} min={mat.min} />
                             </div>
                             <div className="grid grid-cols-2 gap-2 pt-3 mt-auto border-t border-brand-50">
-                              {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreMaterial(mat)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(mat)}>Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(mat)}><Archive size={13}/> Archive</Button></>}
+                              {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreMaterial(mat)}><RotateCcw size={13}/> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(mat)}>Delete</Button></> : <><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold text-white bg-brand-800 hover:bg-brand-900 active:scale-[0.98] transition-colors" onClick={() => { setEditMat(mat); setModalOpen(true); }}>Add Stock / Edit</button><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 active:scale-[0.98] transition-colors" onClick={() => setArchiveTarget(mat)}><Archive size={14}/> Archive</button></>}
                             </div>
                           </>
                         )}

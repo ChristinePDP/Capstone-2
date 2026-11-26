@@ -216,3 +216,137 @@ CROSS JOIN params AS prm
 LEFT JOIN eligible_order AS eo USING (product_key)
 JOIN daily_evidence AS de USING (product_key)
 ORDER BY s.lifetime_units DESC, s.product_name;
+
+-- MODEL AND BACKTEST COMPARISON
+-- This section is an SQL approximation of the deterministic product
+-- reference model in aiAnalytics.service.js. It reproduces its level/trend
+-- calculation and rolling origins, but simplifies the 30-day trend ramp and
+-- omits the JS weekday-IQR outlier adjustment.
+-- Treat its WAPE as an independent reference, not an exact production replay.
+-- It reports rolling-origin WAPE versus the repeat-last-30-days baseline.
+-- Gemini's current cache contains only
+-- the growth/risk shortlist, so it cannot support historical Gemini WAPE; that
+-- requires retaining each dated Gemini forecast and comparing it after its
+-- 30-day actual window has completed.
+
+WITH
+cfg AS (
+  SELECT (now() AT TIME ZONE 'Asia/Manila')::date AS today,
+         (now() AT TIME ZONE 'Asia/Manila')::date - 1 AS history_end
+),
+source AS (
+  SELECT
+    CASE WHEN oi.product_id IS NOT NULL THEN 'id:' || oi.product_id::text
+         ELSE 'name:' || lower(btrim(COALESCE(NULLIF(oi.product_name,''),p.name,''))) END AS product_key,
+    COALESCE(NULLIF(btrim(oi.product_name),''),p.name) AS product_name,
+    (o.created_at AT TIME ZONE 'Asia/Manila')::date AS sale_date,
+    oi.quantity::numeric AS units
+  FROM public.order_items oi
+  JOIN public.orders o ON o.id=oi.order_id
+  LEFT JOIN public.products p ON p.id=oi.product_id
+  CROSS JOIN cfg c
+  WHERE o.status::text <> 'Cancelled'
+    AND (o.created_at AT TIME ZONE 'Asia/Manila')::date <= c.history_end
+),
+daily AS (
+  SELECT product_key, min(product_name) product_name, sale_date, sum(units) units
+  FROM source WHERE NULLIF(btrim(product_name),'') IS NOT NULL
+  GROUP BY product_key,sale_date
+),
+bounds AS (
+  SELECT product_key,min(product_name) product_name,min(sale_date) first_day
+  FROM daily WHERE units>0 GROUP BY product_key
+),
+series AS (
+  SELECT b.product_key,b.product_name,g.day::date AS sale_date,coalesce(d.units,0)::numeric units
+  FROM bounds b CROSS JOIN cfg c
+  CROSS JOIN LATERAL generate_series(b.first_day::timestamp,c.history_end::timestamp,interval '1 day') g(day)
+  LEFT JOIN daily d ON d.product_key=b.product_key AND d.sale_date=g.day::date
+),
+origins AS (
+  SELECT s.*, j.origin,
+         (c.history_end - 30 - 7*j.origin)::date AS origin_end,
+         (c.history_end - 29 - 7*j.origin)::date AS test_start,
+         (c.history_end - 7*j.origin)::date AS test_end
+  FROM series s CROSS JOIN cfg c CROSS JOIN generate_series(0,3) j(origin)
+  WHERE s.sale_date <= c.history_end - 30 - 7*j.origin
+),
+train_stats AS (
+  SELECT product_key,product_name,origin,origin_end,
+         count(*)::int train_days,
+         count(*) FILTER(WHERE units>0)::int active_days,
+         sum(units) FILTER(WHERE sale_date>origin_end-30)::numeric recent30,
+         avg(units) FILTER(WHERE sale_date>origin_end-30)::numeric level30,
+         avg(units) FILTER(WHERE sale_date>origin_end-28)::numeric recent28,
+         avg(units) FILTER(WHERE sale_date>origin_end-56 AND sale_date<=origin_end-28)::numeric prior28
+  FROM origins GROUP BY product_key,product_name,origin,origin_end
+),
+backtest AS (
+  SELECT t.product_key,t.product_name,t.origin,t.origin_end,
+         sum(a.units)::numeric actual30,
+         t.recent30::numeric baseline30,
+         greatest(0,round(30*t.level30 * (1 + (least(1.3,greatest(0.7,
+           CASE WHEN coalesce(t.prior28,0)>0 THEN t.recent28/t.prior28 ELSE 1 END
+         )) - 1)*0.5)))::numeric db_forecast30
+  FROM train_stats t
+  JOIN daily a ON a.product_key=t.product_key
+              AND a.sale_date>t.origin_end AND a.sale_date<=t.origin_end+30
+  WHERE t.train_days>=14 AND t.active_days>=2 AND t.recent30>=3
+  GROUP BY t.product_key,t.product_name,t.origin,t.origin_end,t.recent30,t.level30,t.recent28,t.prior28
+),
+metrics AS (
+  SELECT product_key, min(product_name) product_name, count(*) samples,
+         sum(actual30) total_actual,
+         sum(abs(db_forecast30-actual30)) db_abs_error,
+         sum(abs(baseline30-actual30)) baseline_abs_error,
+         round(100*sum(abs(db_forecast30-actual30))/nullif(sum(actual30),0),1) db_wape_pct,
+         round(100*sum(abs(baseline30-actual30))/nullif(sum(actual30),0),1) baseline_wape_pct,
+         sum(abs(db_forecast30-actual30)) <= sum(abs(baseline30-actual30)) beats_baseline
+  FROM backtest GROUP BY product_key
+),
+current_model AS (
+  SELECT s.product_key,min(s.product_name) product_name,
+         count(*) history_days,
+         count(*) FILTER(WHERE units>0) active_days,
+         sum(units) FILTER(WHERE sale_date>c.history_end-30) recent30,
+         avg(units) FILTER(WHERE sale_date>c.history_end-30) level30,
+         avg(units) FILTER(WHERE sale_date>c.history_end-28) recent28,
+         avg(units) FILTER(WHERE sale_date>c.history_end-56 AND sale_date<=c.history_end-28) prior28
+  FROM series s CROSS JOIN cfg c GROUP BY s.product_key
+),
+current_forecast AS (
+  SELECT m.*,
+    greatest(0,round(30*level30*(1+(least(1.3,greatest(0.7,
+      CASE WHEN coalesce(prior28,0)>0 THEN recent28/prior28 ELSE 1 END
+    ))-1)*0.5)))::numeric db_reference_next30
+  FROM current_model m
+),
+ai_shortlist AS (
+  SELECT item->>'name' product_name,
+         (item->>'forecast')::numeric ai_forecast_next30,
+         (item->>'recentQty')::numeric ai_comparison_recent30,
+         'growth'::text list_type
+  FROM public.ai_cache c CROSS JOIN LATERAL jsonb_array_elements(coalesce(c.payload#>'{thirtyDay,growth}','[]'::jsonb)) item
+  WHERE c.cache_key='product_forecast:combined'
+  UNION ALL
+  SELECT item->>'name',(item->>'forecast')::numeric,(item->>'recentQty')::numeric,'risk'
+  FROM public.ai_cache c CROSS JOIN LATERAL jsonb_array_elements(coalesce(c.payload#>'{thirtyDay,risk}','[]'::jsonb)) item
+  WHERE c.cache_key='product_forecast:combined'
+)
+SELECT f.product_name,
+       (SELECT generated_at FROM public.ai_cache WHERE cache_key='product_forecast:combined') ai_cache_generated_at,
+       f.history_days,f.active_days,f.recent30,
+       f.db_reference_next30,
+       ai.list_type,ai.ai_forecast_next30,ai.ai_comparison_recent30,
+       CASE WHEN ai.ai_forecast_next30 IS NOT NULL
+            THEN abs(ai.ai_forecast_next30-f.db_reference_next30) END AS ai_vs_db_abs_difference,
+       m.samples backtest_origins,m.total_actual backtest_actual_units,
+       m.db_wape_pct,m.baseline_wape_pct,m.beats_baseline,
+       CASE WHEN ai.ai_forecast_next30 IS NULL THEN 'AI per-product forecast unavailable in cache'
+            ELSE 'Shortlist-only comparison; validate against actual sales after forecast horizon' END AS interpretation
+FROM current_forecast f
+LEFT JOIN metrics m USING(product_key)
+LEFT JOIN ai_shortlist ai ON lower(btrim(ai.product_name))=lower(btrim(f.product_name))
+WHERE f.history_days>=14 AND f.active_days>=2 AND f.recent30>=3
+ORDER BY f.recent30 DESC,f.product_name;
+

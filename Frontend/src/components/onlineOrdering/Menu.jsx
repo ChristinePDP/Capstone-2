@@ -1440,7 +1440,7 @@ function stockIssueMessage(issue, orderType) {
 
 // `blockedReasons`: { 'Buy Now': msg | null, 'Pre-Order': msg | null } — may laman kapag
 // hindi kaya ng stock/limit ng kasalukuyang cart ang order type na iyon.
-function OrderTypeSwitch({ value, forcedType, onChange, blockedReasons = {} }) {
+function OrderTypeSwitch({ value, forcedType, onChange, blockedReasons = {}, compact = false }) {
   // Ang kasalukuyang napiling type ay hindi na kaya ng cart (hal. nagbago ang limit)
   const currentIssue = blockedReasons[value];
 
@@ -1458,8 +1458,8 @@ function OrderTypeSwitch({ value, forcedType, onChange, blockedReasons = {} }) {
               // mula sa handleOrderTypeChange kung bakit hindi puwedeng lumipat.
               disabled={locked}
               onClick={() => onChange(type)}
-              className={`flex-1 py-2.5 text-xs font-semibold rounded-lg transition-colors ${
-                value === type ? 'bg-[#4A3B36] text-white shadow-sm' : 'text-[#8A7264] hover:bg-[#EAE4E0]'
+              className={`flex-1 ${compact ? 'py-2' : 'py-2.5'} text-xs font-semibold rounded-lg transition-colors ${
+                value === type ? `${compact ? 'bg-[#3B1F0A]' : 'bg-[#4A3B36]'} text-white shadow-sm` : 'text-[#8A7264] hover:bg-[#EAE4E0]'
               } ${(locked || blocked) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {ORDER_TYPE_LABELS[type]}
@@ -2480,18 +2480,33 @@ export default function Menu({ cart, setCart }) {
         </div>
       </div>
 
-      {cartCount > 0 && !isMobileCartOpen && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#EAE4E0] p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+      {!isMobileCartOpen && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-[#EAE4E0] p-3 sm:p-4 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+          {/* Order type switch — nasa labas na ng cart para hindi na kailangang buksan ito */}
+          <div className="mb-3">
+            <OrderTypeSwitch compact value={effectiveOrderType} forcedType={null} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
+          </div>
           <div className="flex gap-3">
-            <button onClick={() => setIsMobileCartOpen(true)} className="flex items-center justify-center gap-2 px-5 bg-[#F5EFEB] text-[#3B1F0A] rounded-xl font-semibold shadow-sm shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileCartOpen(true)}
+              aria-label={`Open cart, ${cartCount} items`}
+              className="flex items-center justify-center gap-2 px-4 bg-[#3B1F0A] text-white rounded-xl font-semibold shadow-sm shrink-0 hover:bg-[#2A1608] active:scale-[0.98] transition-all"
+            >
               <div data-cart-target className="relative">
                 <ShoppingBag size={18} />
-                <span className="absolute -top-1.5 -right-2.5 bg-[#3B1F0A] text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold">{cartCount}</span>
+                {cartCount > 0 && <span className="absolute -top-1.5 -right-2.5 bg-white text-[#3B1F0A] text-[10px] min-w-4 h-4 px-1 rounded-full flex items-center justify-center font-bold">{cartCount}</span>}
               </div>
+              <span>Cart</span>
             </button>
-            <button onClick={handleProceedToCheckout} className="flex-1 bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-between px-5">
-              <span>Checkout</span>
-              <span>{formatPeso(cartTotal)}</span>
+            <button
+              type="button"
+              onClick={handleProceedToCheckout}
+              disabled={cartCount === 0}
+              className={`flex-1 py-3.5 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-between px-4 sm:px-5 ${cartCount > 0 ? 'bg-[#3B1F0A] text-white' : 'bg-[#3B1F0A] text-white cursor-not-allowed'}`}
+            >
+              <span>{cartCount > 0 ? 'Checkout' : 'Add items to begin'}</span>
+              {cartCount > 0 && <span>{formatPeso(cartTotal)}</span>}
             </button>
           </div>
         </div>
@@ -2508,12 +2523,12 @@ export default function Menu({ cart, setCart }) {
               <button onClick={() => setIsMobileCartOpen(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-[#8A7264] hover:bg-[#EAE4E0] transition-colors shrink-0"><X size={20} /></button>
             </div>
 
-            <div className="px-5 pt-4 shrink-0">
-              <OrderTypeSwitch value={effectiveOrderType} forcedType={null} onChange={handleOrderTypeChange} blockedReasons={orderTypeBlockedReasons} />
-            </div>
-
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5 flex flex-col gap-4">
-              {cart.map((item, i) => (
+              {cart.length === 0 ? (
+                <p className="rounded-xl bg-[#FCFAF9] border border-[#F1EBE6] p-4 text-sm text-[#8A7264]">
+                  Your cart is empty. Add products from the menu to get started.
+                </p>
+              ) : cart.map((item, i) => (
                 <CartItemRow
                   key={i}
                   item={item}
@@ -2537,7 +2552,13 @@ export default function Menu({ cart, setCart }) {
                 <span className="text-sm font-semibold text-[#5A453C]">Subtotal</span>
                 <span className="font-serif text-xl text-[#3B1F0A]">{formatPeso(cartTotal)}</span>
               </div>
-              <button onClick={() => { if (handleProceedToCheckout()) setIsMobileCartOpen(false); }} className="w-full bg-[#3B1F0A] text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-[#2A1608] active:scale-[0.98] transition-all">Proceed to Checkout</button>
+              <button
+                disabled={cartCount === 0}
+                onClick={() => { if (handleProceedToCheckout()) setIsMobileCartOpen(false); }}
+                className={`w-full py-3.5 rounded-xl text-sm font-semibold transition-all ${cartCount > 0 ? 'bg-[#3B1F0A] text-white hover:bg-[#2A1608] active:scale-[0.98]' : 'bg-[#EAE4E0] text-[#8A7264] cursor-not-allowed'}`}
+              >
+                {cartCount > 0 ? 'Proceed to Checkout' : 'Add items to continue'}
+              </button>
             </div>
           </div>
         </div>
@@ -2548,7 +2569,7 @@ export default function Menu({ cart, setCart }) {
           onClick={handleBackToTop}
           aria-label="Back to top"
           className={`lg:hidden fixed right-4 sm:right-6 z-30 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#3B1F0A] text-white flex items-center justify-center shadow-lg hover:bg-[#2A1608] active:scale-95 transition-all ${
-            cartCount > 0 && !isMobileCartOpen ? 'bottom-24' : 'bottom-6'
+            isMobileCartOpen ? 'hidden' : 'bottom-40'
           }`}
         >
           <ArrowUp size={20} />
@@ -2590,7 +2611,7 @@ export default function Menu({ cart, setCart }) {
       <Footer />
 
       {/* Espasyo para sa fixed na Checkout bar — nasa ILALIM ng footer (dati nasa itaas nito kaya may malaking blangko sa gitna) */}
-      {cartCount > 0 && !isMobileCartOpen && <div className="lg:hidden h-[88px] shrink-0"></div>}
+      {!isMobileCartOpen && <div className="lg:hidden h-[148px] shrink-0"></div>}
     </div>
   );
 }

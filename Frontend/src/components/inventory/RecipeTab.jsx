@@ -760,14 +760,14 @@ export default function RecipeTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-brand-100 gap-3">
+        <div className="grid grid-cols-[1fr_auto] items-start gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between p-4 border-b border-brand-100">
           <div>
             <h3 className="font-bold text-brand-800">Production Formulas</h3>
             <p className="text-xs text-brand-400 mt-0.5">Manage the recipe and product materials needed to make each product.</p>
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="contents sm:flex sm:items-center sm:gap-2 sm:w-auto">
             {!showArchives && (
-              <Button variant="dark" onClick={openAdd} className="flex-1 sm:flex-none justify-center">
+              <Button variant="dark" onClick={openAdd} className="order-last col-span-2 w-full justify-center sm:order-none sm:col-span-1 sm:w-auto">
                 <Plus size={14} /> Add Formula
               </Button>
             )}
@@ -776,7 +776,7 @@ export default function RecipeTab() {
               count={recipes.filter(r => r.is_archived).length}
               backLabel="Back to Formulas"
               onClick={() => { setShowArchives(value => !value); setCurrentPage(1); }}
-              className={showArchives ? 'flex-1 sm:flex-none' : ''}
+              className={showArchives ? 'col-span-2 w-full sm:col-span-1 sm:w-auto' : ''}
             />
           </div>
         </div>
@@ -804,25 +804,27 @@ export default function RecipeTab() {
             {paged.map(r => {
               const cost = getRecipeCost(r);
               return (
-                <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-xl shadow-sm flex flex-col gap-3 min-w-0">
-                  <div className="min-w-0">
-                    <h4 className="font-bold text-brand-900 text-sm sm:text-base wrap-break-word leading-snug">{r.product}</h4>
+                <div key={r.id} className="p-4 bg-white border border-brand-100 rounded-2xl shadow-sm flex flex-col gap-3.5 min-w-0">
+                  <div className="flex items-start justify-between gap-3 min-w-0">
+                    <h4 className="font-bold text-brand-900 text-[15px] wrap-break-word leading-snug min-w-0">{r.product}</h4>
+                    <span className="shrink-0 whitespace-nowrap rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-bold text-brand-700">{r.yield} {r.yieldUnit} / batch</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs p-2.5 rounded-lg border border-brand-100/60 bg-brand-50/50">
+                  <div className="flex items-end justify-between gap-3 border-t border-brand-100 pt-3">
                     <div className="min-w-0">
-                      <span className="text-brand-400 block text-[10px] font-medium">Items per batch</span>
-                      <span className="font-bold text-brand-800">{r.yield} {r.yieldUnit}</span>
+                      <p className="text-[11px] font-medium text-brand-400">Est. cost per batch</p>
+                      <p className="text-lg font-extrabold leading-tight text-brand-900">{cost.total > 0 ? formatPeso(cost.total) : '—'}</p>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-brand-400 block text-[10px] font-medium">Est. cost per batch</span>
-                      <span className="font-bold text-brand-800">{cost.total > 0 ? formatPeso(cost.total) : '—'}</span>
-                      {cost.total > 0 && <span className="block text-[10px] text-brand-400">≈ {formatPeso(cost.perItem)} per item</span>}
-                    </div>
+                    {cost.total > 0 && (
+                      <div className="text-right shrink-0">
+                        <p className="text-[11px] font-medium text-brand-400">Per item</p>
+                        <p className="text-sm font-bold text-brand-700">≈ {formatPeso(cost.perItem)}</p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-auto">
-                    {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreRecipe(r)}><RotateCcw size={13} /> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(r)}><Trash2 size={13} /> Delete</Button></> : <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => openEdit(r)}><Edit2 size={13} /> Edit</Button><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => setArchiveTarget(r)}><Archive size={13} /> Archive</Button></>}
+                    {showArchives ? <><Button size="sm" variant="secondary" className="w-full py-2" onClick={() => restoreRecipe(r)}><RotateCcw size={13} /> Restore</Button><Button size="sm" variant="danger" className="w-full py-2" onClick={() => setDeleteTarget(r)}><Trash2 size={13} /> Delete</Button></> : <><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold text-white bg-brand-800 hover:bg-brand-900 active:scale-[0.98] transition-colors" onClick={() => openEdit(r)}><Edit2 size={14} /> Edit</button><button type="button" className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-xs font-bold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 active:scale-[0.98] transition-colors" onClick={() => setArchiveTarget(r)}><Archive size={14} /> Archive</button></>}
                   </div>
                 </div>
               );
